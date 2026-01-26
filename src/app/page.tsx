@@ -4,34 +4,30 @@ import React, { useState } from 'react';
 import { LayoutDashboard, Menu } from 'lucide-react';
 
 // Import Components
-// หมายเหตุ: ใน TypeScript ถ้าไฟล์ลูกเป็น .js มันจะมองเป็น module type any โดยอัตโนมัติใน Next.js ส่วนใหญ่
 import Sidebar from './components/sidebar'; 
 import ProductMain from './components/products/ProductMain';
 import CustomerMain from './components/customers/CustomerMain';
 import OrderMain from './components/orders/OrderMain'; 
 import MarketingMain from './components/marketing/MarketingMain';
 import DashboardMain from './components/dashboard/DashboardMain';
+import UserMain from './components/users/UserMain'; // 1. เพิ่ม Import นี้
 
 export default function Home() {
-  const [activeTab, setActiveTab] = useState<string>('orders'); 
+  const [activeTab, setActiveTab] = useState<string>('dashboard'); 
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   
-  // Fix 1: ระบุ Type เป็น <any> เพื่อให้เก็บ object อะไรก็ได้
   const [navData, setNavData] = useState<any>(null);
 
-  // Fix 2: ใส่ : any หลังตัวแปร customerId เพื่อบอก TypeScript ว่ารับค่าอะไรก็ได้
   const handleNavigateToCustomer = (customerId: any) => {
     setActiveTab('customers');
     setNavData({ target: 'customer', id: customerId, timestamp: Date.now() });
   };
 
-  // Fix 3: ใส่ : any หลัง order
   const handleNavigateToOrder = (order: any) => {
     setActiveTab('orders');
     setNavData({ target: 'order', data: order, timestamp: Date.now() });
   };
 
-  // Fix 4: ใส่ : any หลัง tab
   const handleTabChange = (tab: any) => {
     setActiveTab(tab);
     setNavData(null); 
@@ -75,6 +71,9 @@ export default function Home() {
           )}
 
           {activeTab === 'marketing' && <MarketingMain />}
+
+          {/* 2. เพิ่มส่วนแสดงผลหน้าจัดการ User ตรงนี้ */}
+          {activeTab === 'users' && <UserMain />}
         </div>
       </main>
     </div>

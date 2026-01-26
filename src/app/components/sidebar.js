@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, Package, Users, ShoppingBag, X, LogOut, Megaphone } from 'lucide-react';
+import { LayoutDashboard, Package, Users, ShoppingBag, X, LogOut, Megaphone, ShieldCheck } from 'lucide-react';
 
 const Sidebar = ({ activeTab, setActiveTab, isOpen, onClose = () => {} }) => {
   const menuItems = [
@@ -7,8 +7,9 @@ const Sidebar = ({ activeTab, setActiveTab, isOpen, onClose = () => {} }) => {
     { id: 'products', label: 'สินค้า', icon: Package },
     { id: 'customers', label: 'ลูกค้า', icon: Users },
     { id: 'orders', label: 'คำสั่งซื้อ', icon: ShoppingBag },
-    // เพิ่มเมนูนี้เข้าไปครับ
-    { id: 'marketing', label: 'การตลาด', icon: Megaphone }, 
+    { id: 'marketing', label: 'การตลาด', icon: Megaphone },
+    // เพิ่มเมนูนี้เพื่อให้เข้าหน้าจัดการ User ได้
+    { id: 'users', label: 'จัดการทีมงาน', icon: ShieldCheck }, 
   ];
 
   return (
@@ -34,7 +35,7 @@ const Sidebar = ({ activeTab, setActiveTab, isOpen, onClose = () => {} }) => {
         </div>
 
         {/* Menu */}
-        <nav className="flex-1 px-4 space-y-2 py-4">
+        <nav className="flex-1 px-4 space-y-2 py-4 overflow-y-auto">
           {menuItems.map((item) => {
             const isActive = activeTab === item.id;
             return (

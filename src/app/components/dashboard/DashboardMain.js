@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Calendar, RefreshCw, TrendingUp, Filter } from 'lucide-react';
+import { Calendar, RefreshCw, TrendingUp, Filter, Shield } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { 
   startOfMonth, endOfMonth, subMonths, 
@@ -9,14 +9,18 @@ import {
   format, isSameMonth 
 } from 'date-fns';
 import { th } from 'date-fns/locale';
+import { useAuth } from '../../context/AuthContext'; 
 
 import StatCards from './StatCards';
 import SalesChart from './SalesChart';
 import MarketingChart from './MarketingChart';
-import CategoryChart from './CategoryChart'; // Import กราฟวงกลม
+import CategoryChart from './CategoryChart';
 import TopRankings from './TopRankings';
 
 const DashboardMain = () => {
+  const auth = useAuth();
+  const role = auth?.role; 
+  
   const [loading, setLoading] = useState(true);
   const [dateFilter, setDateFilter] = useState('this_month');
   const [compareMode, setCompareMode] = useState('prev_period');
@@ -27,7 +31,6 @@ const DashboardMain = () => {
   const fetchData = async () => {
     setLoading(true);
     try {
-      // FIX 1: ดึงทุกสถานะ ยกเว้น "ยกเลิก" และ "ใบเสนอราคา" (เพื่อให้ Completed/Paid/Deposit มาครบ)
       const { data: orders } = await supabase
         .from('orders')
         .select('*, order_items(*)')
@@ -40,7 +43,6 @@ const DashboardMain = () => {
         .select('*')
         .order('expense_date', { ascending: true });
 
-      // FIX 2: ดึงสินค้า+หมวดหมู่ มาทำ Map (สำหรับกราฟวงกลม)
       const { data: products } = await supabase
         .from('products')
         .select('id, category_id, categories(name)');
@@ -70,7 +72,7 @@ const DashboardMain = () => {
     const { orders, marketing, products } = rawData;
     const now = new Date();
     
-    // สร้าง Map: ProductID -> CategoryName
+    // สร้าง Map เพื่อเช็ค Category ของสินค้าแต่ละตัว
     const productCategoryMap = {};
     products.forEach(p => {
       productCategoryMap[p.id] = p.categories?.name || 'Uncategorized';
@@ -79,7 +81,6 @@ const DashboardMain = () => {
     let start, end, prevStart, prevEnd;
     let groupBy = 'day';
 
-    // --- Define Date Ranges ---
     if (dateFilter === 'this_month') {
       start = startOfMonth(now);
       end = endOfMonth(now);
@@ -118,14 +119,17 @@ const DashboardMain = () => {
     const currentMarketing = filterByDate(marketing, 'expense_date', start, end);
     const prevOrders = filterByDate(orders, 'order_date', prevStart, prevEnd);
     
+    // --- Helper: Convert to Number safely ---
+    const toNum = (val) => Number(val || 0);
+
     const calcStats = (ords, mkts) => {
-      const revenue = ords.reduce((sum, o) => sum + (o.grand_total || 0), 0);
-      const mktCost = mkts.reduce((sum, m) => sum + (m.amount || 0), 0);
+      const revenue = ords.reduce((sum, o) => sum + toNum(o.grand_total), 0);
+      const mktCost = mkts.reduce((sum, m) => sum + toNum(m.amount), 0);
       let productCost = 0;
       ords.forEach(o => {
-        productCost += o.order_items?.reduce((s, i) => s + (i.cost_price * i.quantity), 0) || 0;
+        productCost += o.order_items?.reduce((s, i) => s + (toNum(i.cost_price) * toNum(i.quantity)), 0) || 0;
       });
-      const shipping = ords.reduce((sum, o) => sum + (o.shipping_cost || 0), 0);
+      const shipping = ords.reduce((sum, o) => sum + toNum(o.shipping_cost), 0);
       const netProfit = revenue - productCost - shipping - mktCost;
       return { revenue, netProfit, ordersCount: ords.length, mktCost };
     };
@@ -145,7 +149,6 @@ const DashboardMain = () => {
       profitMargin: currStats.revenue > 0 ? (currStats.netProfit / currStats.revenue * 100).toFixed(1) : 0,
     };
 
-    // --- Chart Data ---
     let intervals;
     if (groupBy === 'day') {
       intervals = eachDayOfInterval({ start, end });
@@ -167,7 +170,7 @@ const DashboardMain = () => {
           targetPrev.setDate(prevStart.getDate() + index);
           if (targetPrev <= prevEnd) {
              const prevStr = format(targetPrev, 'yyyy-MM-dd');
-             prevSales = prevOrders.filter(o => o.order_date.startsWith(prevStr)).reduce((s, o) => s + o.grand_total, 0);
+             prevSales = prevOrders.filter(o => o.order_date.startsWith(prevStr)).reduce((s, o) => s + toNum(o.grand_total), 0);
           }
         }
       } else {
@@ -179,24 +182,23 @@ const DashboardMain = () => {
            const targetPrev = new Date(prevStart);
            targetPrev.setMonth(prevStart.getMonth() + index);
            if (targetPrev <= prevEnd) {
-              prevSales = prevOrders.filter(o => isSameMonth(new Date(o.order_date), targetPrev)).reduce((s, o) => s + o.grand_total, 0);
+              prevSales = prevOrders.filter(o => isSameMonth(new Date(o.order_date), targetPrev)).reduce((s, o) => s + toNum(o.grand_total), 0);
            }
         }
       }
 
-      const sales = dayOrders.reduce((sum, o) => sum + o.grand_total, 0);
-      const mkt = dayMarketing.reduce((sum, m) => sum + m.amount, 0);
+      const sales = dayOrders.reduce((sum, o) => sum + toNum(o.grand_total), 0);
+      const mkt = dayMarketing.reduce((sum, m) => sum + toNum(m.amount), 0);
       
       let cost = 0;
       dayOrders.forEach(o => {
-        cost += (o.order_items?.reduce((s, i) => s + (i.cost_price * i.quantity), 0) || 0) + (o.shipping_cost || 0);
+        cost += (o.order_items?.reduce((s, i) => s + (toNum(i.cost_price) * toNum(i.quantity)), 0) || 0) + toNum(o.shipping_cost);
       });
       const profit = sales - cost - mkt;
 
       return { date: label, sales, profit, marketingCost: mkt, prevSales: compareMode === 'none' ? null : prevSales };
     });
 
-    // --- Category Stats (New Feature) ---
     const categoryStats = {};
     currentOrders.forEach(o => {
       o.order_items?.forEach(i => {
@@ -204,8 +206,8 @@ const DashboardMain = () => {
         
         if (!categoryStats[catName]) categoryStats[catName] = { name: catName, sales: 0, profit: 0 };
         
-        const itemSales = i.sell_price * i.quantity;
-        const itemCost = i.cost_price * i.quantity;
+        const itemSales = toNum(i.sell_price) * toNum(i.quantity);
+        const itemCost = toNum(i.cost_price) * toNum(i.quantity);
         const itemProfit = itemSales - itemCost;
 
         categoryStats[catName].sales += itemSales;
@@ -214,27 +216,45 @@ const DashboardMain = () => {
     });
     const categoryData = Object.values(categoryStats).sort((a,b) => b.sales - a.sales);
 
-    // --- Rankings ---
-    const productStats = {};
-    const locationStats = {};
+    // --- Ranking Logic (Updated) ---
+    const scooterStats = {};
+    const accessoryStats = {};
+    
     currentOrders.forEach(o => {
       o.order_items?.forEach(i => {
-        if (!productStats[i.product_name]) productStats[i.product_name] = { name: i.product_name, quantity: 0, total: 0 };
-        productStats[i.product_name].quantity += i.quantity;
-        productStats[i.product_name].total += (i.sell_price * i.quantity);
+        const catName = productCategoryMap[i.product_id] || 'Uncategorized';
+        
+        // แยกประเภทสินค้า
+        const isScooter = catName.includes('Scooter') || catName.includes('Bike') || catName.includes('Vehicle');
+        const targetStats = isScooter ? scooterStats : accessoryStats;
+        
+        if (!targetStats[i.product_name]) targetStats[i.product_name] = { name: i.product_name, quantity: 0, total: 0 };
+        targetStats[i.product_name].quantity += toNum(i.quantity);
+        targetStats[i.product_name].total += (toNum(i.sell_price) * toNum(i.quantity));
       });
+    });
+    
+    // Top 10 Scooters
+    const topScooters = Object.values(scooterStats).sort((a,b) => b.total - a.total).slice(0, 10);
+    // Top 10 Accessories
+    const topAccessories = Object.values(accessoryStats).sort((a,b) => b.total - a.total).slice(0, 10);
+
+    const locationStats = {};
+    currentOrders.forEach(o => {
       const prov = o.customer_cache?.address_parsed?.prov || 'ไม่ระบุ';
       if (!locationStats[prov]) locationStats[prov] = { province: prov, count: 0, total: 0 };
       locationStats[prov].count += 1;
-      locationStats[prov].total += o.grand_total;
+      locationStats[prov].total += toNum(o.grand_total);
     });
+    const topLocations = Object.values(locationStats).sort((a,b) => b.total - a.total).slice(0, 5);
 
     return { 
       stats, 
       chartData, 
-      categoryData, // ส่งข้อมูลหมวดหมู่ไป
-      topProducts: Object.values(productStats).sort((a,b)=>b.total-a.total).slice(0,5), 
-      topLocations: Object.values(locationStats).sort((a,b)=>b.total-a.total).slice(0,5) 
+      categoryData, 
+      topScooters,     // ส่งข้อมูลสกู๊ตเตอร์ขายดี
+      topAccessories,  // ส่งข้อมูลชุดแต่งขายดี
+      topLocations 
     };
 
   }, [rawData, dateFilter, compareMode, mounted]);
@@ -246,8 +266,14 @@ const DashboardMain = () => {
       
       {/* Header & Controls */}
       <div className="flex flex-col md:flex-row justify-between items-center bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
-        <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-          <TrendingUp className="text-indigo-600"/> ภาพรวมธุรกิจ
+        <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-3">
+          <TrendingUp className="text-indigo-600"/> 
+          ภาพรวมธุรกิจ 
+          {role && (
+            <span className="text-sm font-medium bg-indigo-50 text-indigo-700 px-3 py-1 rounded-full flex items-center gap-1 border border-indigo-100">
+              <Shield size={14}/> {role.name}
+            </span>
+          )}
         </h1>
         
         <div className="flex flex-wrap items-center gap-3">
@@ -257,20 +283,24 @@ const DashboardMain = () => {
              <button onClick={() => setCompareMode('prev_period')} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${compareMode==='prev_period' ? 'bg-white shadow text-indigo-600' : 'text-gray-500'}`}>ช่วงก่อนหน้า</button>
            </div>
 
-           <select 
-            className="bg-gray-50 border border-gray-200 text-gray-700 text-sm rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer font-bold"
-            value={dateFilter}
-            onChange={(e) => setDateFilter(e.target.value)}
-          >
-            <option value="this_month">เดือนนี้ (รายวัน)</option>
-            <option value="last_month">เดือนที่แล้ว (รายวัน)</option>
-            <option value="Q1">ไตรมาส 1 (ม.ค.-มี.ค.)</option>
-            <option value="Q2">ไตรมาส 2 (เม.ย.-มิ.ย.)</option>
-            <option value="Q3">ไตรมาส 3 (ก.ค.-ก.ย.)</option>
-            <option value="Q4">ไตรมาส 4 (ต.ค.-ธ.ค.)</option>
-            <option value="this_year">ปีนี้ (รายเดือน)</option>
-          </select>
-          <button onClick={fetchData} className="p-2.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-600 transition-colors">
+           <div className="relative">
+             <Filter size={16} className="absolute left-3 top-3 text-gray-400"/>
+             <select 
+              className="bg-gray-50 border border-gray-200 text-gray-700 text-sm rounded-xl pl-9 pr-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer font-bold"
+              value={dateFilter}
+              onChange={(e) => setDateFilter(e.target.value)}
+            >
+              <option value="this_month">เดือนนี้ (รายวัน)</option>
+              <option value="last_month">เดือนที่แล้ว (รายวัน)</option>
+              <option value="Q1">ไตรมาส 1 (ม.ค.-มี.ค.)</option>
+              <option value="Q2">ไตรมาส 2 (เม.ย.-มิ.ย.)</option>
+              <option value="Q3">ไตรมาส 3 (ก.ค.-ก.ย.)</option>
+              <option value="Q4">ไตรมาส 4 (ต.ค.-ธ.ค.)</option>
+              <option value="this_year">ปีนี้ (รายเดือน)</option>
+            </select>
+           </div>
+
+           <button onClick={fetchData} className="p-2.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-600 transition-colors">
             <RefreshCw size={18} className={loading ? "animate-spin" : ""} />
           </button>
         </div>
@@ -278,21 +308,24 @@ const DashboardMain = () => {
 
       <StatCards stats={processedData?.stats} loading={loading} />
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      {/* Sales Chart (Full Width) */}
+      <div className="w-full h-[450px]">
         <SalesChart data={processedData?.chartData} />
-        {/* ใส่กราฟวงกลมคู่กับกราฟแท่ง */}
-        <div className="flex flex-col gap-6">
-           <div className="flex-1 min-h-[300px]">
-             <CategoryChart data={processedData?.categoryData || []} />
-           </div>
-           <div className="flex-1 min-h-[300px]">
-             <MarketingChart data={processedData?.chartData} />
-           </div>
+      </div>
+
+      {/* Grid: Category & Marketing Charts */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="flex-1 min-h-[350px]">
+           <CategoryChart data={processedData?.categoryData || []} />
+        </div>
+        <div className="flex-1 min-h-[350px]">
+           <MarketingChart data={processedData?.chartData} />
         </div>
       </div>
 
       <TopRankings 
-        topProducts={processedData?.topProducts} 
+        topScooters={processedData?.topScooters} 
+        topAccessories={processedData?.topAccessories}
         topLocations={processedData?.topLocations} 
       />
     </div>
