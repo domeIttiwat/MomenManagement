@@ -22,13 +22,24 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
 
   const round2 = (num) => Math.round((num + Number.EPSILON) * 100) / 100;
 
+  // Initialize State
   const [formData, setFormData] = useState(() => {
     if (initialData) {
       return {
         ...initialData,
         customer: initialData.customer_cache || null, 
         items: initialData.order_items || [], 
-        payments: initialData.order_payments || [],
+        
+        // --- FIX: Map ข้อมูลการชำระเงินให้ชัวร์ ---
+        payments: (initialData.order_payments || []).map(p => ({
+          ...p,
+          // ถ้ามี payment_date จาก DB ให้ใช้ ถ้าไม่มีใช้ p.date หรือถ้าไม่มีเลยใช้วันนี้
+          date: p.payment_date ? p.payment_date.split('T')[0] : (p.date || getLocalDate()),
+          method: p.payment_method || 'Transfer',
+          fee_percent: p.fee_percent || 0,
+          fee_amount: p.fee_amount || 0
+        })),
+
         images: (initialData.images || []).map(url => ({ url, file: null })),
         shipping_cost: initialData.shipping_cost || 0,
         discount: initialData.discount || 0,
@@ -106,7 +117,11 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
     if (formData.items.length === 0) return alert('กรุณาเพิ่มสินค้า');
     
     setLoading(true);
+    console.log('[DEBUG] Start Submitting Order...');
+    
     try {
+      // 1. Upload Images
+      console.log('[DEBUG] Uploading images...');
       const uploadedImages = await Promise.all(formData.images.map(async (img) => {
         if (img.file) {
           const fileName = `ord-${Date.now()}-${Math.random()}`;
@@ -117,6 +132,7 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
         return img.url;
       }));
 
+      // 2. Prepare Order Payload
       const orderPayload = {
         order_number: formData.order_number,
         customer_id: formData.customer.id,
@@ -136,17 +152,29 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
         images: uploadedImages
       };
 
+      console.log('[DEBUG] Order Payload:', orderPayload);
+
       let orderId = initialData?.id;
 
+      // 3. Upsert Order
       if (orderId) {
-        await supabase.from('orders').update(orderPayload).eq('id', orderId);
+        console.log('[DEBUG] Updating existing order ID:', orderId);
+        const { error: orderError } = await supabase.from('orders').update(orderPayload).eq('id', orderId);
+        if (orderError) throw new Error('Update Order Failed: ' + orderError.message);
+
+        // Delete old items/payments (to replace with new ones)
+        console.log('[DEBUG] Cleaning up old items/payments...');
         await supabase.from('order_items').delete().eq('order_id', orderId);
         await supabase.from('order_payments').delete().eq('order_id', orderId);
       } else {
-        const { data } = await supabase.from('orders').insert([orderPayload]).select().single();
+        console.log('[DEBUG] Creating new order...');
+        const { data, error: orderError } = await supabase.from('orders').insert([orderPayload]).select().single();
+        if (orderError) throw new Error('Create Order Failed: ' + orderError.message);
         orderId = data.id;
+        console.log('[DEBUG] New Order ID:', orderId);
       }
 
+      // 4. Insert Items
       const itemsPayload = formData.items.map(item => ({
         order_id: orderId,
         product_id: item.product_id,
@@ -157,24 +185,36 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
         sell_price: item.sell_price,
         quantity: item.quantity
       }));
-      await supabase.from('order_items').insert(itemsPayload);
+      const { error: itemsError } = await supabase.from('order_items').insert(itemsPayload);
+      if (itemsError) throw new Error('Save Items Failed: ' + itemsError.message);
 
+      // 5. Insert Payments
+      console.log('[DEBUG] Processing payments:', formData.payments);
       if (formData.payments.length > 0) {
         const paymentsPayload = formData.payments.map(p => ({
           order_id: orderId,
           amount: p.amount,
-          payment_date: p.date,
+          payment_date: p.date || getLocalDate(), // Fallback date if missing
           type: p.type,
-          method: p.method,
+          payment_method: p.method || 'Transfer', // Check column name in DB!
           fee_percent: p.fee_percent || 0,
           fee_amount: p.fee_amount || 0
         }));
-        await supabase.from('order_payments').insert(paymentsPayload);
+        
+        console.log('[DEBUG] Payments Payload to Insert:', paymentsPayload);
+        
+        const { error: paymentError } = await supabase.from('order_payments').insert(paymentsPayload);
+        if (paymentError) {
+             console.error('[DEBUG] Payment Insert Error:', paymentError);
+             throw new Error('Save Payments Failed: ' + paymentError.message);
+        }
       }
 
+      console.log('[DEBUG] Success!');
       onSuccess();
     } catch (error) {
-      alert('Error: ' + error.message);
+      console.error('[DEBUG] Critical Error:', error);
+      alert('เกิดข้อผิดพลาด: ' + error.message);
     } finally {
       setLoading(false);
     }
@@ -193,7 +233,6 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
   const inputClass = "w-full px-4 py-2 bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 rounded-xl transition-all outline-none text-gray-700 font-medium";
   const labelClass = "block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5 ml-1";
 
-  // Helper เพื่อ Select Text อัตโนมัติเมื่อกดช่องตัวเลข
   const handleFocus = (e) => e.target.select();
 
   return (
@@ -354,14 +393,12 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
               <div className="flex justify-between items-center">
                 <span className="text-gray-600">ส่วนลด</span>
                 <div className="w-24">
-                  {/* เพิ่ม onFocus ให้ select all */}
                   <NumericInput className="w-full text-right border border-gray-200 rounded-lg px-2 py-1 focus:border-indigo-500 outline-none" placeholder="0" value={formData.discount} onChange={val => setFormData({...formData, discount: val})} onFocus={handleFocus} />
                 </div>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-gray-600 flex items-center gap-1"><Truck size={14}/> ค่าขนส่ง</span>
                 <div className="w-24">
-                  {/* เพิ่ม onFocus ให้ select all */}
                   <NumericInput className="w-full text-right border border-gray-200 rounded-lg px-2 py-1 focus:border-indigo-500 outline-none" placeholder="0" value={formData.shipping_cost} onChange={val => setFormData({...formData, shipping_cost: val})} onFocus={handleFocus} />
                 </div>
               </div>
