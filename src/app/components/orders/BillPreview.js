@@ -13,29 +13,25 @@ const BillPreview = ({ order, onClose }) => {
     const printContent = contentRef.current.innerHTML;
     const printWindow = window.open('', '', 'height=800,width=800');
     printWindow.document.write('<html><head><title>Print Bill</title>');
-    // ใส่ Tailwind CDN สำหรับหน้าพิมพ์
-    printWindow.document.write('<script src="https://cdn.tailwindcss.com"></script>');
-    // Load Fonts: Sarabun & Kanit
+    // Load Fonts
     printWindow.document.write('<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&family=Kanit:wght@300;400;500;600&display=swap" rel="stylesheet">');
-    
-    // Custom CSS สำหรับการพิมพ์
+    // Simple Reset CSS for Print
     printWindow.document.write(`
       <style>
         @page { size: A4; margin: 0; }
-        body { margin: 0; -webkit-print-color-adjust: exact; font-family: 'Sarabun', sans-serif; }
-        .print-container { padding: 10mm; min-height: 297mm; position: relative; }
+        body { margin: 0; font-family: "Sarabun", sans-serif; -webkit-print-color-adjust: exact; }
+        * { box-sizing: border-box; }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { padding: 8px 12px; }
       </style>
     `);
-    
     printWindow.document.write('</head><body class="bg-white">');
     printWindow.document.write(printContent);
     printWindow.document.write('</body></html>');
     printWindow.document.close();
-    
-    // รอให้โหลด Style/Font เสร็จก่อนพิมพ์
     setTimeout(() => {
       printWindow.print();
-    }, 1500);
+    }, 1000);
   };
 
   const handleDownloadImage = async () => {
@@ -75,13 +71,43 @@ const BillPreview = ({ order, onClose }) => {
     ? (isTaxInvoice ? 'RECEIPT / TAX INVOICE' : 'RECEIPT')
     : 'QUOTATION';
 
+  // --- STYLES (HARDCODED HEX for Stability) ---
+  const styles = {
+    chatContainer: {
+      fontFamily: '"Kanit", sans-serif',
+      backgroundColor: '#ffffff',
+      minHeight: '600px',
+      display: 'flex',
+      flexDirection: 'column',
+      paddingBottom: '30px',
+      position: 'relative'
+    },
+    chatHeader: {
+      backgroundColor: '#111827', // Gray 900
+      color: '#facc15', // Yellow 400
+      padding: '30px 20px',
+      textAlign: 'center',
+      borderBottomLeftRadius: '40px',
+      borderBottomRightRadius: '40px',
+      marginBottom: '20px'
+    },
+    chatCard: {
+      backgroundColor: '#ffffff',
+      borderRadius: '16px',
+      boxShadow: '0 4px 15px rgba(0,0,0,0.05)',
+      border: '1px solid #f3f4f6',
+      padding: '20px',
+      textAlign: 'center',
+      marginBottom: '20px'
+    },
+    textDark: { color: '#1f2937' },
+    textGray: { color: '#6b7280' },
+    textLight: { color: '#9ca3af' },
+    borderDashed: { borderBottom: '1px dashed #e5e7eb', margin: '20px 0' }
+  };
+
   return (
     <div className="fixed inset-0 z-[100] bg-black/90 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in duration-200 font-sans">
-      {/* เพิ่มลิงก์ฟอนต์ในหน้า Preview นี้ด้วย เพื่อให้แสดงผลถูกต้องก่อนพิมพ์ */}
-      <style jsx global>{`
-        @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&family=Kanit:wght@300;400;500;600&display=swap');
-      `}</style>
-
       <div className="bg-white w-full max-w-5xl h-[95vh] rounded-2xl overflow-hidden flex flex-col shadow-2xl">
         
         {/* Header Tools */}
@@ -124,175 +150,170 @@ const BillPreview = ({ order, onClose }) => {
           
           <div 
             ref={contentRef} 
-            className={mode === 'official' ? "bg-white shadow-2xl print:shadow-none" : ""}
+            // ใช้ inline style สำหรับ width/height เพื่อความแน่นอน และ class ที่ไม่ซับซ้อน
             style={{
                 width: mode === 'official' ? '210mm' : '400px',
                 minHeight: mode === 'official' ? '297mm' : 'auto',
                 backgroundColor: '#ffffff',
-                // Box shadow only for visual preview
                 boxShadow: mode === 'official' ? '0 10px 30px rgba(0,0,0,0.1)' : 'none',
                 margin: '0 auto'
             }}
           >
             
             {/* =================================================================================
-                                          MODE 1: OFFICIAL (Modern Professional Redesign)
+                                          MODE 1: OFFICIAL (New Modern Design)
                ================================================================================= */}
             {mode === 'official' && (
-              <div className="print-container p-[10mm] text-gray-900 relative min-h-[297mm] flex flex-col" style={{ fontFamily: '"Sarabun", sans-serif' }}>
+              <div className="p-[15mm] text-gray-800 relative min-h-[297mm] flex flex-col" style={{ fontFamily: '"Sarabun", sans-serif' }}>
                 
-                {/* 1. Header & Brand */}
-                <div className="flex justify-between items-start mb-8 pb-6 border-b border-gray-100">
-                  <div className="w-2/3 pr-8">
-                    <h1 className="text-2xl font-bold text-gray-900 mb-2 tracking-tight">บริษัท ไทยฟรอสเทค จำกัด</h1>
-                    <p className="text-xs text-gray-500 leading-relaxed font-medium">
+                {/* 1. Modern Header */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '30px' }}>
+                  <div style={{ width: '60%' }}>
+                    <h1 style={{ fontSize: '28px', fontWeight: 'bold', margin: '0 0 5px 0', color: '#1e1b4b', letterSpacing: '-0.5px' }}>บริษัท ไทยฟรอสเทค จำกัด</h1>
+                    <p style={{ fontSize: '13px', color: '#6b7280', lineHeight: '1.6' }}>
                       97 หมู่ 1 ซอยรังสิต-นครนายก 64 ต.ประชาธิปัตย์<br/>
-                      อ.ธัญบุรี จ.ปทุมธานี 12130
+                      อ.ธัญบุรี จ.ปทุมธานี 12130<br/>
+                      <span style={{ color: '#374151', fontWeight: 600 }}>โทร:</span> 093-121-5740
+                      {order.show_tax_id && <span> &nbsp;|&nbsp; <span style={{ color: '#374151', fontWeight: 600 }}>Tax ID:</span> 0105551234567</span>}
                     </p>
-                    <div className="mt-3 flex items-center gap-4 text-xs text-gray-500">
-                       <span className="flex items-center gap-1"><span className="font-bold text-gray-700">โทร:</span> 093-121-5740</span>
-                       {order.show_tax_id && <span className="flex items-center gap-1 border-l pl-4 border-gray-300"><span className="font-bold text-gray-700">เลขประจำตัวผู้เสียภาษี:</span> 0105551234567</span>}
-                    </div>
                   </div>
-                  <div className="w-1/3 text-right">
-                    <div className="inline-block">
-                        <h2 className="text-xl font-bold uppercase tracking-wider text-indigo-900 mb-1">
-                        {docTitle}
-                        </h2>
-                        <p className="text-[10px] font-bold text-gray-400 tracking-[0.3em] border-t border-gray-200 pt-1">{docTitleEn}</p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* 2. Info Grid */}
-                <div className="flex gap-8 mb-8">
-                  {/* Customer Block */}
-                  <div className="flex-1 bg-gray-50/50 rounded-lg p-4 border border-gray-100">
-                    <h3 className="text-[10px] font-bold text-indigo-500 uppercase mb-3 tracking-wider">ข้อมูลลูกค้า (Customer)</h3>
-                    <p className="font-bold text-sm text-gray-900 mb-1">{order.customer_cache?.first_name} {order.customer_cache?.last_name}</p>
-                    <p className="text-[11px] text-gray-600 mb-2 leading-relaxed">{order.customer_cache?.address_raw || '-'}</p>
-                    <div className="flex flex-col gap-1 text-[11px] text-gray-600">
-                        <div><span className="font-semibold text-gray-800">โทร:</span> {order.customer_cache?.phone}</div>
-                        {order.show_tax_id && order.customer_cache?.tax_id && (
-                             <div><span className="font-semibold text-gray-800">Tax ID:</span> {order.customer_cache.tax_id}</div>
-                        )}
-                    </div>
-                  </div>
-
-                  {/* Document Info Block */}
-                  <div className="w-[35%] space-y-3">
-                    <div className="flex justify-between items-center border-b border-gray-100 pb-2">
-                      <span className="text-[11px] font-semibold text-gray-500">เลขที่เอกสาร</span>
-                      <span className="text-sm font-bold text-gray-900">{order.order_number}</span>
-                    </div>
-                    {hasInvoiceNumber && (
-                        <div className="flex justify-between items-center border-b border-gray-100 pb-2">
-                        <span className="text-[11px] font-semibold text-gray-500">เลขที่ใบกำกับ</span>
-                        <span className="text-sm font-bold text-indigo-700">{order.invoice_number}</span>
-                        </div>
-                    )}
-                    <div className="flex justify-between items-center border-b border-gray-100 pb-2">
-                      <span className="text-[11px] font-semibold text-gray-500">วันที่</span>
-                      <span className="text-sm font-bold text-gray-900">{new Date(order.order_date).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' })}</span>
-                    </div>
-                    {order.status === 'Paid' && (
-                        <div className="flex justify-between items-center border-b border-gray-100 pb-2">
-                        <span className="text-[11px] font-semibold text-gray-500">วันที่ชำระ</span>
-                        <span className="text-sm font-bold text-green-700">{new Date().toLocaleDateString('th-TH')}</span>
-                        </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* 3. Items Table */}
-                <div className="mb-6 border rounded-lg border-gray-200 overflow-hidden">
-                    <table className="w-full text-[11px] border-collapse">
-                    <thead>
-                        <tr className="bg-gray-100 text-gray-800 border-b border-gray-200">
-                        <th className="py-2.5 px-3 text-center w-12 font-bold border-r border-gray-200">#</th>
-                        <th className="py-2.5 px-3 text-left font-bold border-r border-gray-200">รายการสินค้า (Description)</th>
-                        <th className="py-2.5 px-3 text-center w-20 font-bold border-r border-gray-200">จำนวน</th>
-                        <th className="py-2.5 px-3 text-right w-28 font-bold border-r border-gray-200">ราคา/หน่วย</th>
-                        <th className="py-2.5 px-3 text-right w-32 font-bold">รวมเงิน</th>
-                        </tr>
-                    </thead>
-                    <tbody className="text-gray-700">
-                        {order.order_items?.map((item, i) => (
-                        <tr key={i} className="border-b border-gray-100 last:border-none">
-                            <td className="py-2 px-3 text-center text-gray-400 border-r border-gray-100 bg-gray-50/30">{i+1}</td>
-                            <td className="py-2 px-3 border-r border-gray-100">
-                            <p className="font-bold text-gray-900 text-[12px]">{item.product_name}</p>
-                            {item.variant_name && <p className="text-[10px] text-gray-500 mt-0.5 inline-block bg-gray-100 px-1.5 rounded">{item.variant_name}</p>}
-                            {item.sku && <p className="text-[9px] text-gray-400 font-mono mt-0.5">SKU: {item.sku}</p>}
-                            </td>
-                            <td className="py-2 px-3 text-center border-r border-gray-100 font-medium">{item.quantity}</td>
-                            <td className="py-2 px-3 text-right border-r border-gray-100">{item.sell_price.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
-                            <td className="py-2 px-3 text-right font-bold text-gray-900">{ (item.sell_price * item.quantity).toLocaleString(undefined, {minimumFractionDigits: 2}) }</td>
-                        </tr>
-                        ))}
-                        {/* Filler Rows */}
-                        {Array.from({ length: Math.max(0, 12 - (order.order_items?.length || 0)) }).map((_, i) => (
-                        <tr key={`fill-${i}`} className="border-b border-gray-50 h-8 last:border-none">
-                            <td className="border-r border-gray-50 bg-gray-50/10"></td>
-                            <td className="border-r border-gray-50"></td>
-                            <td className="border-r border-gray-50"></td>
-                            <td className="border-r border-gray-50"></td>
-                            <td></td>
-                        </tr>
-                        ))}
-                    </tbody>
-                    </table>
-                </div>
-
-                {/* 4. Footer & Totals */}
-                <div className="flex justify-end mt-auto">
-                  <div className="w-[45%] bg-gray-50 rounded-xl p-4 border border-gray-200">
-                    <div className="flex justify-between py-1 text-[11px] text-gray-600">
-                      <span>รวมเป็นเงิน (Subtotal)</span>
-                      <span className="font-medium">{order.subtotal?.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
-                    </div>
-                    {order.discount > 0 && (
-                      <div className="flex justify-between py-1 text-[11px] text-red-600">
-                        <span>หักส่วนลด (Discount)</span>
-                        <span>-{order.discount.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
-                      </div>
-                    )}
-                    <div className="flex justify-between py-1 text-[11px] text-gray-600">
-                      <span>ค่าขนส่ง (Shipping)</span>
-                      <span>{order.shipping_cost === 0 ? '-' : order.shipping_cost?.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
-                    </div>
-                    {order.vat_type !== 'no_vat' && (
-                      <div className="flex justify-between py-1 text-[11px] text-gray-600">
-                        <span>ภาษีมูลค่าเพิ่ม (VAT 7%)</span>
-                        <span>{order.vat_amount?.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
-                      </div>
-                    )}
+                  <div style={{ textAlign: 'right' }}>
+                    <h2 style={{ fontSize: '24px', fontWeight: '800', textTransform: 'uppercase', color: '#1e1b4b', marginBottom: '2px' }}>
+                      {docTitle}
+                    </h2>
+                    <p style={{ fontSize: '11px', color: '#9ca3af', letterSpacing: '2px', fontWeight: 600 }}>{docTitleEn}</p>
                     
-                    <div className="my-2 border-t border-gray-300"></div>
-
-                    <div className="flex justify-between items-center">
-                      <span className="font-bold text-sm text-gray-900">จำนวนเงินสุทธิ (Total)</span>
-                      <span className="font-bold text-lg text-indigo-900">฿{order.grand_total?.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
-                    </div>
-                    <div className="mt-1 text-right text-[10px] text-gray-500 italic">
-                      {toThaiBahtText(order.grand_total)}
+                    <div style={{ marginTop: '15px' }}>
+                       <div style={{ fontSize: '14px', color: '#374151', marginBottom: '4px' }}>
+                          <span style={{ color: '#9ca3af', fontSize: '12px', marginRight: '8px' }}>เลขที่:</span> 
+                          <span style={{ fontWeight: 'bold' }}>{order.order_number}</span>
+                       </div>
+                       {hasInvoiceNumber && (
+                           <div style={{ fontSize: '14px', color: '#374151', marginBottom: '4px' }}>
+                              <span style={{ color: '#9ca3af', fontSize: '12px', marginRight: '8px' }}>TAX Inv:</span> 
+                              <span style={{ fontWeight: 'bold', color: '#4f46e5' }}>{order.invoice_number}</span>
+                           </div>
+                       )}
+                       <div style={{ fontSize: '14px', color: '#374151' }}>
+                          <span style={{ color: '#9ca3af', fontSize: '12px', marginRight: '8px' }}>วันที่:</span> 
+                          <span>{new Date(order.order_date).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' })}</span>
+                       </div>
                     </div>
                   </div>
                 </div>
 
-                {/* 5. Signatures Area */}
-                <div className="flex justify-between items-end mt-12 pt-6 border-t border-gray-200">
-                  <div className="text-center w-1/3">
-                    <div className="h-10 border-b border-dotted border-gray-400 mb-2"></div>
-                    <p className="text-[11px] font-bold text-gray-700">ผู้รับวางบิล / ผู้รับสินค้า</p>
-                    <p className="text-[10px] text-gray-500 mt-0.5">วันที่ ______/______/______</p>
-                  </div>
-                  <div className="text-center w-1/3">
-                    <div className="h-10 border-b border-dotted border-gray-400 mb-2"></div>
-                    <p className="text-[11px] font-bold text-gray-700">ผู้มีอำนาจลงนาม</p>
-                    <p className="text-[10px] text-gray-500 mt-0.5">วันที่ {new Date().toLocaleDateString('th-TH')}</p>
+                {/* 2. Customer Section (Clean Box) */}
+                <div style={{ backgroundColor: '#f9fafb', padding: '20px', borderRadius: '12px', marginBottom: '30px', border: '1px solid #f3f4f6' }}>
+                  <div style={{ display: 'flex' }}>
+                     <div style={{ flex: 1 }}>
+                        <h3 style={{ fontSize: '11px', fontWeight: 'bold', color: '#9ca3af', textTransform: 'uppercase', marginBottom: '8px', letterSpacing: '1px' }}>ลูกค้า (Bill To)</h3>
+                        <p style={{ fontSize: '16px', fontWeight: 'bold', color: '#111827', marginBottom: '4px' }}>
+                            {order.customer_cache?.first_name} {order.customer_cache?.last_name}
+                        </p>
+                        <p style={{ fontSize: '13px', color: '#4b5563', lineHeight: '1.5', maxWidth: '300px' }}>
+                            {order.customer_cache?.address_raw || '-'}
+                        </p>
+                        <div style={{ marginTop: '8px', fontSize: '13px', color: '#4b5563' }}>
+                             <span style={{ fontWeight: 600 }}>โทร:</span> {order.customer_cache?.phone}
+                             {order.show_tax_id && order.customer_cache?.tax_id && (
+                                <span style={{ marginLeft: '15px' }}><span style={{ fontWeight: 600 }}>Tax ID:</span> {order.customer_cache.tax_id}</span>
+                             )}
+                        </div>
+                     </div>
+                     {order.status === 'Paid' && (
+                        <div style={{ alignSelf: 'center', border: '2px solid #10b981', color: '#10b981', padding: '8px 20px', borderRadius: '8px', transform: 'rotate(-10deg)', fontSize: '18px', fontWeight: 'bold', opacity: 0.8 }}>
+                            PAID
+                        </div>
+                     )}
                   </div>
                 </div>
+
+                {/* 3. Items Table (Minimalist) */}
+                <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '30px', fontSize: '13px' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '2px solid #e5e7eb' }}>
+                      <th style={{ padding: '12px 10px', textAlign: 'left', color: '#6b7280', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px', width: '50px' }}>#</th>
+                      <th style={{ padding: '12px 10px', textAlign: 'left', color: '#6b7280', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px' }}>รายการ (Description)</th>
+                      <th style={{ padding: '12px 10px', textAlign: 'center', color: '#6b7280', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px', width: '80px' }}>จำนวน</th>
+                      <th style={{ padding: '12px 10px', textAlign: 'right', color: '#6b7280', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px', width: '120px' }}>ราคา/หน่วย</th>
+                      <th style={{ padding: '12px 10px', textAlign: 'right', color: '#6b7280', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px', width: '120px' }}>จำนวนเงิน</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {order.order_items?.map((item, i) => (
+                      <tr key={i} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                        <td style={{ padding: '12px 10px', color: '#9ca3af', verticalAlign: 'top' }}>{i+1}</td>
+                        <td style={{ padding: '12px 10px', verticalAlign: 'top' }}>
+                          <p style={{ margin: 0, fontWeight: '600', color: '#1f2937' }}>{item.product_name}</p>
+                          {item.variant_name && <p style={{ margin: '2px 0 0', fontSize: '12px', color: '#6b7280' }}>{item.variant_name}</p>}
+                          {item.sku && <p style={{ margin: '2px 0 0', fontSize: '11px', color: '#9ca3af', fontFamily: 'monospace' }}>{item.sku}</p>}
+                        </td>
+                        <td style={{ padding: '12px 10px', textAlign: 'center', verticalAlign: 'top', color: '#4b5563' }}>{item.quantity}</td>
+                        <td style={{ padding: '12px 10px', textAlign: 'right', verticalAlign: 'top', color: '#4b5563' }}>{item.sell_price.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                        <td style={{ padding: '12px 10px', textAlign: 'right', verticalAlign: 'top', fontWeight: '600', color: '#111827' }}>{ (item.sell_price * item.quantity).toLocaleString(undefined, {minimumFractionDigits: 2}) }</td>
+                      </tr>
+                    ))}
+                    {/* Spacer to push footer */}
+                    <tr style={{ height: 'auto' }}><td colSpan={5}></td></tr>
+                  </tbody>
+                </table>
+
+                {/* 4. Footer & Summary */}
+                <div style={{ marginTop: 'auto', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                   {/* Left: Notes & Text Total */}
+                   <div style={{ width: '50%', paddingRight: '20px' }}>
+                      <div style={{ fontSize: '12px', color: '#6b7280', backgroundColor: '#f9fafb', padding: '15px', borderRadius: '8px' }}>
+                         <p style={{ fontWeight: 'bold', marginBottom: '4px', fontSize: '11px', textTransform: 'uppercase', color: '#9ca3af' }}>หมายเหตุ (Note)</p>
+                         <p>{order.notes || '-'}</p>
+                      </div>
+                      <div style={{ marginTop: '15px', fontSize: '13px', color: '#4b5563', fontStyle: 'italic' }}>
+                         ( {toThaiBahtText(order.grand_total)} )
+                      </div>
+                   </div>
+
+                   {/* Right: Numbers */}
+                   <div style={{ width: '40%' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #f3f4f6', fontSize: '13px', color: '#4b5563' }}>
+                        <span>รวมเป็นเงิน</span>
+                        <span style={{ fontWeight: 500 }}>{order.subtotal?.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+                      </div>
+                      {order.discount > 0 && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #f3f4f6', fontSize: '13px', color: '#ef4444' }}>
+                          <span>หักส่วนลด</span>
+                          <span>-{order.discount.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+                        </div>
+                      )}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #f3f4f6', fontSize: '13px', color: '#4b5563' }}>
+                        <span>ค่าขนส่ง</span>
+                        <span>{order.shipping_cost === 0 ? '-' : order.shipping_cost?.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+                      </div>
+                      {order.vat_type !== 'no_vat' && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #f3f4f6', fontSize: '13px', color: '#4b5563' }}>
+                          <span>ภาษีมูลค่าเพิ่ม (7%)</span>
+                          <span>{order.vat_amount?.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+                        </div>
+                      )}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '15px 0', marginTop: '10px', borderTop: '2px solid #1f2937', fontSize: '18px', color: '#111827' }}>
+                        <span style={{ fontWeight: 'bold' }}>จำนวนเงินสุทธิ</span>
+                        <span style={{ fontWeight: '800', color: '#1e1b4b' }}>฿{order.grand_total?.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+                      </div>
+                   </div>
+                </div>
+
+                {/* 5. Signature Area */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '50px', paddingTop: '30px' }}>
+                   <div style={{ textAlign: 'center', width: '35%' }}>
+                      <div style={{ borderBottom: '1px solid #d1d5db', height: '40px', marginBottom: '10px' }}></div>
+                      <p style={{ fontSize: '12px', fontWeight: '600', color: '#374151' }}>ผู้รับวางบิล / ผู้รับสินค้า</p>
+                      <p style={{ fontSize: '11px', color: '#9ca3af', marginTop: '4px' }}>วันที่ ______/______/______</p>
+                   </div>
+                   <div style={{ textAlign: 'center', width: '35%' }}>
+                      <div style={{ borderBottom: '1px solid #d1d5db', height: '40px', marginBottom: '10px' }}></div>
+                      <p style={{ fontSize: '12px', fontWeight: '600', color: '#374151' }}>ผู้มีอำนาจลงนาม</p>
+                      <p style={{ fontSize: '11px', color: '#9ca3af', marginTop: '4px' }}>วันที่ {new Date().toLocaleDateString('th-TH')}</p>
+                   </div>
+                </div>
+
               </div>
             )}
 
@@ -300,21 +321,18 @@ const BillPreview = ({ order, onClose }) => {
                                           MODE 2: CHAT SUMMARY (Pure Inline Style)
                ================================================================================= */}
             {mode === 'chat' && (
-              <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', paddingBottom: '30px', fontFamily: '"Kanit", sans-serif', backgroundColor: '#ffffff', minHeight: '600px' }}>
+              <div style={styles.chatContainer}>
                 
                 {/* Brand Header Bar */}
-                <div style={{ backgroundColor: '#111827', color: '#facc15', padding: '30px 20px', textAlign: 'center', position: 'relative', overflow: 'hidden', borderBottomLeftRadius: '40px', borderBottomRightRadius: '40px' }}>
-                  {/* เปลี่ยน Gradient เป็น rgba เพื่อให้ html2canvas อ่านได้ */}
-                  <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', opacity: 0.1, background: 'radial-gradient(circle at top right, rgba(255,255,255,1), rgba(255,255,255,0))' }}></div>
+                <div style={styles.chatHeader}>
                   <h1 style={{ fontSize: '36px', fontWeight: '900', letterSpacing: '2px', margin: 0, color: '#facc15', lineHeight: 1 }}>MOMEN</h1>
                   <p style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '4px', opacity: 0.8, marginTop: '5px', color: '#d1d5db' }}>Technology</p>
-                  <div style={{ position: 'absolute', bottom: 0, left: 0, width: '100%', height: '4px', backgroundColor: '#facc15' }}></div>
                 </div>
 
                 <div style={{ padding: '0 25px', flex: 1, marginTop: '-20px', position: 'relative', zIndex: 10 }}>
                   
                   {/* Order Summary Card */}
-                  <div style={{ backgroundColor: '#ffffff', borderRadius: '16px', boxShadow: '0 4px 15px rgba(0,0,0,0.05)', border: '1px solid #f3f4f6', padding: '20px', textAlign: 'center', marginBottom: '20px' }}>
+                  <div style={styles.chatCard}>
                     <p style={{ color: '#9ca3af', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 'bold', marginBottom: '5px' }}>รายการสั่งซื้อ</p>
                     <p style={{ color: '#111827', fontSize: '18px', fontWeight: 'bold', marginBottom: '5px' }}>#{order.order_number}</p>
                     <p style={{ color: '#6b7280', fontSize: '12px' }}>{new Date(order.order_date).toLocaleDateString('th-TH', { dateStyle: 'long' })}</p>
