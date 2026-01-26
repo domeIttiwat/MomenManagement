@@ -1,0 +1,168 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import { Plus, Search, Eye, EyeOff, LayoutGrid, List as ListIcon, Loader2, ArrowUpDown, Filter, Package } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
+import ProductList from './ProductList';
+import ProductForm from './ProductForm';
+import ProductDetail from './ProductDetail';
+
+const ProductMain = () => {
+  const [view, setView] = useState('list');
+  const [products, setProducts] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [viewMode, setViewMode] = useState('list');
+  const [showCost, setShowCost] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [search, setSearch] = useState('');
+  
+  const [categories, setCategories] = useState([]);
+  const [selectedCategory, setSelectedCategory] = useState('All');
+  const [sortOption, setSortOption] = useState('newest');
+
+  const fetchProducts = async () => {
+    setLoading(true);
+    const { data: prodData } = await supabase
+      .from('products')
+      .select('*, categories(name), product_variants(sell_price, cost_price), order_items(quantity, sell_price, cost_price)')
+      .order('created_at', { ascending: false });
+      
+    if (prodData) {
+      const productsWithStats = prodData.map(p => {
+        const sales = p.order_items || [];
+        const soldCount = sales.reduce((sum, item) => sum + item.quantity, 0);
+        const timesOrdered = sales.length;
+        const totalSalesVal = sales.reduce((sum, item) => sum + (item.sell_price * item.quantity), 0);
+        const totalCostVal = sales.reduce((sum, item) => sum + (item.cost_price * item.quantity), 0);
+        const totalProfitVal = totalSalesVal - totalCostVal;
+
+        return { ...p, stats: { soldCount, timesOrdered, totalSalesVal, totalProfitVal } };
+      });
+      setProducts(productsWithStats);
+    }
+
+    const { data: catData } = await supabase.from('categories').select('*').order('name');
+    if (catData) setCategories(catData);
+    setLoading(false);
+  };
+
+  useEffect(() => { fetchProducts(); }, []);
+
+  const filteredAndSorted = useMemo(() => {
+    let result = [...products];
+
+    if (search) {
+      result = result.filter(p => p.name.toLowerCase().includes(search.toLowerCase()) || p.sku?.toLowerCase().includes(search.toLowerCase()));
+    }
+
+    if (selectedCategory !== 'All') {
+      result = result.filter(p => p.categories?.name === selectedCategory);
+    }
+
+    switch(sortOption) {
+      case 'newest': result.sort((a,b) => new Date(b.created_at) - new Date(a.created_at)); break;
+      case 'oldest': result.sort((a,b) => new Date(a.created_at) - new Date(b.created_at)); break;
+      case 'price_high': result.sort((a,b) => b.sell_price - a.sell_price); break;
+      case 'price_low': result.sort((a,b) => a.sell_price - b.sell_price); break;
+      case 'name_asc': result.sort((a,b) => a.name.localeCompare(b.name)); break;
+      case 'name_desc': result.sort((a,b) => b.name.localeCompare(a.name)); break;
+      case 'sales_high': result.sort((a,b) => b.stats.totalSalesVal - a.stats.totalSalesVal); break;
+    }
+
+    return result;
+  }, [products, search, selectedCategory, sortOption]);
+
+  if (view === 'form') return <ProductForm onCancel={() => setView('list')} onSuccess={() => { setView('list'); fetchProducts(); }} initialData={selectedProduct} />;
+  if (view === 'detail' && selectedProduct) return <ProductDetail product={selectedProduct} onBack={() => setView('list')} onEdit={() => setView('form')} showCost={showCost} setShowCost={setShowCost} onDelete={() => { fetchProducts(); setView('list'); }} />;
+
+  return (
+    <div className="max-w-[1600px] mx-auto space-y-6 animate-in fade-in duration-500">
+      
+      {/* Header Bar - Orange Theme */}
+      <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-gradient-to-r from-orange-500 to-amber-500 p-6 rounded-2xl shadow-lg text-white">
+        <div>
+           <h1 className="text-3xl font-bold tracking-tight text-white flex items-center gap-3">
+             <Package size={32} className="text-orange-100" /> คลังสินค้าสกู๊ตเตอร์
+           </h1>
+           <p className="text-orange-100 mt-1 font-medium ml-1">จัดการรายการ ({filteredAndSorted.length})</p>
+        </div>
+        <button 
+          onClick={() => { setSelectedProduct(null); setView('form'); }} 
+          className="bg-white text-orange-600 hover:bg-orange-50 px-6 py-3 rounded-xl font-bold shadow-md flex items-center gap-2 transition-all active:scale-95"
+        >
+          <Plus size={24} /> เพิ่มสินค้าใหม่
+        </button>
+      </div>
+
+      <div className="bg-white p-2 rounded-2xl shadow-sm border border-gray-100 flex flex-col xl:flex-row gap-3">
+        <div className="relative flex-1">
+          <Search className="absolute left-4 top-3.5 text-gray-400" size={20}/>
+          <input 
+            className="w-full pl-12 pr-4 py-3 bg-gray-50 hover:bg-gray-100 focus:bg-white border-transparent focus:border-indigo-500 rounded-xl transition-all outline-none" 
+            placeholder="ค้นหาชื่อสินค้า, SKU..." 
+            value={search} 
+            onChange={e => setSearch(e.target.value)} 
+          />
+        </div>
+        
+        <div className="flex flex-wrap items-center gap-2 px-2">
+          {/* Category Filter */}
+          <div className="relative">
+             <select 
+               className="appearance-none bg-gray-50 hover:bg-gray-100 px-4 py-3 pl-10 pr-8 rounded-xl text-sm font-semibold text-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 cursor-pointer border-none"
+               value={selectedCategory}
+               onChange={e => setSelectedCategory(e.target.value)}
+             >
+               <option value="All">ทุกหมวดหมู่</option>
+               {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+             </select>
+             <Filter size={16} className="absolute left-3.5 top-3.5 text-gray-400 pointer-events-none"/>
+          </div>
+
+          {/* Sort */}
+          <div className="relative">
+             <select 
+               className="appearance-none bg-gray-50 hover:bg-gray-100 px-4 py-3 pl-10 pr-8 rounded-xl text-sm font-semibold text-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 cursor-pointer border-none"
+               value={sortOption}
+               onChange={e => setSortOption(e.target.value)}
+             >
+               <option value="newest">ใหม่ล่าสุด</option>
+               <option value="oldest">เก่าสุด</option>
+               <option value="sales_high">ยอดขายสูงสุด</option>
+               <option value="price_high">ราคา มาก-น้อย</option>
+               <option value="price_low">ราคา น้อย-มาก</option>
+               <option value="name_asc">ชื่อ A-Z</option>
+               <option value="name_desc">ชื่อ Z-A</option>
+             </select>
+             <ArrowUpDown size={16} className="absolute left-3.5 top-3.5 text-gray-400 pointer-events-none"/>
+          </div>
+
+          <div className="w-px h-8 bg-gray-200 mx-2 hidden md:block" />
+          
+          <button 
+            onClick={() => setShowCost(!showCost)} 
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all ${showCost ? 'bg-amber-50 text-amber-700 ring-1 ring-amber-200' : 'text-gray-500 hover:bg-gray-50'}`}
+          >
+            {showCost ? <Eye size={18}/> : <EyeOff size={18}/>}
+            <span className="hidden sm:inline">{showCost ? 'ซ่อนต้นทุน' : 'แสดงต้นทุน'}</span>
+          </button>
+          
+          <div className="flex bg-gray-100 p-1 rounded-xl">
+            <button onClick={() => setViewMode('list')} className={`p-2 rounded-lg transition-all ${viewMode === 'list' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}><ListIcon size={20}/></button>
+            <button onClick={() => setViewMode('card')} className={`p-2 rounded-lg transition-all ${viewMode === 'card' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}><LayoutGrid size={20}/></button>
+          </div>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="flex justify-center py-24"><Loader2 className="animate-spin text-indigo-600" size={32} /></div>
+      ) : (
+        <ProductList 
+          products={filteredAndSorted} 
+          viewMode={viewMode} 
+          showCost={showCost} 
+          onSelectProduct={(p) => { setSelectedProduct(p); setView('detail'); }} 
+        />
+      )}
+    </div>
+  );
+};
+export default ProductMain;

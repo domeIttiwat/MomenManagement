@@ -7,11 +7,10 @@ import Sidebar from './components/sidebar';
 import ProductMain from './components/products/ProductMain';
 import CustomerMain from './components/customers/CustomerMain';
 import OrderMain from './components/orders/OrderMain'; 
-import MarketingMain from './components/marketing/MarketingMain';
-import DashboardMain from './components/dashboard/DashboardMain'; // เพิ่ม Import
+import MarketingMain from './components/marketing/MarketingMain'; // Import
 
 export default function Home() {
-  const [activeTab, setActiveTab] = useState('dashboard'); // เปลี่ยน Default เป็น dashboard
+  const [activeTab, setActiveTab] = useState('orders'); 
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [navData, setNavData] = useState(null);
 
@@ -49,8 +48,7 @@ export default function Home() {
         </div>
 
         <div className="max-w-[1600px] mx-auto animate-in fade-in duration-500">
-          {/* แสดง Dashboard */}
-          {activeTab === 'dashboard' && <DashboardMain />}
+          {activeTab === 'dashboard' && <div className="p-20 text-center border-2 border-dashed rounded-3xl">Dashboard Coming Soon</div>}
           
           {activeTab === 'products' && <ProductMain />}
           
@@ -68,6 +66,7 @@ export default function Home() {
             />
           )}
 
+          {/* Marketing System */}
           {activeTab === 'marketing' && <MarketingMain />}
         </div>
       </main>
