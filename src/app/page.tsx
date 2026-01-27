@@ -2,33 +2,44 @@
 
 import React, { useState } from 'react';
 import { LayoutDashboard, Menu } from 'lucide-react';
+import { AuthProvider, useAuth } from './context/AuthContext';
 
-// Import Components
 import Sidebar from './components/sidebar'; 
 import ProductMain from './components/products/ProductMain';
 import CustomerMain from './components/customers/CustomerMain';
 import OrderMain from './components/orders/OrderMain'; 
 import MarketingMain from './components/marketing/MarketingMain';
 import DashboardMain from './components/dashboard/DashboardMain';
-import UserMain from './components/users/UserMain'; // 1. เพิ่ม Import นี้
+import UserMain from './components/users/UserMain';
+import Login from './login/page';
+import ServiceMain from './components/services/ServiceMain'; // Import Service
 
-export default function Home() {
-  const [activeTab, setActiveTab] = useState<string>('dashboard'); 
+const AppContent = () => {
+  const { user, loading, profile } = useAuth();
+  const [activeTab, setActiveTab] = useState('services'); // ลองเปลี่ยน Default มาเทสหน้า Services
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  
-  const [navData, setNavData] = useState<any>(null);
+  const [navData, setNavData] = useState(null);
 
-  const handleNavigateToCustomer = (customerId: any) => {
+  if (loading) return <div className="h-screen flex items-center justify-center bg-gray-50">Loading...</div>;
+  if (!user) return <Login />;
+  if (profile?.status === 'pending') {
+    return (
+      <div className="h-screen flex items-center justify-center bg-gray-50 flex-col p-8 text-center">
+        <h1 className="text-2xl font-bold text-gray-800 mb-2">รอการอนุมัติสิทธิ์</h1>
+        <p className="text-gray-500">บัญชีของคุณสมัครเรียบร้อยแล้ว<br/>กรุณารอให้ Admin อนุมัติการใช้งาน</p>
+      </div>
+    );
+  }
+
+  const handleNavigateToCustomer = (customerId) => {
     setActiveTab('customers');
     setNavData({ target: 'customer', id: customerId, timestamp: Date.now() });
   };
-
-  const handleNavigateToOrder = (order: any) => {
+  const handleNavigateToOrder = (order) => {
     setActiveTab('orders');
     setNavData({ target: 'order', data: order, timestamp: Date.now() });
   };
-
-  const handleTabChange = (tab: any) => {
+  const handleTabChange = (tab) => {
     setActiveTab(tab);
     setNavData(null); 
   };
@@ -53,29 +64,34 @@ export default function Home() {
 
         <div className="max-w-[1600px] mx-auto animate-in fade-in duration-500">
           {activeTab === 'dashboard' && <DashboardMain />}
-          
           {activeTab === 'products' && <ProductMain />}
-          
           {activeTab === 'customers' && (
             <CustomerMain 
               initialNavData={navData?.target === 'customer' ? navData : null} 
               onViewOrder={handleNavigateToOrder}
             />
           )}
-          
           {activeTab === 'orders' && (
             <OrderMain 
               initialNavData={navData?.target === 'order' ? navData : null} 
               onViewCustomer={handleNavigateToCustomer}
             />
           )}
-
           {activeTab === 'marketing' && <MarketingMain />}
-
-          {/* 2. เพิ่มส่วนแสดงผลหน้าจัดการ User ตรงนี้ */}
           {activeTab === 'users' && <UserMain />}
+          
+          {/* Service System */}
+          {activeTab === 'services' && <ServiceMain />}
         </div>
       </main>
     </div>
+  );
+};
+
+export default function Home() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
   );
 }

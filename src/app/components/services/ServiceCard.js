@@ -1,0 +1,168 @@
+import React from 'react';
+import { Wrench, Calendar, User, Clock, CheckCircle2, AlertCircle, Truck, Wallet } from 'lucide-react';
+
+const ServiceCard = ({ service, onClick }) => {
+  const statusColors = {
+    Received: 'bg-gray-100 text-gray-600 border-gray-200',
+    Checking: 'bg-yellow-50 text-yellow-700 border-yellow-200',
+    Quoted: 'bg-purple-50 text-purple-700 border-purple-200',
+    'In Progress': 'bg-blue-50 text-blue-700 border-blue-200',
+    Done: 'bg-indigo-50 text-indigo-700 border-indigo-200',
+    Tested: 'bg-orange-50 text-orange-700 border-orange-200',
+    Completed: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    Delivered: 'bg-teal-50 text-teal-700 border-teal-200',
+    Cancelled: 'bg-red-50 text-red-700 border-red-200'
+  };
+
+  const getStatusIcon = (status) => {
+    switch (status) {
+      case 'Completed': return <CheckCircle2 size={12} />;
+      case 'In Progress': return <Wrench size={12} />;
+      case 'Done': return <Wrench size={12} />;
+      default: return <Clock size={12} />;
+    }
+  };
+
+  const getStatusLabel = (status) => {
+      const labels = {
+          'Waiting': 'รอทำ',
+          'In Progress': 'ส่งทำ',
+          'Done': 'ทำเสร็จแล้ว',
+          'Tested': 'ทดสอบแล้ว',
+          'Completed': 'เรียบร้อย',
+          'Cancelled': 'ยกเลิก',
+          'Received': 'รับรถเข้า',
+          'Checking': 'กำลังตรวจเช็ค',
+          'Quoted': 'เสนอราคาแล้ว',
+          'Delivered': 'ส่งมอบแล้ว'
+      };
+      return labels[status] || status;
+  };
+
+  const getPaymentStatus = () => {
+    const totalPaid = service.service_payments?.reduce((sum, p) => sum + Number(p.amount), 0) || 0;
+    const grandTotal = service.grand_total || 0;
+
+    if (grandTotal === 0 && totalPaid === 0) return null;
+    if (totalPaid === 0) return { label: 'ยังไม่ชำระ', color: 'text-red-500 bg-red-50' };
+    if (totalPaid >= grandTotal) return { label: 'ชำระครบ', color: 'text-green-600 bg-green-50' };
+    const isOnlyDeposit = service.service_payments?.length > 0 && service.service_payments.every(p => p.type === 'deposit');
+    if (isOnlyDeposit) return { label: 'มัดจำแล้ว', color: 'text-amber-600 bg-amber-50' };
+    return { label: 'ยังไม่ครบ', color: 'text-orange-600 bg-orange-50' };
+  };
+
+  // Duration Logic
+  const getDurationInfo = () => {
+    if (!service.received_date) return { text: '-', totalDays: 0, isFinished: false };
+
+    const start = new Date(service.received_date);
+    const isFinished = ['Done', 'Tested', 'Completed', 'Delivered', 'Cancelled'].includes(service.status);
+    
+    const end = isFinished && service.completed_date 
+      ? new Date(service.completed_date) 
+      : new Date();
+
+    start.setHours(0,0,0,0);
+    end.setHours(0,0,0,0);
+
+    let diffTime = end.getTime() - start.getTime();
+    if (diffTime < 0) diffTime = 0;
+
+    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+    
+    const years = Math.floor(diffDays / 365);
+    const remainingDaysAfterYears = diffDays % 365;
+    const months = Math.floor(remainingDaysAfterYears / 30);
+    const days = remainingDaysAfterYears % 30;
+
+    const parts = [];
+    if (years > 0) parts.push(`${years} ปี`);
+    if (months > 0) parts.push(`${months} เดือน`);
+    if (days > 0) parts.push(`${days} วัน`);
+    if (parts.length === 0) parts.push('0 วัน');
+
+    return { text: parts.join(' '), totalDays: diffDays, isFinished };
+  };
+
+  const { text: durationText, totalDays, isFinished } = getDurationInfo();
+
+  const getDurationColorClass = (days, finished) => {
+    if (finished) return 'bg-gray-100 text-gray-500 border-gray-200';
+    if (days <= 7) return 'bg-green-100 text-green-700 border-green-200';
+    if (days <= 30) return 'bg-blue-100 text-blue-700 border-blue-200';
+    if (days <= 60) return 'bg-orange-100 text-orange-700 border-orange-200';
+    return 'bg-red-100 text-red-700 border-red-200';
+  };
+
+  const payStatus = getPaymentStatus();
+  const mainItem = service.service_items?.[0]?.description || 'รอการตรวจสอบ';
+
+  return (
+    <div onClick={onClick} className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 hover:shadow-md hover:border-indigo-200 transition-all cursor-pointer group flex flex-col h-full">
+      {/* Header Image */}
+      <div className="relative aspect-video bg-gray-50 rounded-xl overflow-hidden mb-4 border border-gray-50">
+        {service.images && service.images.length > 0 ? (
+          <img src={service.images[0]} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center text-gray-300 flex-col gap-2">
+            <Wrench size={32} />
+          </div>
+        )}
+        <div className="absolute top-2 right-2">
+          <span className={`px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wide shadow-sm flex items-center gap-1 border ${statusColors[service.status] || 'bg-gray-100'}`}>
+            {getStatusIcon(service.status)} {getStatusLabel(service.status)}
+          </span>
+        </div>
+      </div>
+
+      <div className="flex-1 flex flex-col">
+        {/* Service No & Date */}
+        <div className="flex justify-between items-start mb-2">
+          <div>
+            <h3 className="font-bold text-gray-800 text-sm">{service.service_number}</h3>
+            <div className="flex flex-col gap-1 mt-0.5">
+                <div className="flex items-center gap-1 text-[10px] text-gray-400">
+                    <Calendar size={10}/> {new Date(service.received_date).toLocaleDateString('th-TH')}
+                </div>
+                {/* Duration Badge */}
+                <span className={`text-[9px] px-1.5 py-0.5 rounded border w-fit flex items-center gap-1 font-bold ${getDurationColorClass(totalDays, isFinished)}`}>
+                    <Clock size={9}/> {isFinished ? `เสร็จใน ${durationText}` : `รอ ${durationText}`}
+                </span>
+            </div>
+          </div>
+          {service.grand_total > 0 && (
+            <div className="text-right">
+              <p className="font-bold text-indigo-600">฿{service.grand_total.toLocaleString()}</p>
+              {payStatus && (
+                <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${payStatus.color}`}>
+                   {payStatus.label}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Customer */}
+        <div className="flex items-center gap-2 mb-3 bg-gray-50 p-2 rounded-lg">
+          <div className="w-6 h-6 rounded-full bg-white flex items-center justify-center text-gray-400 shadow-sm border border-gray-100">
+            <User size={12}/>
+          </div>
+          <p className="text-xs font-medium text-gray-700 truncate">
+            {service.customer_cache?.first_name} {service.customer_cache?.last_name}
+          </p>
+        </div>
+
+        {/* Job Description */}
+        <div className="mt-auto border-t border-gray-50 pt-2">
+          <div className="flex items-center gap-2 text-xs text-gray-600">
+            <AlertCircle size={12} className="text-orange-500 shrink-0"/> 
+            <span className="truncate">{mainItem}</span>
+            {service.service_items?.length > 1 && <span className="text-[10px] bg-gray-100 px-1 rounded text-gray-400">+{service.service_items.length-1}</span>}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default ServiceCard;

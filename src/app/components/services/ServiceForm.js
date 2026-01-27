@@ -1,0 +1,347 @@
+import React, { useState } from 'react';
+import { ArrowLeft, Save, Loader2, Info, Wrench, Calendar, Clock, User, FileText, CheckCircle, Printer, History } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
+import CustomerSelector from '../orders/CustomerSelector';
+import ImageUploader from '../orders/ImageUploader';
+import PaymentManager from '../orders/PaymentManager';
+import ServiceTeamSelector from './ServiceTeamSelector';
+import ServiceItemManager from './ServiceItemManager';
+import NumericInput from '../products/NumericInput';
+import ServiceBillPreview from './ServiceBillPreview';
+import ServiceUpdateManager from './ServiceUpdateManager';
+
+const ServiceForm = ({ onCancel, onSuccess, initialData }) => {
+  const [loading, setLoading] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
+  
+  const getLocalDate = () => new Date().toISOString().split('T')[0];
+
+  const [formData, setFormData] = useState(initialData ? {
+    ...initialData,
+    customer: initialData.customer_cache || null,
+    assignees: initialData.service_assignees || [],
+    items: initialData.service_items || [],
+    payments: (initialData.service_payments || []).map(p => ({
+        ...p,
+        date: p.payment_date ? p.payment_date.split('T')[0] : (p.date || getLocalDate()),
+        method: p.method || 'Transfer',
+        fee_amount: p.fee_amount || 0
+    })),
+    // --- FIX: โหลดข้อมูล updates ---
+    updates: (initialData.service_updates || []).map(u => ({
+        ...u,
+        images: (u.images || []).map(url => ({ url, file: null }))
+    })),
+    images: (initialData.images || []).map(url => ({ url, file: null })),
+    appointment_date: initialData.appointment_date ? initialData.appointment_date.split('T')[0] : '',
+    received_date: initialData.received_date ? initialData.received_date.split('T')[0] : getLocalDate(),
+    completed_date: initialData.completed_date ? initialData.completed_date.split('T')[0] : ''
+  } : {
+    service_number: `SRV-${new Date().getFullYear().toString().substr(-2)}${(new Date().getMonth()+1).toString().padStart(2,0)}-${Math.floor(1000 + Math.random() * 9000)}`,
+    received_date: getLocalDate(),
+    appointment_date: '',
+    completed_date: '',
+    status: 'Waiting',
+    customer: null,
+    assignees: [],
+    items: [],
+    payments: [],
+    updates: [], // New State for Updates
+    images: [],
+    shipping_cost: 0,
+    discount: 0,
+    vat_type: 'no_vat',
+    service_fee: 0,
+    notes: ''
+  });
+
+  const itemsTotal = formData.items.reduce((sum, item) => sum + (item.sell_price * item.quantity), 0);
+  const subtotal = itemsTotal + parseFloat(formData.service_fee || 0);
+  const discountVal = parseFloat(formData.discount) || 0;
+  const shippingVal = parseFloat(formData.shipping_cost) || 0;
+  const taxable = Math.max(0, subtotal - discountVal);
+  
+  let vatAmt = 0;
+  let grandTotal = taxable + shippingVal;
+
+  if (formData.vat_type === 'exclude') {
+    vatAmt = taxable * 0.07;
+    grandTotal += vatAmt;
+  } else if (formData.vat_type === 'include') {
+    vatAmt = taxable * 7 / 107;
+  }
+
+  const previewServiceData = {
+    ...formData,
+    customer_cache: formData.customer,
+    service_items: formData.items,
+    service_assignees: formData.assignees,
+    service_payments: formData.payments,
+    subtotal,
+    vat_amount: vatAmt,
+    grand_total: grandTotal
+  };
+
+  const handleStatusChange = (e) => {
+    const status = e.target.value;
+    let completedDate = formData.completed_date;
+    if (status === 'Completed' && !completedDate) {
+        completedDate = getLocalDate();
+    }
+    setFormData({...formData, status, completed_date: completedDate});
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!formData.customer) return alert('กรุณาระบุข้อมูลลูกค้า');
+    
+    setLoading(true);
+    try {
+      // 1. Upload Main Images
+      const uploadedImages = await Promise.all(formData.images.map(async (img) => {
+        if (img.file) {
+          const fileName = `srv-${Date.now()}-${Math.random()}`;
+          await supabase.storage.from('services').upload(fileName, img.file);
+          const { data } = supabase.storage.from('services').getPublicUrl(fileName);
+          return data.publicUrl;
+        }
+        return img.url;
+      }));
+
+      // 2. Upload Update Images & Prepare Updates Payload
+      const processedUpdates = await Promise.all(formData.updates.map(async (upd) => {
+          const updateImgs = await Promise.all(upd.images.map(async (img) => {
+             if (img.file) {
+                const fileName = `srv-upd-${Date.now()}-${Math.random()}`;
+                await supabase.storage.from('services').upload(fileName, img.file);
+                const { data } = supabase.storage.from('services').getPublicUrl(fileName);
+                return data.publicUrl;
+             }
+             return img.url;
+          }));
+          return {
+              description: upd.description,
+              update_date: upd.update_date,
+              images: updateImgs
+          };
+      }));
+
+      const payload = {
+        service_number: formData.service_number,
+        customer_id: formData.customer.id,
+        customer_cache: formData.customer,
+        status: formData.status,
+        received_date: formData.received_date,
+        appointment_date: formData.appointment_date || null,
+        completed_date: formData.status === 'Completed' ? formData.completed_date : null,
+        subtotal,
+        service_fee: formData.service_fee,
+        shipping_cost: shippingVal,
+        discount: discountVal,
+        vat_type: formData.vat_type,
+        vat_amount: vatAmt,
+        grand_total: grandTotal,
+        notes: formData.notes,
+        images: uploadedImages
+      };
+
+      let serviceId = initialData?.id;
+
+      if (serviceId) {
+        const { error } = await supabase.from('services').update(payload).eq('id', serviceId);
+        if (error) throw error;
+        
+        await supabase.from('service_items').delete().eq('service_id', serviceId);
+        await supabase.from('service_assignees').delete().eq('service_id', serviceId);
+        await supabase.from('service_payments').delete().eq('service_id', serviceId);
+        // --- FIX: ลบ updates เดิม ---
+        await supabase.from('service_updates').delete().eq('service_id', serviceId);
+      } else {
+        const { data, error } = await supabase.from('services').insert([payload]).select().single();
+        if (error) throw error;
+        serviceId = data.id;
+      }
+
+      // Insert Items
+      if (formData.items.length > 0) {
+        await supabase.from('service_items').insert(formData.items.map(i => ({
+          service_id: serviceId,
+          description: i.description,
+          type: i.type,
+          cost_price: i.cost_price,
+          sell_price: i.sell_price,
+          quantity: i.quantity,
+          sub_items: i.sub_items 
+        })));
+      }
+
+      // --- FIX: บันทึก Updates ---
+      if (processedUpdates.length > 0) {
+          await supabase.from('service_updates').insert(processedUpdates.map(u => ({
+              service_id: serviceId,
+              description: u.description,
+              update_date: u.update_date,
+              images: u.images
+          })));
+      }
+
+      if (formData.assignees.length > 0) {
+        await supabase.from('service_assignees').insert(formData.assignees.map(a => ({
+          service_id: serviceId,
+          user_id: a.user_id,
+          job_role: a.job_role
+        })));
+      }
+
+      if (formData.payments.length > 0) {
+        await supabase.from('service_payments').insert(formData.payments.map(p => ({
+          service_id: serviceId,
+          amount: p.amount,
+          payment_date: p.date,
+          type: p.type,
+          method: p.method,
+          fee_amount: p.fee_amount
+        })));
+      }
+
+      onSuccess();
+    } catch (err) {
+      alert('เกิดข้อผิดพลาด: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const inputClass = "w-full px-4 py-2 bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 rounded-xl transition-all outline-none text-gray-700 font-medium";
+  const labelClass = "block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5 ml-1";
+
+  const handleFocus = (e) => e.target.select();
+
+  return (
+    <form onSubmit={handleSubmit} className="max-w-7xl mx-auto pb-20 animate-in slide-in-from-bottom-4">
+      {/* Header */}
+      <div className="flex justify-between items-center bg-white/80 backdrop-blur-md p-4 rounded-2xl sticky top-2 z-20 shadow-sm border border-gray-100 mb-6">
+        <div className="flex items-center gap-4">
+          <button type="button" onClick={onCancel} className="p-2 hover:bg-gray-100 rounded-full transition-colors text-gray-500"><ArrowLeft size={20} /></button>
+          <div>
+            <h1 className="text-xl font-bold text-gray-900">{initialData ? 'แก้ไขใบงานซ่อม' : 'เปิดใบงานซ่อมใหม่'}</h1>
+            <p className="text-xs text-gray-500 font-mono">{formData.service_number}</p>
+          </div>
+        </div>
+        <div className="flex gap-2">
+            <button 
+                type="button" 
+                onClick={() => setShowPreview(true)}
+                className="bg-white text-indigo-700 border border-indigo-100 hover:bg-indigo-50 px-4 py-2.5 rounded-xl font-medium flex items-center gap-2 transition-all"
+            >
+                <Printer size={18} /> พรีวิวใบงาน
+            </button>
+            <button type="submit" disabled={loading} className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-xl font-medium shadow-lg flex gap-2">
+                {loading ? <Loader2 className="animate-spin"/> : <Save size={18} />} บันทึก
+            </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Left Column */}
+        <div className="lg:col-span-2 space-y-6">
+          
+          <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 space-y-5">
+            <h3 className="font-bold text-gray-800 text-lg border-b border-gray-50 pb-3 flex items-center gap-2">
+              <User size={20} className="text-indigo-500"/> ข้อมูลลูกค้า & วันที่
+            </h3>
+            
+            <CustomerSelector 
+              selectedCustomer={formData.customer} 
+              onSelect={c => setFormData({...formData, customer: c})} 
+            />
+            
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+               <div><label className={labelClass}>วันที่รับรถ</label><input type="date" className={inputClass} value={formData.received_date} onChange={e => setFormData({...formData, received_date: e.target.value})} /></div>
+               <div><label className={labelClass}>วันนัดส่งคืน (Optional)</label><input type="date" className={inputClass} value={formData.appointment_date} onChange={e => setFormData({...formData, appointment_date: e.target.value})} /></div>
+               <div>
+                 <label className={labelClass}>สถานะงาน</label>
+                 <select className={inputClass} value={formData.status} onChange={handleStatusChange}>
+                   <option value="Waiting">รอทำ</option>
+                   <option value="In Progress">ส่งทำ</option>
+                   <option value="Done">ทำเสร็จแล้ว</option>
+                   <option value="Tested">ทดสอบแล้ว</option>
+                   <option value="Completed">เรียบร้อย</option>
+                   <option value="Cancelled">ยกเลิก</option>
+                 </select>
+               </div>
+            </div>
+
+            {(formData.status === 'Completed') && (
+                 <div className="animate-in fade-in slide-in-from-left-2">
+                   <label className={`${labelClass} text-green-600`}>วันที่ส่งรถคืน/เสร็จสิ้น</label>
+                   <div className="relative">
+                      <input type="date" className={`${inputClass} border-green-200 bg-green-50 text-green-800 focus:ring-green-500/20`} value={formData.completed_date} onChange={e => setFormData({...formData, completed_date: e.target.value})} />
+                      <CheckCircle className="absolute right-3 top-2.5 text-green-500 pointer-events-none" size={16}/>
+                   </div>
+                 </div>
+               )}
+
+            <div><label className={labelClass}>ทีมงานผู้รับผิดชอบ</label><ServiceTeamSelector assignees={formData.assignees} onChange={a => setFormData({...formData, assignees: a})} /></div>
+          </div>
+
+          <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 min-h-[300px]">
+             <h3 className="font-bold text-gray-800 mb-4 text-lg flex items-center gap-2"><Wrench size={20} className="text-indigo-500"/> รายการซ่อม / อะไหล่</h3>
+             <ServiceItemManager items={formData.items} onChange={i => setFormData({...formData, items: i})} />
+          </div>
+
+          <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+             <h3 className="font-bold text-gray-800 mb-4 text-lg flex items-center gap-2">
+               <History size={20} className="text-indigo-500"/> อัปเดตความคืบหน้า (Job Timeline)
+             </h3>
+             <ServiceUpdateManager updates={formData.updates} onChange={u => setFormData({...formData, updates: u})} />
+          </div>
+        </div>
+
+        {/* Right Column */}
+        <div className="space-y-6">
+          <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+            <h3 className="font-bold text-gray-800 mb-4 text-lg">สรุปค่าใช้จ่าย</h3>
+            <div className="space-y-3 text-sm">
+               <div className="flex justify-between text-gray-600"><span>รวมค่าแรง/อะไหล่</span><span>{itemsTotal.toLocaleString()}</span></div>
+               <div className="flex justify-between items-center"><span className="text-gray-600">ค่าบริการเพิ่มเติม</span><NumericInput className="w-24 text-right border rounded px-2 py-1 focus:border-indigo-500 outline-none" value={formData.service_fee} onChange={v => setFormData({...formData, service_fee: v})} placeholder="0" onFocus={handleFocus}/></div>
+               <div className="flex justify-between items-center"><span className="text-gray-600">ค่าขนส่ง</span><NumericInput className="w-24 text-right border rounded px-2 py-1 focus:border-indigo-500 outline-none" value={formData.shipping_cost} onChange={v => setFormData({...formData, shipping_cost: v})} placeholder="0" onFocus={handleFocus}/></div>
+               <div className="flex justify-between items-center"><span className="text-gray-600">ส่วนลด</span><NumericInput className="w-24 text-right border rounded px-2 py-1 text-red-500 focus:border-red-500 outline-none" value={formData.discount} onChange={v => setFormData({...formData, discount: v})} placeholder="0" onFocus={handleFocus}/></div>
+               <div className="flex justify-between items-center pt-2">
+                <span className="text-gray-600">VAT 7%</span>
+                <select className="border border-gray-200 rounded px-1 py-1 text-xs bg-gray-50 outline-none" value={formData.vat_type} onChange={e => setFormData({...formData, vat_type: e.target.value})}>
+                  <option value="no_vat">ไม่คิด</option>
+                  <option value="exclude">คิดแยก (Exc)</option>
+                  <option value="include">รวมในยอด (Inc)</option>
+                </select>
+               </div>
+               {formData.vat_type !== 'no_vat' && <div className="flex justify-between text-gray-500 text-xs"><span>ยอด VAT</span><span>{vatAmt.toLocaleString(undefined, {minimumFractionDigits: 2})}</span></div>}
+               <div className="pt-4 border-t border-dashed border-gray-200 flex justify-between items-end mt-2">
+                 <span className="text-gray-900 font-bold">ยอดสุทธิ</span>
+                 <span className="text-2xl font-extrabold text-indigo-600">฿{grandTotal.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+               </div>
+            </div>
+          </div>
+
+          <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+             <h3 className="font-bold text-gray-800 mb-4">การชำระเงิน / มัดจำ</h3>
+             <PaymentManager payments={formData.payments} onChange={p => setFormData({...formData, payments: p})} grandTotal={grandTotal} />
+          </div>
+
+          <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+             <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><FileText size={18}/> รูปภาพรถ / อาการ</h3>
+             <ImageUploader images={formData.images} onChange={imgs => setFormData({...formData, images: imgs})} />
+          </div>
+
+          <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+             <h3 className="font-bold text-gray-800 mb-2">หมายเหตุ</h3>
+             <textarea className="w-full bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 rounded-xl p-3 text-sm transition-all outline-none" rows="3" value={formData.notes} onChange={e => setFormData({...formData, notes: e.target.value})} placeholder="บันทึกเพิ่มเติม..." />
+          </div>
+        </div>
+      </div>
+
+      {showPreview && <ServiceBillPreview service={previewServiceData} onClose={() => setShowPreview(false)} />}
+    </form>
+  );
+};
+export default ServiceForm;

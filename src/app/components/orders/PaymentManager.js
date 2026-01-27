@@ -4,11 +4,15 @@ import NumericInput from '../products/NumericInput';
 
 const PaymentManager = ({ payments = [], onChange, grandTotal }) => {
   const [isAdding, setIsAdding] = useState(false);
+  
+  // ตรวจสอบว่ามีมัดจำไปแล้วหรือยัง?
+  const hasDeposit = payments.some(p => p.type === 'deposit');
+
   const [newPay, setNewPay] = useState({ 
     amount: 0, 
     date: new Date().toISOString().split('T')[0], 
-    type: 'deposit',
-    method: 'Transfer', // Transfer, Cash, CreditCard
+    type: hasDeposit ? 'full' : 'deposit', // ถ้ามีมัดจำแล้ว ให้ default เป็น full
+    method: 'Transfer', 
     chargePercent: 0,
     chargeAmount: 0
   });
@@ -18,10 +22,12 @@ const PaymentManager = ({ payments = [], onChange, grandTotal }) => {
   const isPaidFull = Math.round(remaining * 100) <= 0;
 
   const handleOpenAdd = () => {
+    // เช็คอีกครั้งตอนกดปุ่มเปิดฟอร์ม
+    const currentHasDeposit = payments.some(p => p.type === 'deposit');
     setNewPay({ 
       amount: Math.max(0, remaining),
       date: new Date().toISOString().split('T')[0], 
-      type: 'deposit',
+      type: currentHasDeposit ? 'full' : 'deposit',
       method: 'Transfer',
       chargePercent: 0,
       chargeAmount: 0
@@ -33,7 +39,6 @@ const PaymentManager = ({ payments = [], onChange, grandTotal }) => {
     setNewPay(prev => ({ 
       ...prev, 
       method, 
-      // Reset charge if not credit card
       chargePercent: method === 'CreditCard' ? prev.chargePercent : 0,
       chargeAmount: method === 'CreditCard' ? prev.chargeAmount : 0
     }));
@@ -54,11 +59,9 @@ const PaymentManager = ({ payments = [], onChange, grandTotal }) => {
   const addPayment = () => {
     if (newPay.amount <= 0) return;
     
-    // บันทึกข้อมูล (รวมข้อมูลชาร์จบัตรไปด้วย)
     onChange([...payments, { 
       ...newPay, 
       id: Date.now(),
-      // เก็บค่าธรรมเนียมแยกไว้ด้วยเพื่อดูย้อนหลัง
       fee_percent: newPay.chargePercent,
       fee_amount: newPay.chargeAmount
     }]);
@@ -67,7 +70,6 @@ const PaymentManager = ({ payments = [], onChange, grandTotal }) => {
 
   const removePayment = (id) => onChange(payments.filter(p => p.id !== id));
 
-  // Helper Icon
   const getMethodIcon = (m) => {
     switch(m) {
       case 'Cash': return <Banknote size={14} className="text-green-600"/>;
@@ -118,7 +120,6 @@ const PaymentManager = ({ payments = [], onChange, grandTotal }) => {
               </div>
             </div>
             
-            {/* Show Charge Detail if any */}
             {p.method === 'CreditCard' && p.fee_amount > 0 && (
                <div className="flex justify-between text-xs text-gray-400 border-t border-dashed border-gray-100 pt-1 mt-1">
                  <span>ชาร์จบัตร {p.fee_percent}% (+{Number(p.fee_amount).toLocaleString()})</span>
@@ -139,8 +140,9 @@ const PaymentManager = ({ payments = [], onChange, grandTotal }) => {
               value={newPay.type} 
               onChange={e => setNewPay({...newPay, type: e.target.value})}
             >
-              <option value="deposit">มัดจำ</option>
-              <option value="full">จ่ายส่วนที่เหลือ / เต็มจำนวน</option>
+              {/* แสดงตัวเลือก "มัดจำ" เฉพาะตอนที่ยังไม่มีมัดจำ หรือกำลังแก้ไขรายการที่เป็นมัดจำ */}
+              {!hasDeposit && <option value="deposit">มัดจำ</option>}
+              <option value="full">{hasDeposit ? 'ชำระส่วนที่เหลือ / เพิ่มเติม' : 'ชำระเต็มจำนวน'}</option>
             </select>
             <input 
               type="date" className="border border-indigo-200 rounded-lg px-2 py-2 text-sm outline-none bg-white" 
@@ -175,7 +177,6 @@ const PaymentManager = ({ payments = [], onChange, grandTotal }) => {
                  <span className="absolute right-3 top-2 text-xs text-gray-400">บาท</span>
                </div>
                
-               {/* Credit Card Charge Option */}
                {newPay.method === 'CreditCard' && (
                  <div className="bg-white p-2 rounded-lg border border-purple-100 flex items-center gap-2 text-xs">
                     <span className="text-purple-700 font-medium whitespace-nowrap">ชาร์จบัตร:</span>
@@ -199,7 +200,6 @@ const PaymentManager = ({ payments = [], onChange, grandTotal }) => {
             </div>
           </div>
           
-          {/* Total Swipe Preview */}
           {newPay.method === 'CreditCard' && newPay.chargeAmount > 0 && (
              <div className="text-right text-xs bg-purple-50 p-1.5 rounded text-purple-800">
                ยอดรูดบัตรสุทธิ: <b>{(newPay.amount + newPay.chargeAmount).toLocaleString()}</b> บาท

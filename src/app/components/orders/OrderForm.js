@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ArrowLeft, Save, Loader2, Trash2, Receipt, Truck, Printer, PackagePlus, DollarSign, Calculator } from 'lucide-react';
+import { ArrowLeft, Save, Loader2, Trash2, Receipt, Truck, Printer, PackagePlus, DollarSign, Calculator, History } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import CustomerSelector from './CustomerSelector';
 import ProductSelector from './ProductSelector';
@@ -7,6 +7,7 @@ import PaymentManager from './PaymentManager';
 import ImageUploader from './ImageUploader';
 import BillPreview from './BillPreview';
 import NumericInput from '../products/NumericInput';
+import OrderUpdateManager from './OrderUpdateManager'; // Import ใหม่
 
 const OrderForm = ({ onCancel, onSuccess, initialData }) => {
   const [loading, setLoading] = useState(false);
@@ -22,24 +23,24 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
 
   const round2 = (num) => Math.round((num + Number.EPSILON) * 100) / 100;
 
-  // Initialize State
   const [formData, setFormData] = useState(() => {
     if (initialData) {
       return {
         ...initialData,
         customer: initialData.customer_cache || null, 
         items: initialData.order_items || [], 
-        
-        // --- FIX: Map ข้อมูลการชำระเงินให้ชัวร์ ---
         payments: (initialData.order_payments || []).map(p => ({
           ...p,
-          // ถ้ามี payment_date จาก DB ให้ใช้ ถ้าไม่มีใช้ p.date หรือถ้าไม่มีเลยใช้วันนี้
-          date: p.payment_date ? p.payment_date.split('T')[0] : (p.date || getLocalDate()),
+          date: p.payment_date ? p.payment_date.split('T')[0] : p.date,
           method: p.payment_method || 'Transfer',
           fee_percent: p.fee_percent || 0,
           fee_amount: p.fee_amount || 0
         })),
-
+        // --- FIX: Map Updates ---
+        updates: (initialData.order_updates || []).map(u => ({
+          ...u,
+          images: (u.images || []).map(url => ({ url, file: null }))
+        })),
         images: (initialData.images || []).map(url => ({ url, file: null })),
         shipping_cost: initialData.shipping_cost || 0,
         discount: initialData.discount || 0,
@@ -59,6 +60,7 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
       customer: null,
       items: [],
       payments: [],
+      updates: [], // New State for Updates
       images: [], 
       shipping_cost: 0,
       discount: 0,
@@ -90,14 +92,12 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
   const handleTargetPriceChange = (targetPrice) => {
     const target = parseFloat(targetPrice) || 0;
     let newDiscount = 0;
-
     if (formData.vat_type === 'exclude') {
       const base = (target - shippingVal) / 1.07;
       newDiscount = subtotal - base;
     } else {
       newDiscount = subtotal + shippingVal - target;
     }
-    
     setFormData({ ...formData, discount: Math.max(0, round2(newDiscount)) });
   };
 
@@ -117,11 +117,8 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
     if (formData.items.length === 0) return alert('กรุณาเพิ่มสินค้า');
     
     setLoading(true);
-    console.log('[DEBUG] Start Submitting Order...');
-    
     try {
       // 1. Upload Images
-      console.log('[DEBUG] Uploading images...');
       const uploadedImages = await Promise.all(formData.images.map(async (img) => {
         if (img.file) {
           const fileName = `ord-${Date.now()}-${Math.random()}`;
@@ -132,7 +129,24 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
         return img.url;
       }));
 
-      // 2. Prepare Order Payload
+      // 2. Upload Updates Images
+      const processedUpdates = await Promise.all(formData.updates.map(async (upd) => {
+          const updateImgs = await Promise.all(upd.images.map(async (img) => {
+             if (img.file) {
+                const fileName = `ord-upd-${Date.now()}-${Math.random()}`;
+                await supabase.storage.from('orders').upload(fileName, img.file);
+                const { data } = supabase.storage.from('orders').getPublicUrl(fileName);
+                return data.publicUrl;
+             }
+             return img.url;
+          }));
+          return {
+              description: upd.description,
+              update_date: upd.update_date,
+              images: updateImgs
+          };
+      }));
+
       const orderPayload = {
         order_number: formData.order_number,
         customer_id: formData.customer.id,
@@ -152,29 +166,18 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
         images: uploadedImages
       };
 
-      console.log('[DEBUG] Order Payload:', orderPayload);
-
       let orderId = initialData?.id;
 
-      // 3. Upsert Order
       if (orderId) {
-        console.log('[DEBUG] Updating existing order ID:', orderId);
-        const { error: orderError } = await supabase.from('orders').update(orderPayload).eq('id', orderId);
-        if (orderError) throw new Error('Update Order Failed: ' + orderError.message);
-
-        // Delete old items/payments (to replace with new ones)
-        console.log('[DEBUG] Cleaning up old items/payments...');
+        await supabase.from('orders').update(orderPayload).eq('id', orderId);
         await supabase.from('order_items').delete().eq('order_id', orderId);
         await supabase.from('order_payments').delete().eq('order_id', orderId);
+        await supabase.from('order_updates').delete().eq('order_id', orderId);
       } else {
-        console.log('[DEBUG] Creating new order...');
-        const { data, error: orderError } = await supabase.from('orders').insert([orderPayload]).select().single();
-        if (orderError) throw new Error('Create Order Failed: ' + orderError.message);
+        const { data } = await supabase.from('orders').insert([orderPayload]).select().single();
         orderId = data.id;
-        console.log('[DEBUG] New Order ID:', orderId);
       }
 
-      // 4. Insert Items
       const itemsPayload = formData.items.map(item => ({
         order_id: orderId,
         product_id: item.product_id,
@@ -185,35 +188,33 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
         sell_price: item.sell_price,
         quantity: item.quantity
       }));
-      const { error: itemsError } = await supabase.from('order_items').insert(itemsPayload);
-      if (itemsError) throw new Error('Save Items Failed: ' + itemsError.message);
+      await supabase.from('order_items').insert(itemsPayload);
 
-      // 5. Insert Payments
-      console.log('[DEBUG] Processing payments:', formData.payments);
+      // --- Insert Updates ---
+      if (processedUpdates.length > 0) {
+        await supabase.from('order_updates').insert(processedUpdates.map(u => ({
+            order_id: orderId,
+            description: u.description,
+            update_date: u.update_date,
+            images: u.images
+        })));
+      }
+
       if (formData.payments.length > 0) {
         const paymentsPayload = formData.payments.map(p => ({
           order_id: orderId,
           amount: p.amount,
-          payment_date: p.date || getLocalDate(), // Fallback date if missing
+          payment_date: p.date, 
           type: p.type,
-          payment_method: p.method || 'Transfer', // Check column name in DB!
+          payment_method: p.method || 'Transfer',
           fee_percent: p.fee_percent || 0,
           fee_amount: p.fee_amount || 0
         }));
-        
-        console.log('[DEBUG] Payments Payload to Insert:', paymentsPayload);
-        
-        const { error: paymentError } = await supabase.from('order_payments').insert(paymentsPayload);
-        if (paymentError) {
-             console.error('[DEBUG] Payment Insert Error:', paymentError);
-             throw new Error('Save Payments Failed: ' + paymentError.message);
-        }
+        await supabase.from('order_payments').insert(paymentsPayload);
       }
 
-      console.log('[DEBUG] Success!');
       onSuccess();
     } catch (error) {
-      console.error('[DEBUG] Critical Error:', error);
       alert('เกิดข้อผิดพลาด: ' + error.message);
     } finally {
       setLoading(false);
@@ -221,19 +222,16 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
   };
 
   const handleAddItem = (item) => setFormData({...formData, items: [...formData.items, item]});
-  
   const handleRemoveItem = (idx) => setFormData({...formData, items: formData.items.filter((_, i) => i !== idx)});
-
   const updateItem = (idx, field, value) => {
     const newItems = [...formData.items];
     newItems[idx][field] = value;
     setFormData({...formData, items: newItems});
   };
+  const handleFocus = (e) => e.target.select();
 
   const inputClass = "w-full px-4 py-2 bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 rounded-xl transition-all outline-none text-gray-700 font-medium";
   const labelClass = "block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5 ml-1";
-
-  const handleFocus = (e) => e.target.select();
 
   return (
     <form onSubmit={handleSubmit} className="max-w-7xl mx-auto pb-20 animate-in slide-in-from-bottom-4 fade-in duration-500">
@@ -247,11 +245,7 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
           </div>
         </div>
         <div className="flex gap-2">
-          <button 
-            type="button" 
-            onClick={() => setShowPreview(true)}
-            className="bg-white text-indigo-700 border border-indigo-100 hover:bg-indigo-50 px-4 py-2.5 rounded-xl font-medium flex items-center gap-2 transition-all"
-          >
+          <button type="button" onClick={() => setShowPreview(true)} className="bg-white text-indigo-700 border border-indigo-100 hover:bg-indigo-50 px-4 py-2.5 rounded-xl font-medium flex items-center gap-2 transition-all">
             <Printer size={18} /> พรีวิวเอกสาร
           </button>
           <button type="submit" disabled={loading} className="bg-gray-900 hover:bg-black text-white px-6 py-2.5 rounded-xl font-medium shadow-lg shadow-gray-200 flex items-center gap-2 active:scale-95 transition-all">
@@ -265,29 +259,17 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
         <div className="lg:col-span-2 space-y-6">
           <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 space-y-5">
             <h3 className="font-bold text-gray-800 text-lg border-b border-gray-50 pb-3">ข้อมูลลูกค้า & เอกสาร</h3>
-            
             <CustomerSelector selectedCustomer={formData.customer} onSelect={c => setFormData({...formData, customer: c})} />
-            
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div>
-                <label className={labelClass}>วันที่สั่งซื้อ</label>
-                <input type="date" className={inputClass} value={formData.order_date} onChange={e => setFormData({...formData, order_date: e.target.value})} />
-              </div>
-              <div>
-                <label className={labelClass}>เลขที่ใบกำกับภาษี</label>
-                <input type="text" className={inputClass} placeholder="INV-XXXX" value={formData.invoice_number || ''} onChange={e => setFormData({...formData, invoice_number: e.target.value})} />
-              </div>
+              <div><label className={labelClass}>วันที่สั่งซื้อ</label><input type="date" className={inputClass} value={formData.order_date} onChange={e => setFormData({...formData, order_date: e.target.value})} /></div>
+              <div><label className={labelClass}>เลขที่ใบกำกับภาษี</label><input type="text" className={inputClass} placeholder="INV-XXXX" value={formData.invoice_number || ''} onChange={e => setFormData({...formData, invoice_number: e.target.value})} /></div>
               <div>
                 <label className={labelClass}>สถานะ</label>
-                <select 
-                  className={inputClass} 
-                  value={formData.status} 
-                  onChange={(e) => {
+                <select className={inputClass} value={formData.status} onChange={e => {
                     const status = e.target.value;
                     const completedAt = status === 'Completed' && !formData.completed_at ? getLocalDate() : formData.completed_at;
                     setFormData({...formData, status, completed_at: completedAt});
-                  }}
-                >
+                  }}>
                   <option value="Quotation">เสนอราคา</option>
                   <option value="Deposit">มัดจำ</option>
                   <option value="Paid">ชำระแล้ว</option>
@@ -298,28 +280,14 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
                 </select>
               </div>
             </div>
-
             {formData.status === 'Completed' && (
               <div className="bg-green-50 p-4 rounded-xl border border-green-100 flex items-center gap-4 animate-in fade-in slide-in-from-top-2">
                 <div className="font-bold text-green-700 text-sm whitespace-nowrap">วันที่เสร็จสิ้น:</div>
-                <input 
-                  type="date" 
-                  className="w-full px-4 py-2 bg-white border border-green-200 rounded-lg text-sm text-green-800 focus:outline-none focus:ring-2 focus:ring-green-500/50" 
-                  value={formData.completed_at} 
-                  onChange={e => setFormData({...formData, completed_at: e.target.value})}
-                  required
-                />
+                <input type="date" className="w-full px-4 py-2 bg-white border border-green-200 rounded-lg text-sm text-green-800 focus:outline-none focus:ring-2 focus:ring-green-500/50" value={formData.completed_at} onChange={e => setFormData({...formData, completed_at: e.target.value})} required/>
               </div>
             )}
-
             <div className="flex items-center gap-2">
-              <input 
-                type="checkbox" 
-                id="showTax" 
-                className="w-4 h-4 accent-indigo-600 rounded"
-                checked={formData.show_tax_id}
-                onChange={e => setFormData({...formData, show_tax_id: e.target.checked})}
-              />
+              <input type="checkbox" id="showTax" className="w-4 h-4 accent-indigo-600 rounded" checked={formData.show_tax_id} onChange={e => setFormData({...formData, show_tax_id: e.target.checked})}/>
               <label htmlFor="showTax" className="text-sm font-medium text-gray-700 cursor-pointer">แสดงเลขผู้เสียภาษีลูกค้าในบิล</label>
             </div>
           </div>
@@ -335,13 +303,7 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
                       {item.is_custom ? (
                         <div className="flex items-center gap-2">
                           <PackagePlus size={20} className="text-indigo-500 shrink-0" />
-                          <input 
-                            className="bg-white border border-indigo-200 rounded-lg px-3 py-2 w-full text-sm font-bold text-indigo-900 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none" 
-                            placeholder="ระบุชื่อรายการ..." 
-                            value={item.product_name} 
-                            onChange={(e) => updateItem(idx, 'product_name', e.target.value)}
-                            autoFocus={item.shouldFocus}
-                          />
+                          <input className="bg-white border border-indigo-200 rounded-lg px-3 py-2 w-full text-sm font-bold text-indigo-900 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none" placeholder="ระบุชื่อรายการ..." value={item.product_name} onChange={(e) => updateItem(idx, 'product_name', e.target.value)} autoFocus={item.shouldFocus}/>
                         </div>
                       ) : (
                         <div>
@@ -362,13 +324,7 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
                       )}
                       <div className="flex items-center gap-2 bg-white rounded-lg border border-gray-200 px-2 py-1 h-[38px]">
                         <span className="text-xs text-gray-400 font-bold">Qty</span>
-                        <input 
-                          type="number" min="1" 
-                          className="w-10 text-center text-sm font-bold outline-none" 
-                          value={item.quantity} 
-                          onChange={(e) => updateItem(idx, 'quantity', parseInt(e.target.value) || 1)} 
-                          onFocus={handleFocus}
-                        />
+                        <input type="number" min="1" className="w-10 text-center text-sm font-bold outline-none" value={item.quantity} onChange={(e) => updateItem(idx, 'quantity', parseInt(e.target.value) || 1)} onFocus={handleFocus}/>
                       </div>
                       <div className="text-right min-w-[80px]">
                         <p className="text-sm font-bold text-gray-900">฿{(item.sell_price * item.quantity).toLocaleString()}</p>
@@ -382,6 +338,14 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
               {formData.items.length === 0 && <div className="flex flex-col items-center justify-center py-12 text-gray-400 border-2 border-dashed border-gray-100 rounded-2xl"><Receipt size={40} className="mb-2 opacity-20"/><p>ยังไม่มีรายการสินค้า</p></div>}
             </div>
           </div>
+
+          {/* New Section: Timeline */}
+          <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+             <h3 className="font-bold text-gray-800 mb-4 text-lg flex items-center gap-2">
+               <History size={20} className="text-indigo-500"/> อัปเดตความคืบหน้า (Job Timeline)
+             </h3>
+             <OrderUpdateManager updates={formData.updates} onChange={u => setFormData({...formData, updates: u})} />
+          </div>
         </div>
 
         {/* Right Column */}
@@ -389,46 +353,26 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
           <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
             <h3 className="font-bold text-gray-800 mb-4 text-lg">สรุปยอดเงิน</h3>
             <div className="space-y-3 text-sm">
-              <div className="flex justify-between text-gray-600"><span>รวมสินค้า</span><span>{subtotal.toLocaleString()}</span></div>
-              <div className="flex justify-between items-center">
-                <span className="text-gray-600">ส่วนลด</span>
-                <div className="w-24">
-                  <NumericInput className="w-full text-right border border-gray-200 rounded-lg px-2 py-1 focus:border-indigo-500 outline-none" placeholder="0" value={formData.discount} onChange={val => setFormData({...formData, discount: val})} onFocus={handleFocus} />
-                </div>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-gray-600 flex items-center gap-1"><Truck size={14}/> ค่าขนส่ง</span>
-                <div className="w-24">
-                  <NumericInput className="w-full text-right border border-gray-200 rounded-lg px-2 py-1 focus:border-indigo-500 outline-none" placeholder="0" value={formData.shipping_cost} onChange={val => setFormData({...formData, shipping_cost: val})} onFocus={handleFocus} />
-                </div>
-              </div>
-              <div className="flex justify-between items-center pt-2">
+               <div className="flex justify-between text-gray-600"><span>รวมสินค้า</span><span>{subtotal.toLocaleString()}</span></div>
+               <div className="flex justify-between items-center"><span className="text-gray-600">ส่วนลด</span><div className="w-24"><NumericInput className="w-full text-right border border-gray-200 rounded-lg px-2 py-1 focus:border-indigo-500 outline-none" placeholder="0" value={formData.discount} onChange={val => setFormData({...formData, discount: val})} onFocus={handleFocus} /></div></div>
+               <div className="flex justify-between items-center"><span className="text-gray-600 flex items-center gap-1"><Truck size={14}/> ค่าขนส่ง</span><div className="w-24"><NumericInput className="w-full text-right border border-gray-200 rounded-lg px-2 py-1 focus:border-indigo-500 outline-none" placeholder="0" value={formData.shipping_cost} onChange={val => setFormData({...formData, shipping_cost: val})} onFocus={handleFocus} /></div></div>
+               <div className="flex justify-between items-center pt-2">
                 <span className="text-gray-600">VAT 7%</span>
                 <select className="border border-gray-200 rounded-lg px-2 py-1 text-xs bg-gray-50 outline-none" value={formData.vat_type} onChange={e => setFormData({...formData, vat_type: e.target.value})}>
                   <option value="no_vat">ไม่คิด</option>
                   <option value="exclude">คิดแยก (Exclude)</option>
                   <option value="include">รวมในยอด (Include)</option>
                 </select>
-              </div>
-              {formData.vat_type !== 'no_vat' && <div className="flex justify-between text-gray-500 text-xs"><span>ยอด VAT</span><span>{vatAmount.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span></div>}
-              
-              <div className="pt-4 border-t border-dashed border-gray-200 mt-2">
-                <div className="flex justify-between items-end mb-2">
-                  <span className="text-gray-900 font-bold">ยอดสุทธิ</span>
-                  <span className="text-2xl font-extrabold text-indigo-600">฿{grandTotal.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
-                </div>
-                <div className="flex items-center gap-2 bg-indigo-50 p-2 rounded-lg border border-indigo-100">
-                   <Calculator size={16} className="text-indigo-400"/>
-                   <span className="text-xs text-indigo-700 whitespace-nowrap">ยอดที่ต้องการขาย:</span>
-                   <NumericInput 
-                     className="w-full bg-white border border-indigo-200 rounded px-2 py-1 text-right text-sm font-bold text-indigo-700 focus:outline-none" 
-                     placeholder="กรอกยอดสุทธิ..."
-                     value={grandTotal}
-                     onChange={handleTargetPriceChange}
-                     onFocus={handleFocus}
-                   />
-                </div>
-              </div>
+               </div>
+               {formData.vat_type !== 'no_vat' && <div className="flex justify-between text-gray-500 text-xs"><span>ยอด VAT</span><span>{vatAmount.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span></div>}
+               <div className="pt-4 border-t border-dashed border-gray-200 mt-2">
+                 <div className="flex justify-between items-end mb-2"><span className="text-gray-900 font-bold">ยอดสุทธิ</span><span className="text-2xl font-extrabold text-indigo-600">฿{grandTotal.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span></div>
+                 <div className="flex items-center gap-2 bg-indigo-50 p-2 rounded-lg border border-indigo-100">
+                    <Calculator size={16} className="text-indigo-400"/>
+                    <span className="text-xs text-indigo-700 whitespace-nowrap">ยอดที่ต้องการขาย:</span>
+                    <NumericInput className="w-full bg-white border border-indigo-200 rounded px-2 py-1 text-right text-sm font-bold text-indigo-700 focus:outline-none" placeholder="กรอกยอดสุทธิ..." value={grandTotal} onChange={handleTargetPriceChange} onFocus={handleFocus}/>
+                 </div>
+               </div>
             </div>
           </div>
 
