@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowLeft, Edit, Trash2, Eye, EyeOff, Layers, Package, Wrench, Bike, Check, Tag, Box, TrendingUp, DollarSign, ShoppingBag } from 'lucide-react';
+import { ArrowLeft, Edit, Trash2, Eye, EyeOff, Layers, Package, Wrench, Bike, Check, Tag, Box, TrendingUp, DollarSign, ShoppingBag, Puzzle, MapPin } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 
 const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCost }) => {
   const [variants, setVariants] = useState([]);
+  const [fasteners, setFasteners] = useState([]);
+  const [bundles, setBundles] = useState([]);
   const [selectedImg, setSelectedImg] = useState(null);
 
   // อัปเดตข้อมูลเมื่อเปลี่ยนสินค้า
@@ -11,15 +13,26 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
     if (product) {
       setSelectedImg(product.images?.[0] || null);
       
-      if (product.has_variants) {
-        const fetchVariants = async () => {
+      const fetchData = async () => {
+        // 1. Fetch Variants
+        if (product.has_variants) {
           const { data } = await supabase.from('product_variants').select('*').eq('product_id', product.id).order('sell_price');
           if (data) setVariants(data);
-        };
-        fetchVariants();
-      } else {
-        setVariants([]);
-      }
+        } else {
+          setVariants([]);
+        }
+
+        // 2. Fetch Fasteners (ข้อมูลน็อต)
+        const { data: fData } = await supabase.from('product_fasteners').select('*').eq('product_id', product.id);
+        if (fData) setFasteners(fData);
+
+        // 3. Fetch Bundles (ข้อมูลส่วนประกอบ)
+        // FIX: เพิ่ม cost_price ในการ select เพื่อเอามาคำนวณต้นทุนรวม
+        const { data: bData } = await supabase.from('product_bundles').select('*, product:child_product_id(name, sku, cost_price)').eq('parent_product_id', product.id);
+        if (bData) setBundles(bData);
+      };
+      
+      fetchData();
     }
   }, [product]);
 
@@ -37,6 +50,13 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
   const costPrice = product.cost_price || 0;
   const profit = sellPrice - costPrice;
   const { soldCount, timesOrdered, totalSalesVal, totalProfitVal } = product.stats || { soldCount: 0, timesOrdered: 0, totalSalesVal: 0, totalProfitVal: 0 };
+  
+  // ตรวจสอบว่ามีข้อมูลหรือไม่
+  const hasBundlesData = bundles.length > 0 || product.hasBundles;
+  const hasFastenersData = fasteners.length > 0 || product.hasFasteners;
+
+  // คำนวณต้นทุนรวมของ Bundle
+  const totalBundleCost = bundles.reduce((sum, b) => sum + ((b.product?.cost_price || 0) * (b.quantity || 1)), 0);
 
   return (
     <div className="space-y-8 pb-10">
@@ -67,7 +87,7 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        {/* Left: Images */}
+        {/* Left: Images (Sticky on Desktop) */}
         <div className="lg:col-span-5 space-y-4">
           <div className="sticky top-24 space-y-4">
             <div className="aspect-square bg-gray-50 rounded-3xl overflow-hidden border border-gray-100 relative shadow-sm group">
@@ -141,6 +161,18 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
               <span className="text-xs font-medium text-gray-500 bg-gray-100 px-2 py-1 rounded-md font-mono flex items-center gap-1">
                 <Tag size={12}/> {product.sku}
               </span>
+              
+              {/* Feature Badges (แสดงเมื่อมีข้อมูล) */}
+              {hasBundlesData && (
+                <span className="text-xs font-bold text-purple-600 bg-purple-50 border border-purple-100 px-2 py-1 rounded-md flex items-center gap-1">
+                   <Puzzle size={12}/> มีส่วนประกอบ (Bundles)
+                </span>
+              )}
+              {hasFastenersData && (
+                <span className="text-xs font-bold text-orange-600 bg-orange-50 border border-orange-100 px-2 py-1 rounded-md flex items-center gap-1">
+                   <Wrench size={12}/> มีข้อมูลน็อต (Fasteners)
+                </span>
+              )}
             </div>
             <h1 className="text-3xl sm:text-4xl font-extrabold text-gray-900 tracking-tight leading-tight">{product.name}</h1>
           </div>
@@ -168,6 +200,95 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
                 <Layers size={24} className="text-indigo-500"/>
                 <span className="text-lg font-medium">สินค้านี้มี <span className="text-indigo-600 font-bold">{variants.length}</span> ตัวเลือก</span>
               </div>
+            )}
+          </div>
+
+          {/* Bundles Detail */}
+          {hasBundlesData && (
+            <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
+                <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2 uppercase tracking-wider">
+                    <Puzzle size={16} className="text-purple-500" /> ส่วนประกอบ (Parts Bundle)
+                    </h3>
+                    {showCost && (
+                        <div className="text-xs bg-amber-50 text-amber-700 px-3 py-1 rounded-lg border border-amber-100">
+                            รวมต้นทุนอะไหล่: <b>฿{totalBundleCost.toLocaleString()}</b>
+                        </div>
+                    )}
+                </div>
+                <div className="space-y-2">
+                    {bundles.map((b, i) => (
+                        <div key={i} className="flex justify-between items-center bg-gray-50 p-3 rounded-xl border border-gray-100">
+                            <div className="flex items-center gap-3">
+                                <Package size={16} className="text-gray-400"/>
+                                <div>
+                                    <p className="text-sm font-bold text-gray-800">{b.product?.name}</p>
+                                    <p className="text-xs text-gray-500">{b.product?.sku}</p>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-3">
+                                {showCost && (
+                                    <div className="text-right mr-2 hidden sm:block">
+                                        <p className="text-[10px] text-gray-400">ทุนต่อชิ้น</p>
+                                        <p className="text-xs font-bold text-amber-600">฿{b.product?.cost_price?.toLocaleString()}</p>
+                                    </div>
+                                )}
+                                <span className="text-xs font-bold bg-white px-2 py-1 rounded border border-gray-200">x{b.quantity}</span>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </div>
+          )}
+
+          {/* Fasteners Detail */}
+          {hasFastenersData && (
+             <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
+                <h3 className="text-sm font-bold text-gray-900 mb-4 flex items-center gap-2 uppercase tracking-wider">
+                  <Wrench size={16} className="text-orange-500" /> สเปคน็อต (Fasteners)
+                </h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {fasteners.map((loc, i) => (
+                        <div key={i} className="bg-gray-50 rounded-xl p-3 border border-gray-100">
+                            <div className="flex items-center gap-2 mb-2 pb-2 border-b border-gray-200">
+                                <MapPin size={14} className="text-orange-400"/>
+                                <span className="text-sm font-bold text-gray-700">{loc.location_name}</span>
+                            </div>
+                            <div className="space-y-1">
+                                {loc.bolts_usage?.map((bolt, idx) => (
+                                    <div key={idx} className="flex justify-between text-xs text-gray-600">
+                                        <span>• {bolt.name}</span>
+                                        <span className="font-medium">x{bolt.qty}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    ))}
+                </div>
+             </div>
+          )}
+
+          {/* Compatibility Section */}
+          <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
+            <h3 className="text-sm font-bold text-gray-900 mb-4 flex items-center gap-2 uppercase tracking-wider">
+              <Bike size={16} className="text-indigo-500" /> รุ่นที่รองรับ (Compatibility)
+            </h3>
+
+            {product.compatibility_mode === 'universal' ? (
+              <div className="flex items-center gap-3 text-emerald-700 bg-emerald-50/50 px-4 py-3 rounded-xl border border-emerald-100">
+                <div className="bg-emerald-100 p-2 rounded-full"><Check size={16} /></div>
+                <span className="font-semibold">Universal Part - ติดตั้งได้กับรถทุกรุ่น</span>
+              </div>
+            ) : product.compatible_models && product.compatible_models.length > 0 ? (
+              <div className="flex flex-wrap gap-2">
+                {product.compatible_models.map((model, idx) => (
+                  <span key={idx} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-gray-200 text-gray-700 text-sm font-medium shadow-sm hover:border-indigo-300 hover:text-indigo-600 transition-colors cursor-default">
+                    <Bike size={14} className="text-gray-400" /> {model}
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-gray-400 italic">ไม่ได้ระบุรุ่นที่รองรับ</p>
             )}
           </div>
 
@@ -215,29 +336,7 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
             </div>
           )}
 
-          {/* Compatibility & Desc */}
-          <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
-            <h3 className="text-sm font-bold text-gray-900 mb-4 flex items-center gap-2 uppercase tracking-wider">
-              <Wrench size={16} className="text-indigo-500" /> รุ่นที่รองรับ (Compatibility)
-            </h3>
-            {product.compatibility_mode === 'universal' ? (
-              <div className="flex items-center gap-3 text-emerald-700 bg-emerald-50/50 px-4 py-3 rounded-xl border border-emerald-100">
-                <div className="bg-emerald-100 p-2 rounded-full"><Check size={16} /></div>
-                <span className="font-semibold">Universal Part - ติดตั้งได้กับรถทุกรุ่น</span>
-              </div>
-            ) : product.compatible_models && product.compatible_models.length > 0 ? (
-              <div className="flex flex-wrap gap-2">
-                {product.compatible_models.map((model, idx) => (
-                  <span key={idx} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-gray-200 text-gray-700 text-sm font-medium shadow-sm hover:border-indigo-300 hover:text-indigo-600 transition-colors cursor-default">
-                    <Bike size={14} className="text-gray-400" /> {model}
-                  </span>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-gray-400 italic">ไม่ได้ระบุรุ่นที่รองรับ</p>
-            )}
-          </div>
-
+          {/* Description */}
           <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
             <h3 className="font-bold text-gray-900 mb-4 text-lg border-b border-gray-100 pb-2">รายละเอียดสินค้า</h3>
             <div className="prose prose-sm sm:prose-base text-gray-600 max-w-none whitespace-pre-line leading-relaxed">

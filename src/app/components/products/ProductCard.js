@@ -1,8 +1,7 @@
 import React from 'react';
-import { Package, Layers, Check, Bike, TrendingUp } from 'lucide-react';
+import { Package, Layers, Check, Bike, TrendingUp, Puzzle, Wrench } from 'lucide-react';
 
 const ProductCard = ({ product, showCost, onClick }) => {
-  // Logic หาช่วงราคา
   let priceDisplay = `฿${product.sell_price.toLocaleString()}`;
   if (product.has_variants && product.product_variants && product.product_variants.length > 0) {
     const prices = product.product_variants.map(v => v.sell_price);
@@ -13,8 +12,17 @@ const ProductCard = ({ product, showCost, onClick }) => {
       : `฿${minPrice.toLocaleString()} - ${maxPrice.toLocaleString()}`;
   }
 
-  // Stats
   const { soldCount, totalSalesVal, totalProfitVal } = product.stats || { soldCount: 0, totalSalesVal: 0, totalProfitVal: 0 };
+  const categoryName = product.categories?.name || 'Uncategorized';
+
+  const getCategoryColor = (cat) => {
+      if (!cat) return 'bg-gray-100 text-gray-600';
+      const name = cat.toLowerCase();
+      if (name.includes('scoot')) return 'bg-blue-100 text-blue-700 border-blue-200';
+      if (name.includes('part') || name.includes('อะไหล่')) return 'bg-orange-100 text-orange-700 border-orange-200';
+      if (name.includes('access')) return 'bg-purple-100 text-purple-700 border-purple-200';
+      return 'bg-gray-100 text-gray-600 border-gray-200';
+  };
 
   return (
     <div onClick={onClick} className="bg-white rounded-2xl p-3 shadow-[0_2px_8px_rgba(0,0,0,0.04)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.08)] hover:-translate-y-1 transition-all duration-300 cursor-pointer group border border-gray-100 flex flex-col h-full">
@@ -25,22 +33,35 @@ const ProductCard = ({ product, showCost, onClick }) => {
           <div className="w-full h-full flex items-center justify-center text-gray-300"><Package size={40} /></div>
         )}
         
-        <div className="absolute top-2 left-2 flex gap-1">
+        <div className="absolute top-2 left-2 flex flex-col gap-1">
            {product.has_variants && (
             <span className="bg-white/90 backdrop-blur-md text-purple-600 px-2 py-1 rounded-lg text-[10px] font-bold shadow-sm flex items-center gap-1 border border-purple-100">
               <Layers size={10}/> สเปค
+            </span>
+          )}
+          {/* FIX: เพิ่มไอคอนในการ์ด */}
+          {product.hasBundles && (
+            <span className="bg-white/90 backdrop-blur-md text-indigo-600 px-2 py-1 rounded-lg text-[10px] font-bold shadow-sm flex items-center gap-1 border border-indigo-100">
+              <Puzzle size={10}/> อะไหล่
+            </span>
+          )}
+          {product.hasFasteners && (
+            <span className="bg-white/90 backdrop-blur-md text-amber-600 px-2 py-1 rounded-lg text-[10px] font-bold shadow-sm flex items-center gap-1 border border-amber-100">
+              <Wrench size={10}/> น็อต
             </span>
           )}
         </div>
       </div>
 
       <div className="px-1 flex-1 flex flex-col">
-        <h3 className="font-bold text-gray-800 line-clamp-2 mb-1 group-hover:text-indigo-600 transition-colors h-[2.5em] leading-tight">{product.name}</h3>
+        <h3 className="font-bold text-gray-800 line-clamp-2 mb-1 group-hover:text-orange-600 transition-colors h-[2.5em] leading-tight">{product.name}</h3>
         
         <div className="flex items-center gap-2 mb-3">
-          <span className="text-xs text-gray-400 bg-gray-50 px-1.5 py-0.5 rounded">{product.categories?.name || 'Uncategorized'}</span>
-          <span className="text-[10px] text-gray-400 flex items-center gap-1">
-             <TrendingUp size={10} /> ขายแล้ว {soldCount}
+          <span className={`text-[10px] px-2 py-0.5 rounded font-bold border ${getCategoryColor(categoryName)}`}>
+             {categoryName}
+          </span>
+          <span className="text-[10px] text-gray-400 flex items-center gap-1 ml-auto">
+             <TrendingUp size={10} /> {soldCount}
           </span>
         </div>
         
