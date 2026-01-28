@@ -48,7 +48,7 @@ const ServiceBillPreview = ({ service, onClose }) => {
                     <p className="text-[11px] text-gray-600 leading-snug">
                       97 หมู่ 1 ซอยรังสิต-นครนายก 64 ต.ประชาธิปัตย์<br/>
                       อ.ธัญบุรี จ.ปทุมธานี 12130<br/>
-                      โทร: 093-121-5740 &nbsp;|&nbsp; เลขประจำตัวผู้เสียภาษี: 0105551234567
+                      โทร: 093-121-5740
                     </p>
                  </div>
                  <div className="w-1/3 text-right">
@@ -69,6 +69,9 @@ const ServiceBillPreview = ({ service, onClose }) => {
                         <p className="text-sm font-bold">{service.customer_cache?.first_name} {service.customer_cache?.last_name}</p>
                         <p className="text-gray-600">{service.customer_cache?.address_raw || '-'}</p>
                         <p className="text-gray-600"><span className="font-semibold text-gray-800">โทร:</span> {service.customer_cache?.phone}</p>
+                        {service.show_tax_id && service.customer_cache?.tax_id && (
+                           <p className="text-gray-600"><span className="font-semibold text-gray-800">Tax ID:</span> {service.customer_cache?.tax_id}</p>
+                        )}
                     </div>
                  </div>
                  <div className="w-[40%] border border-gray-300 p-3 rounded-lg bg-gray-50/50">
@@ -144,16 +147,8 @@ const ServiceBillPreview = ({ service, onClose }) => {
 
               {/* Signature */}
               <div className="flex justify-between items-end mt-8 pt-6 border-t border-gray-200">
-                 <div className="text-center w-1/3">
-                    <div className="border-b border-dotted border-gray-400 mb-2 h-8"></div>
-                    <p className="text-[10px] font-bold text-gray-600">ลงชื่อลูกค้ารับรถ / Customer</p>
-                    <p className="text-[10px] text-gray-400">วันที่ ______/______/______</p>
-                 </div>
-                 <div className="text-center w-1/3">
-                    <div className="border-b border-dotted border-gray-400 mb-2 h-8"></div>
-                    <p className="text-[10px] font-bold text-gray-600">ลงชื่อผู้ส่งมอบ / Staff</p>
-                    <p className="text-[10px] text-gray-400">วันที่ ______/______/______</p>
-                 </div>
+                 <div className="text-center w-1/3"><div className="border-b border-black mb-2 h-8"></div><p className="text-xs">ลายเซ็นลูกค้า / Customer Signature</p></div>
+                 <div className="text-center w-1/3"><div className="border-b border-black mb-2 h-8"></div><p className="text-xs">ผู้รับรถ / Receiver Signature</p></div>
               </div>
            </div>
         </div>
