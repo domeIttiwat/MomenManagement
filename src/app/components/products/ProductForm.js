@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Save, Loader2, Info, Wrench, Layers } from 'lucide-react';
+import { ArrowLeft, Save, Loader2, Info, Wrench, Package, Layers } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import ImageUploader from './ImageUploader';
 import CategoryManager from './CategoryManager';
@@ -107,14 +107,13 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
   }, [isSparePart, activeTab]);
 
   const handleSubmit = async (e) => {
-    // FIX: หยุดการส่ง event ไปยังฟอร์มแม่ (ป้องกันหน้าหลักเด้งออก)
     e.stopPropagation();
     e.preventDefault();
-    
     if (formData.category_ids.length === 0) return alert('กรุณาเลือกหมวดสินค้าอย่างน้อย 1 หมวด');
 
     setLoading(true);
     try {
+      // 1. Upload Images
       const uploadedImageUrls = await Promise.all(formData.images.map(async (imgObj) => {
         if (imgObj.file) {
           const fileName = `${Date.now()}-${Math.random()}`;
@@ -133,7 +132,7 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
         images: uploadedImageUrls,
         cost_price: formData.has_variants ? 0 : formData.cost_price,
         sell_price: formData.has_variants ? 0 : formData.sell_price,
-        // stock_quantity: formData.has_variants ? 0 : formData.stock_quantity, // ตัดออกตาม Error ที่แจ้ง
+        // stock_quantity: formData.has_variants ? 0 : formData.stock_quantity, // ตัดออกถาวร
         has_variants: formData.has_variants,
       };
 
@@ -170,7 +169,7 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
             options: v.options,
             cost_price: Number(v.cost_price), 
             sell_price: Number(v.sell_price),
-            // stock_quantity: Number(v.stock_quantity) // ตัดออกเช่นกัน
+            // stock_quantity: Number(v.stock_quantity) // ตัดออก
           })));
         }
       }
@@ -181,7 +180,8 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
             await supabase.from('product_bundles').insert(bundles.map(b => ({
                 parent_product_id: productId,
                 child_product_id: b.child_product_id,
-                quantity: b.quantity
+                quantity: b.quantity,
+                parent_variant_id: b.parent_variant_id
             })));
         }
       }
@@ -196,7 +196,7 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
         })));
       }
 
-      onSuccess(resultData); // ส่งข้อมูลกลับไป (เผื่อใช้)
+      onSuccess(resultData);
     } catch (err) {
       alert('Error: ' + err.message);
     } finally { setLoading(false); }
@@ -219,7 +219,6 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         
-        {/* Sidebar Tabs */}
         <div className="space-y-6">
            <div className="bg-white p-4 rounded-3xl shadow-sm border border-gray-100">
               <div className="space-y-2">
@@ -245,7 +244,6 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
            </div>
         </div>
 
-        {/* Main Content */}
         <div className="lg:col-span-2 space-y-6">
            
            {activeTab === 'info' && (
@@ -282,10 +280,9 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
                   {formData.has_variants ? (
                     <VariantManager variants={variants} onChange={setVariants} mainSku={formData.sku} />
                   ) : (
-                    <div className="grid grid-cols-3 gap-5">
+                    <div className="grid grid-cols-2 gap-5">
                       <div><label className={labelClass}>ราคาทุน</label><NumericInput className={inputClass} value={formData.cost_price} onChange={v => setFormData({...formData, cost_price: v})} placeholder="0" /></div>
                       <div><label className={labelClass}>ราคาขาย</label><NumericInput className={`${inputClass} text-indigo-600 font-bold`} value={formData.sell_price} onChange={v => setFormData({...formData, sell_price: v})} placeholder="0" /></div>
-                      <div><label className={labelClass}>สต็อก</label><NumericInput className={inputClass} value={formData.stock_quantity} onChange={v => setFormData({...formData, stock_quantity: v})} placeholder="0" /></div>
                     </div>
                   )}
                </div>
@@ -298,7 +295,7 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
                   <h3 className="font-bold text-gray-800 text-lg">ส่วนประกอบสินค้า (Bundles / BOM)</h3>
                   <p className="text-gray-400 text-sm mt-1">เลือกอะไหล่หรือสินค้าลูกที่ใช้ประกอบเป็นสินค้านี้</p>
                 </div>
-                <ProductBundleSelector bundles={bundles} onChange={setBundles} />
+                <ProductBundleSelector bundles={bundles} onChange={setBundles} variants={variants} />
              </div>
            )}
 
@@ -308,7 +305,7 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
                   <h3 className="font-bold text-gray-800 text-lg">จุดยึดและน็อตประกอบ (Fasteners Mapping)</h3>
                   <p className="text-gray-400 text-sm mt-1">ระบุตำแหน่งและสเปคน็อตที่ใช้สำหรับสินค้านี้</p>
                 </div>
-                <ProductFastenerSelector locations={fasteners} onChange={setFasteners} />
+                <ProductFastenerSelector locations={fasteners} onChange={setFasteners} variants={variants} />
              </div>
            )}
 

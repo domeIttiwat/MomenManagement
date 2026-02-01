@@ -3,7 +3,7 @@ import { Plus, Trash2, Camera, Search, X, Settings } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import ImageUploader from '../orders/ImageUploader';
 
-const ProductFastenerSelector = ({ locations = [], onChange }) => {
+const ProductFastenerSelector = ({ locations = [], onChange, variants = [] }) => {
   const [bolts, setBolts] = useState([]);
   const [boltSearch, setBoltSearch] = useState('');
   const [isAddingBolt, setIsAddingBolt] = useState({ locIndex: -1, isOpen: false });
@@ -39,16 +39,23 @@ const ProductFastenerSelector = ({ locations = [], onChange }) => {
     const newLocs = [...locations];
     const currentBolts = newLocs[locIndex].bolts_usage || [];
     
-    if (!currentBolts.some(b => b.bolt_id === bolt.id)) {
+    // ปรับ Logic เช็คซ้ำ: ยอมให้เพิ่มได้ถ้ายังไม่มีรายการที่เป็น Common (null variant) สำหรับน็อตตัวนี้
+    // (เพราะค่าเริ่มต้นตอนเพิ่มจะเป็น Common เสมอ)
+    const hasCommonEntry = currentBolts.some(b => b.bolt_id === bolt.id && !b.parent_variant_id);
+
+    if (!hasCommonEntry) {
       newLocs[locIndex].bolts_usage = [...currentBolts, { 
         bolt_id: bolt.id, 
         name: bolt.name, 
         qty: 1, 
         price: bolt.sell_price,
         head_type: bolt.head_type,
-        material: bolt.material
+        material: bolt.material,
+        parent_variant_id: null // เริ่มต้นเป็นใช้ร่วมกันทุกรุ่น
       }];
       onChange(newLocs);
+    } else {
+        alert('มีรายการน็อตนี้ที่เป็นแบบใช้ร่วมกันทุกรุ่นอยู่แล้ว หากต้องการระบุเฉพาะรุ่น ให้เปลี่ยนรายการเดิมเป็นรุ่นย่อยก่อน');
     }
     setIsAddingBolt({ locIndex: -1, isOpen: false });
   };
@@ -59,9 +66,11 @@ const ProductFastenerSelector = ({ locations = [], onChange }) => {
     onChange(newLocs);
   };
 
-  const updateBoltQty = (locIndex, boltIdx, qty) => {
+  // ฟังก์ชันอัปเดตข้อมูลน็อต (รวมถึง Variant)
+  const updateBoltUsage = (locIndex, boltIdx, field, val) => {
     const newLocs = [...locations];
-    newLocs[locIndex].bolts_usage[boltIdx].qty = parseInt(qty) || 1;
+    if (field === 'qty') val = parseInt(val) || 1;
+    newLocs[locIndex].bolts_usage[boltIdx][field] = val;
     onChange(newLocs);
   };
 
@@ -89,7 +98,6 @@ const ProductFastenerSelector = ({ locations = [], onChange }) => {
                            <button type="button" onClick={() => updateLocation(i, 'location_image', null)} className="absolute top-1 right-1 bg-black/50 text-white rounded-full p-1"><X size={14}/></button>
                         </div>
                     ) : (
-                        // ปรับให้ ImageUploader ส่งค่ากลับมาเป็น String URL เดียว
                         <div className="p-2 w-full">
                            <ImageUploader images={[]} onChange={(imgs) => updateLocation(i, 'location_image', imgs[0]?.url)} />
                            <div className="text-center text-xs text-gray-400 mt-2 pointer-events-none">รูปจุดติดตั้ง</div>
@@ -106,22 +114,37 @@ const ProductFastenerSelector = ({ locations = [], onChange }) => {
                  
                  <div className="space-y-2 flex-1">
                     {loc.bolts_usage?.map((b, bIdx) => (
-                       <div key={bIdx} className="flex justify-between items-center bg-white p-3 rounded-lg border border-gray-200 shadow-sm text-sm">
-                          <div className="flex flex-col flex-1">
-                             <span className="font-bold text-gray-800">{b.name}</span>
+                       <div key={bIdx} className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-white p-3 rounded-lg border border-gray-200 shadow-sm text-sm gap-2">
+                          <div className="flex flex-col flex-1 min-w-0 w-full">
+                             <span className="font-bold text-gray-800 truncate">{b.name}</span>
                              <span className="text-[10px] text-gray-500">{b.material} | {b.head_type}</span>
                           </div>
-                          <div className="flex items-center gap-3">
-                             <div className="flex items-center gap-1 bg-gray-100 rounded px-2 py-1">
+                          
+                          <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-end">
+                             {/* Variant Selector */}
+                             {variants.length > 0 && (
+                                <select 
+                                    className={`text-[10px] border rounded px-2 py-1 outline-none font-medium max-w-[100px] ${b.parent_variant_id ? 'bg-purple-50 text-purple-700 border-purple-200' : 'bg-green-50 text-green-700 border-green-200'}`}
+                                    value={b.parent_variant_id || ''}
+                                    onChange={(e) => updateBoltUsage(i, bIdx, 'parent_variant_id', e.target.value || null)}
+                                >
+                                    <option value="">ทุกรุ่น (Common)</option>
+                                    {variants.map(v => (
+                                        <option key={v.id} value={v.id}>เฉพาะ: {v.name}</option>
+                                    ))}
+                                </select>
+                             )}
+
+                             <div className="flex items-center gap-1 bg-gray-100 rounded px-2 py-1 shrink-0">
                                 <input 
                                     type="number" min="1" 
                                     className="w-8 text-center bg-transparent font-bold outline-none text-gray-700" 
                                     value={b.qty} 
-                                    onChange={e => updateBoltQty(i, bIdx, e.target.value)}
+                                    onChange={e => updateBoltUsage(i, bIdx, 'qty', e.target.value)}
                                 />
                                 <span className="text-[10px] text-gray-400">ตัว</span>
                              </div>
-                             <button type="button" onClick={() => removeBoltFromLocation(i, bIdx)} className="text-red-400 hover:text-red-600"><Trash2 size={16}/></button>
+                             <button type="button" onClick={() => removeBoltFromLocation(i, bIdx)} className="text-red-400 hover:text-red-600 ml-1"><Trash2 size={16}/></button>
                           </div>
                        </div>
                     ))}
