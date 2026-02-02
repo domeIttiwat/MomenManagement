@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowLeft, Edit, Trash2, MapPin, Phone, MessageSquare, Facebook, Instagram, MessageCircle, X, ShoppingBag, TrendingUp, DollarSign, Eye, EyeOff, Package, ExternalLink } from 'lucide-react';
+import { ArrowLeft, Edit, Trash2, MapPin, Phone, MessageSquare, Facebook, Instagram, MessageCircle, X, ShoppingBag, TrendingUp, DollarSign, Eye, EyeOff, Package, ExternalLink, Map } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 
 const CustomerDetail = ({ customer, onBack, onEdit, onDelete, onViewOrder }) => {
@@ -124,14 +124,24 @@ const CustomerDetail = ({ customer, onBack, onEdit, onDelete, onViewOrder }) => 
           
           <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
             <h3 className="font-bold text-gray-800 mb-4 text-sm uppercase tracking-wide border-b pb-2 flex items-center gap-2"><MapPin size={18} className="text-indigo-500"/> ที่อยู่</h3>
-            <p className="text-sm text-gray-700 leading-relaxed mb-6">{customer.address_raw || 'ไม่ได้ระบุที่อยู่'}</p>
+            <p className="text-sm text-gray-700 leading-relaxed mb-4">{customer.address_raw || 'ไม่ได้ระบุที่อยู่'}</p>
+            
+            {/* Location Button */}
+            {customer.location_url && (
+                <a 
+                    href={customer.location_url} 
+                    target="_blank" 
+                    rel="noreferrer"
+                    className="flex items-center justify-center gap-2 w-full py-2.5 bg-blue-50 text-blue-700 rounded-xl border border-blue-100 hover:bg-blue-100 font-medium text-sm transition-all"
+                >
+                    <Map size={16}/> เปิดแผนที่ (Google Maps)
+                </a>
+            )}
             
             {customer.address_parsed && (
-              <div className="grid grid-cols-2 gap-3 text-xs">
+              <div className="grid grid-cols-2 gap-3 text-xs mt-4">
                 <div className="p-2 bg-gray-50 rounded-lg border border-gray-100"><p className="text-gray-400 mb-0.5">จังหวัด</p><p className="font-bold text-indigo-900">{customer.address_parsed.prov || '-'}</p></div>
                 <div className="p-2 bg-gray-50 rounded-lg border border-gray-100"><p className="text-gray-400 mb-0.5">อำเภอ/เขต</p><p className="font-bold text-indigo-900">{customer.address_parsed.dist || '-'}</p></div>
-                <div className="p-2 bg-gray-50 rounded-lg border border-gray-100"><p className="text-gray-400 mb-0.5">ตำบล/แขวง</p><p className="font-bold text-indigo-900">{customer.address_parsed.subdist || '-'}</p></div>
-                <div className="p-2 bg-gray-50 rounded-lg border border-gray-100"><p className="text-gray-400 mb-0.5">รหัสไปรษณีย์</p><p className="font-bold text-indigo-900">{customer.address_parsed.zip || '-'}</p></div>
               </div>
             )}
           </div>
@@ -195,7 +205,6 @@ const CustomerDetail = ({ customer, onBack, onEdit, onDelete, onViewOrder }) => 
                       const profit = (order.subtotal - order.discount) - cost;
                       
                       return (
-                        // เพิ่ม onClick เพื่อเรียก onViewOrder
                         <tr 
                           key={order.id} 
                           onClick={() => onViewOrder && onViewOrder(order)} 

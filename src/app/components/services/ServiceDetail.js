@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ArrowLeft, Edit, Trash2, Printer, Wrench, User, Calendar, Clock, DollarSign, CreditCard, Banknote, Landmark, X, History, FileText, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, Edit, Trash2, Printer, Wrench, User, Calendar, Clock, DollarSign, CreditCard, Banknote, Landmark, X, History, FileText, CheckCircle2, AlertCircle, Truck, PauseCircle, XCircle, PlayCircle } from 'lucide-react';
 import ServiceBillPreview from './ServiceBillPreview';
 
 const ServiceDetail = ({ service, onBack, onEdit, onDelete }) => {
@@ -8,7 +8,27 @@ const ServiceDetail = ({ service, onBack, onEdit, onDelete }) => {
 
   if (!service) return <div className="p-10 text-center text-gray-500">ไม่พบข้อมูลงานซ่อม</div>;
 
-  // --- Duration Logic ---
+  // --- Status Logic (Unified) ---
+  const getStatusDisplay = (status, reason) => {
+    switch (status) {
+      case 'Waiting':
+        if (reason === 'รอคิว') return { color: 'bg-orange-100 text-orange-700 border-orange-200', icon: PauseCircle, label: 'รอคิว' };
+        if (reason === 'รออะไหล่') return { color: 'bg-red-100 text-red-700 border-red-200', icon: AlertCircle, label: 'รออะไหล่' };
+        return { color: 'bg-yellow-100 text-yellow-800 border-yellow-200', icon: Clock, label: reason ? `รอ: ${reason}` : 'รอดำเนินการ' };
+      
+      case 'In Progress': return { color: 'bg-blue-100 text-blue-700 border-blue-200', icon: Wrench, label: 'กำลังซ่อม' };
+      case 'Tested': return { color: 'bg-purple-100 text-purple-700 border-purple-200', icon: PlayCircle, label: 'ทดสอบแล้ว' };
+      case 'Delivered': return { color: 'bg-teal-100 text-teal-700 border-teal-200', icon: Truck, label: 'ส่งมอบแล้ว' };
+      case 'Completed': return { color: 'bg-green-100 text-green-700 border-green-200', icon: CheckCircle2, label: 'เรียบร้อย' };
+      case 'Cancelled': return { color: 'bg-gray-100 text-gray-500 border-gray-200', icon: XCircle, label: 'ยกเลิก' };
+      default: return { color: 'bg-gray-50 text-gray-600 border-gray-200', icon: Clock, label: status };
+    }
+  };
+
+  const statusInfo = getStatusDisplay(service.status, service.waiting_reason);
+  // ------------------------------
+
+  // Duration Logic
   const getDurationInfo = () => {
     if (!service.received_date) return { text: '-', totalDays: 0, isFinished: false };
     const start = new Date(service.received_date);
@@ -30,21 +50,24 @@ const ServiceDetail = ({ service, onBack, onEdit, onDelete }) => {
   };
 
   const { text: durationText, totalDays, isFinished } = getDurationInfo();
-  
+
   const getDurationColorClass = (days, finished) => {
-    if (finished) return 'bg-gray-100 text-gray-600 border-gray-200';
+    if (finished) return 'bg-gray-100 text-gray-500 border-gray-200';
     if (days <= 7) return 'bg-green-100 text-green-700 border-green-200';
     if (days <= 30) return 'bg-blue-100 text-blue-700 border-blue-200';
     if (days <= 60) return 'bg-orange-100 text-orange-700 border-orange-200';
     return 'bg-red-100 text-red-700 border-red-200';
   };
 
+  // Payment Status Logic
   const getPaymentStatus = () => {
     const totalPaid = service.service_payments?.reduce((sum, p) => sum + Number(p.amount), 0) || 0;
     const grandTotal = service.grand_total || 0;
+
     if (grandTotal === 0 && totalPaid === 0) return { label: '-', color: 'bg-gray-100 text-gray-500' };
     if (totalPaid === 0) return { label: 'ยังไม่ได้ชำระ', color: 'bg-red-100 text-red-700 border-red-200' };
     if (totalPaid >= grandTotal) return { label: 'ชำระครบแล้ว', color: 'bg-green-100 text-green-700 border-green-200' };
+
     const isOnlyDeposit = service.service_payments?.length > 0 && service.service_payments.every(p => p.type === 'deposit');
     if (isOnlyDeposit) return { label: 'มัดจำแล้ว', color: 'bg-amber-100 text-amber-700 border-amber-200' };
     return { label: 'ชำระยังไม่ครบ', color: 'bg-orange-100 text-orange-700 border-orange-200' };
@@ -77,6 +100,7 @@ const ServiceDetail = ({ service, onBack, onEdit, onDelete }) => {
         </div>
       )}
 
+      {/* Navbar */}
       <div className="flex justify-between items-center bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
         <button onClick={onBack} className="flex items-center gap-2 text-gray-600 hover:text-gray-900 font-medium px-2 py-1 rounded-lg hover:bg-gray-50 transition-colors">
           <ArrowLeft size={20}/> กลับหน้ารายการ
@@ -91,7 +115,6 @@ const ServiceDetail = ({ service, onBack, onEdit, onDelete }) => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
            <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100">
-              {/* Header Info (Same as before) */}
               <div className="flex justify-between items-start mb-6">
                  <div>
                     <span className="text-xs font-bold text-gray-400 uppercase tracking-wider bg-gray-50 px-2 py-1 rounded">Job No.</span>
@@ -109,13 +132,18 @@ const ServiceDetail = ({ service, onBack, onEdit, onDelete }) => {
                     </div>
                  </div>
                  <div className="flex flex-col items-end gap-2">
-                    <span className="px-4 py-2 bg-blue-50 text-blue-700 rounded-lg font-bold text-sm border border-blue-100 shadow-sm">{service.status}</span>
+                    <span className={`px-4 py-2 rounded-lg font-bold text-sm border shadow-sm flex items-center gap-2 ${statusInfo.color}`}>
+                       <statusInfo.icon size={16}/> {statusInfo.label}
+                    </span>
                     <span className={`px-3 py-1 rounded-lg text-xs font-bold border ${payStatus.color} flex items-center gap-1`}>
                        <DollarSign size={12}/> {payStatus.label}
                     </span>
                  </div>
               </div>
 
+              {/* ... (ส่วนอื่นๆ ของ Detail เหมือนเดิม) ... */}
+              {/* เพื่อความกระชับ ผมละโค้ดส่วนแสดงลูกค้าและรายการซ่อมไว้ (ให้ใช้ของเดิมได้เลย) 
+                  แต่ถ้าคุณต้องการให้ผมพิมพ์ซ้ำทั้งหมด บอกได้ครับ */}
               <div className="p-4 bg-gray-50 rounded-xl border border-gray-100 mb-6 flex items-center gap-4">
                  <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center text-gray-400 shadow-sm border border-gray-200"><User size={24}/></div>
                  <div>
@@ -151,9 +179,8 @@ const ServiceDetail = ({ service, onBack, onEdit, onDelete }) => {
                     </div>
                   ))}
               </div>
-              
-              {/* Totals */}
-              <div className="flex justify-end border-t border-gray-100 pt-4">
+
+              <div className="flex justify-end border-t border-gray-100 pt-4 mt-6">
                  <div className="w-1/2 text-right space-y-2 text-sm">
                     <div className="flex justify-between"><span>รวมค่าบริการ</span><span>{service.subtotal.toLocaleString()}</span></div>
                     {service.shipping_cost > 0 && <div className="flex justify-between"><span>ค่าขนส่ง</span><span>{service.shipping_cost.toLocaleString()}</span></div>}
@@ -162,35 +189,36 @@ const ServiceDetail = ({ service, onBack, onEdit, onDelete }) => {
                  </div>
               </div>
            </div>
-
-           {/* Updates Timeline (New Section) */}
-           <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
-              <h3 className="font-bold text-gray-800 mb-6 flex items-center gap-2"><History size={18} className="text-indigo-500"/> ความคืบหน้างานซ่อม (Timeline)</h3>
-              <div className="relative pl-4 border-l-2 border-indigo-100 ml-2 space-y-6">
-                {service.service_updates?.length > 0 ? service.service_updates.map((update, i) => (
+           
+           {/* Timeline & Updates */}
+           {service.service_updates && service.service_updates.length > 0 && (
+            <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+                <h3 className="font-bold text-gray-800 mb-6 flex items-center gap-2"><History size={18} className="text-indigo-500"/> ความคืบหน้างาน (Timeline)</h3>
+                <div className="relative pl-4 border-l-2 border-indigo-100 ml-2 space-y-6">
+                {service.service_updates.map((update, i) => (
                     <div key={i} className="relative">
-                       <div className="absolute -left-[23px] top-1 w-3 h-3 bg-indigo-500 rounded-full border-2 border-white shadow-sm"></div>
-                       <div className="text-xs text-gray-400 mb-1 flex items-center gap-2">
-                          <Calendar size={12}/> {new Date(update.update_date).toLocaleDateString('th-TH')}
-                       </div>
-                       <div className="bg-gray-50 rounded-xl p-3 border border-gray-100">
-                          <p className="text-sm text-gray-800 whitespace-pre-line mb-2">{update.description}</p>
-                          {update.images?.length > 0 && (
+                        <div className="absolute -left-[23px] top-1 w-3 h-3 bg-indigo-500 rounded-full border-2 border-white shadow-sm"></div>
+                        <div className="text-xs text-gray-400 mb-1 flex items-center gap-2">
+                            <Calendar size={12}/> {new Date(update.update_date).toLocaleDateString('th-TH')}
+                        </div>
+                        <div className="bg-gray-50 rounded-xl p-3 border border-gray-100">
+                            <p className="text-sm text-gray-800 whitespace-pre-line mb-2">{update.description}</p>
+                            {update.images?.length > 0 && (
                             <div className="flex gap-2 overflow-x-auto pb-1">
-                               {update.images.map((img, imgIdx) => (
-                                 <img key={imgIdx} src={img} className="w-16 h-16 rounded-lg object-cover cursor-pointer hover:opacity-80" onClick={() => setLightboxImg(img)} />
-                               ))}
+                                {update.images.map((img, imgIdx) => (
+                                    <img key={imgIdx} src={img} className="w-16 h-16 rounded-lg object-cover cursor-pointer hover:opacity-80" onClick={() => setLightboxImg(img)} />
+                                ))}
                             </div>
-                          )}
-                       </div>
+                            )}
+                        </div>
                     </div>
-                )) : (
-                    <p className="text-sm text-gray-400 italic">ยังไม่มีการอัปเดตความคืบหน้า</p>
-                )}
-              </div>
-           </div>
+                ))}
+                </div>
+            </div>
+          )}
         </div>
 
+        {/* Right Column */}
         <div className="space-y-6">
            <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
               <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><CreditCard size={18} className="text-indigo-500"/> ประวัติการชำระเงิน</h3>
@@ -239,13 +267,13 @@ const ServiceDetail = ({ service, onBack, onEdit, onDelete }) => {
                       <User size={14} className="text-indigo-400"/> {a.user?.first_name} <span className="text-xs text-gray-400">({a.job_role})</span>
                    </div>
                  ))}
-                 {(!service.service_assignees || service.service_assignees.length === 0) && <p className="text-gray-400 text-sm text-center">-</p>}
+                 {(!service.service_assignees || service.service_assignees.length === 0) && <p className="text-gray-400 text-sm text-center">ไม่ได้ระบุผู้รับผิดชอบ</p>}
               </div>
            </div>
 
            {service.images?.length > 0 && (
               <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
-                 <h3 className="font-bold text-gray-800 mb-4">รูปภาพรถ</h3>
+                 <h3 className="font-bold text-gray-800 mb-4">รูปภาพ</h3>
                  <div className="grid grid-cols-2 gap-2">
                     {service.images.map((img, i) => (
                        <div key={i} className="cursor-zoom-in hover:opacity-90 transition-opacity" onClick={() => setLightboxImg(img)}>

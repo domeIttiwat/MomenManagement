@@ -1,54 +1,39 @@
 import React from 'react';
-import { Wrench, Calendar, User, Clock, CheckCircle2, AlertCircle, Truck, Wallet } from 'lucide-react';
+import { Wrench, Calendar, User, Clock, CheckCircle2, AlertCircle, Truck, Wallet, PauseCircle, XCircle, PlayCircle } from 'lucide-react';
 
 const ServiceCard = ({ service, onClick }) => {
-  const statusColors = {
-    Received: 'bg-gray-100 text-gray-600 border-gray-200',
-    Checking: 'bg-yellow-50 text-yellow-700 border-yellow-200',
-    Quoted: 'bg-purple-50 text-purple-700 border-purple-200',
-    'In Progress': 'bg-blue-50 text-blue-700 border-blue-200',
-    Done: 'bg-indigo-50 text-indigo-700 border-indigo-200',
-    Tested: 'bg-orange-50 text-orange-700 border-orange-200',
-    Completed: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-    Delivered: 'bg-teal-50 text-teal-700 border-teal-200',
-    Cancelled: 'bg-red-50 text-red-700 border-red-200'
-  };
-
-  const getStatusIcon = (status) => {
+  
+  // Logic การแสดงผลสถานะ (Unified Status Logic)
+  const getStatusDisplay = (status, reason) => {
     switch (status) {
-      case 'Completed': return <CheckCircle2 size={12} />;
-      case 'In Progress': return <Wrench size={12} />;
-      case 'Done': return <Wrench size={12} />;
-      default: return <Clock size={12} />;
+      case 'Waiting':
+        if (reason === 'รอคิว') return { color: 'bg-orange-100 text-orange-700 border-orange-200', icon: PauseCircle, label: 'รอคิว' };
+        if (reason === 'รออะไหล่') return { color: 'bg-red-100 text-red-700 border-red-200', icon: AlertCircle, label: 'รออะไหล่' };
+        return { color: 'bg-yellow-100 text-yellow-800 border-yellow-200', icon: Clock, label: reason ? `รอ: ${reason}` : 'รอดำเนินการ' };
+      
+      case 'In Progress': return { color: 'bg-blue-100 text-blue-700 border-blue-200', icon: Wrench, label: 'กำลังซ่อม' };
+      case 'Tested': return { color: 'bg-purple-100 text-purple-700 border-purple-200', icon: PlayCircle, label: 'ทดสอบแล้ว' };
+      case 'Delivered': return { color: 'bg-teal-100 text-teal-700 border-teal-200', icon: Truck, label: 'ส่งมอบแล้ว' };
+      case 'Completed': return { color: 'bg-green-100 text-green-700 border-green-200', icon: CheckCircle2, label: 'เรียบร้อย' };
+      case 'Cancelled': return { color: 'bg-gray-100 text-gray-500 border-gray-200', icon: XCircle, label: 'ยกเลิก' };
+      default: return { color: 'bg-gray-50 text-gray-600 border-gray-200', icon: Clock, label: status };
     }
   };
 
-  const getStatusLabel = (status) => {
-      const labels = {
-          'Waiting': 'รอทำ',
-          'In Progress': 'ส่งทำ',
-          'Done': 'ทำเสร็จแล้ว',
-          'Tested': 'ทดสอบแล้ว',
-          'Completed': 'เรียบร้อย',
-          'Cancelled': 'ยกเลิก',
-          'Received': 'รับรถเข้า',
-          'Checking': 'กำลังตรวจเช็ค',
-          'Quoted': 'เสนอราคาแล้ว',
-          'Delivered': 'ส่งมอบแล้ว'
-      };
-      return labels[status] || status;
-  };
+  const statusInfo = getStatusDisplay(service.status, service.waiting_reason);
 
   const getPaymentStatus = () => {
     const totalPaid = service.service_payments?.reduce((sum, p) => sum + Number(p.amount), 0) || 0;
     const grandTotal = service.grand_total || 0;
 
     if (grandTotal === 0 && totalPaid === 0) return null;
-    if (totalPaid === 0) return { label: 'ยังไม่ชำระ', color: 'text-red-500 bg-red-50' };
-    if (totalPaid >= grandTotal) return { label: 'ชำระครบ', color: 'text-green-600 bg-green-50' };
+    if (totalPaid === 0) return { label: 'ยังไม่ชำระ', color: 'text-red-500 bg-red-50 border-red-100' };
+    if (totalPaid >= grandTotal) return { label: 'ชำระครบ', color: 'text-green-600 bg-green-50 border-green-100' };
+    
     const isOnlyDeposit = service.service_payments?.length > 0 && service.service_payments.every(p => p.type === 'deposit');
-    if (isOnlyDeposit) return { label: 'มัดจำแล้ว', color: 'text-amber-600 bg-amber-50' };
-    return { label: 'ยังไม่ครบ', color: 'text-orange-600 bg-orange-50' };
+    if (isOnlyDeposit) return { label: 'มัดจำแล้ว', color: 'text-amber-600 bg-amber-50 border-amber-100' };
+    
+    return { label: 'ยังไม่ครบ', color: 'text-orange-600 bg-orange-50 border-orange-100' };
   };
 
   // Duration Logic
@@ -95,12 +80,12 @@ const ServiceCard = ({ service, onClick }) => {
   };
 
   const payStatus = getPaymentStatus();
-  const mainItem = service.service_items?.[0]?.description || 'รอการตรวจสอบ';
+  const mainItem = service.service_items?.[0]?.description || 'ไม่มีรายการ';
 
   return (
     <div onClick={onClick} className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 hover:shadow-md hover:border-indigo-200 transition-all cursor-pointer group flex flex-col h-full">
       {/* Header Image */}
-      <div className="relative aspect-video bg-gray-50 rounded-xl overflow-hidden mb-4 border border-gray-50">
+      <div className="relative aspect-square bg-gray-50 rounded-xl overflow-hidden mb-4 border border-gray-50">
         {service.images && service.images.length > 0 ? (
           <img src={service.images[0]} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
         ) : (
@@ -109,8 +94,8 @@ const ServiceCard = ({ service, onClick }) => {
           </div>
         )}
         <div className="absolute top-2 right-2">
-          <span className={`px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wide shadow-sm flex items-center gap-1 border ${statusColors[service.status] || 'bg-gray-100'}`}>
-            {getStatusIcon(service.status)} {getStatusLabel(service.status)}
+          <span className={`px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wide shadow-sm flex items-center gap-1 border ${statusInfo.color}`}>
+            <statusInfo.icon size={12}/> {statusInfo.label}
           </span>
         </div>
       </div>
@@ -131,11 +116,11 @@ const ServiceCard = ({ service, onClick }) => {
             </div>
           </div>
           {service.grand_total > 0 && (
-            <div className="text-right">
+            <div className="text-right flex flex-col items-end gap-1">
               <p className="font-bold text-indigo-600">฿{service.grand_total.toLocaleString()}</p>
               {payStatus && (
-                <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${payStatus.color}`}>
-                   {payStatus.label}
+                <span className={`text-[9px] px-1.5 py-0.5 rounded border font-bold flex items-center gap-1 ${payStatus.color}`}>
+                   <Wallet size={8}/> {payStatus.label}
                 </span>
               )}
             </div>
@@ -143,7 +128,7 @@ const ServiceCard = ({ service, onClick }) => {
         </div>
 
         {/* Customer */}
-        <div className="flex items-center gap-2 mb-3 bg-gray-50 p-2 rounded-lg">
+        <div className="flex items-center gap-2 mb-3 bg-gray-50 p-2 rounded-lg mt-2">
           <div className="w-6 h-6 rounded-full bg-white flex items-center justify-center text-gray-400 shadow-sm border border-gray-100">
             <User size={12}/>
           </div>
@@ -156,8 +141,10 @@ const ServiceCard = ({ service, onClick }) => {
         <div className="mt-auto border-t border-gray-50 pt-2">
           <div className="flex items-center gap-2 text-xs text-gray-600">
             <AlertCircle size={12} className="text-orange-500 shrink-0"/> 
-            <span className="truncate">{mainItem}</span>
-            {service.service_items?.length > 1 && <span className="text-[10px] bg-gray-100 px-1 rounded text-gray-400">+{service.service_items.length-1}</span>}
+            <div className="truncate flex-1">
+                {mainItem}
+            </div>
+            {service.service_items?.length > 1 && <span className="text-[10px] bg-gray-100 px-1 rounded text-gray-400 shrink-0">+{service.service_items.length-1}</span>}
           </div>
         </div>
       </div>

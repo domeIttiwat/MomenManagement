@@ -21,8 +21,6 @@ const OrderDetail = ({ order, onBack, onEdit, onDelete, showProfit, setShowProfi
     Cancelled: 'bg-red-50 text-red-700 border-red-200'
   };
 
-  // ... (ฟังก์ชัน helper อื่นๆ เหมือนเดิม)
-
   const getDurationInfo = () => {
     const start = new Date(order.order_date);
     const end = order.status === 'Completed' && order.completed_at ? new Date(order.completed_at) : new Date(); 
@@ -88,7 +86,7 @@ const OrderDetail = ({ order, onBack, onEdit, onDelete, showProfit, setShowProfi
         </div>
       )}
 
-      {/* Navbar */}
+      {/* Sticky Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white/80 backdrop-blur-md p-4 rounded-2xl shadow-sm border border-gray-100 sticky top-2 z-20">
         <button onClick={onBack} className="flex items-center gap-2 text-gray-500 hover:text-gray-900 font-medium px-3 py-2 rounded-xl hover:bg-gray-100 transition-all">
           <ArrowLeft size={20} /> <span className="hidden sm:inline">ย้อนกลับ</span>
@@ -118,11 +116,21 @@ const OrderDetail = ({ order, onBack, onEdit, onDelete, showProfit, setShowProfi
               <div>
                 <div className="flex items-center gap-3 mb-2">
                   <span className="text-xs font-bold text-gray-500 uppercase tracking-wider bg-gray-100 px-2 py-1 rounded-md border border-gray-200">Order No.</span>
-                  <span className={`px-3 py-1 rounded-full font-bold text-xs border ${statusColors[order.status] || 'bg-gray-100'}`}>{order.status}</span>
+                  <span className={`px-3 py-1 rounded-full font-bold text-xs border ${statusColors[order.status] || 'bg-gray-100'}`}>
+                    {order.status}
+                  </span>
                 </div>
                 <h1 className="text-4xl font-extrabold text-gray-900 tracking-tight">{order.order_number}</h1>
-                <div className="flex items-center gap-2 text-gray-500 mt-2 font-medium">
-                  <Clock size={16}/> {new Date(order.order_date).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' })}
+                <div className="flex flex-wrap items-center gap-3 mt-2">
+                  <span className="flex items-center gap-2 text-gray-500 font-medium">
+                    <Clock size={16}/> 
+                    {new Date(order.order_date).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' })}
+                  </span>
+                  
+                  {/* Duration Badge */}
+                  <span className={`text-xs px-2 py-0.5 rounded border flex items-center gap-1 font-bold ${getDurationColorClass(totalDays)}`}>
+                    {order.status === 'Completed' ? `เสร็จใน ${durationText}` : `รอ ${durationText}`}
+                  </span>
                 </div>
               </div>
               <div className="flex flex-col gap-2">
@@ -141,13 +149,26 @@ const OrderDetail = ({ order, onBack, onEdit, onDelete, showProfit, setShowProfi
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-6 border-t border-gray-100 relative z-10">
               <div className="flex gap-4 cursor-pointer hover:bg-gray-50 p-2 rounded-xl transition-colors" onClick={() => onViewCustomer && onViewCustomer(order.customer_id)}>
-                <div className="w-12 h-12 bg-indigo-50 rounded-full flex items-center justify-center text-indigo-600 shrink-0"><User size={24} /></div>
+                <div className="w-12 h-12 bg-indigo-50 rounded-full flex items-center justify-center text-indigo-600 shrink-0">
+                  <User size={24} />
+                </div>
                 <div>
                   <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wide mb-1">ลูกค้า</h3>
-                  <p className="font-bold text-gray-800 text-lg">{order.customer_cache?.first_name} {order.customer_cache?.last_name} <span className="text-sm font-normal text-gray-500 ml-2">({order.customer_cache?.nickname || '-'})</span></p>
-                  <div className="flex items-start gap-2 text-sm text-gray-600 mt-1"><Phone size={14} className="mt-1 shrink-0"/> {order.customer_cache?.phone}</div>
-                  {social && <div className="flex items-center gap-2 text-sm text-gray-600 mt-1">{getSocialIcon(social.type)} {social.value}</div>}
-                  <div className="flex items-start gap-2 text-sm text-gray-600 mt-1"><MapPin size={14} className="mt-1 shrink-0"/> {order.customer_cache?.address_raw || '-'}</div>
+                  <p className="font-bold text-gray-800 text-lg">
+                    {order.customer_cache?.first_name} {order.customer_cache?.last_name} 
+                    <span className="text-sm font-normal text-gray-500 ml-2">({order.customer_cache?.nickname || '-'})</span>
+                  </p>
+                  <div className="flex items-start gap-2 text-sm text-gray-600 mt-1">
+                    <Phone size={14} className="mt-1 shrink-0"/> {order.customer_cache?.phone}
+                  </div>
+                  {social && (
+                    <div className="flex items-center gap-2 text-sm text-gray-600 mt-1">
+                       {getSocialIcon(social.type)} {social.value}
+                    </div>
+                  )}
+                  <div className="flex items-start gap-2 text-sm text-gray-600 mt-1">
+                    <MapPin size={14} className="mt-1 shrink-0"/> {order.customer_cache?.address_raw || '-'}
+                  </div>
                 </div>
               </div>
             </div>
@@ -177,9 +198,15 @@ const OrderDetail = ({ order, onBack, onEdit, onDelete, showProfit, setShowProfi
                         {item.variant_name && <p className="text-xs text-gray-500 bg-gray-100 inline-block px-2 py-0.5 rounded mt-1">{item.variant_name}</p>}
                         {item.sku && <p className="text-[10px] text-gray-400 font-mono mt-0.5">{item.sku}</p>}
                       </td>
-                      <td className="py-4 px-6 text-center"><span className="bg-gray-100 text-gray-700 px-3 py-1 rounded-lg font-bold">{item.quantity}</span></td>
+                      <td className="py-4 px-6 text-center">
+                        <span className="bg-gray-100 text-gray-700 px-3 py-1 rounded-lg font-bold">{item.quantity}</span>
+                      </td>
                       <td className="py-4 px-6 text-right font-medium text-gray-600">฿{item.sell_price.toLocaleString()}</td>
-                      {showProfit && <td className="py-4 px-6 text-right font-bold text-emerald-600 bg-emerald-50/30">+{(item.sell_price - item.cost_price).toLocaleString()}</td>}
+                      {showProfit && (
+                        <td className="py-4 px-6 text-right font-bold text-emerald-600 bg-emerald-50/30">
+                          +{(item.sell_price - item.cost_price).toLocaleString()}
+                        </td>
+                      )}
                       <td className="py-4 px-8 text-right font-bold text-gray-900">฿{(item.sell_price * item.quantity).toLocaleString()}</td>
                     </tr>
                   ))}
@@ -291,7 +318,7 @@ const OrderDetail = ({ order, onBack, onEdit, onDelete, showProfit, setShowProfi
         </div>
       </div>
 
-      {showBill && <ServiceBillPreview service={order} onClose={() => setShowBill(false)} />}
+      {showBill && <BillPreview order={order} onClose={() => setShowBill(false)} />}
     </div>
   );
 };

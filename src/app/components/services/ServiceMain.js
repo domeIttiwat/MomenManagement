@@ -19,7 +19,6 @@ const ServiceMain = () => {
   const fetchServices = async () => {
     setLoading(true);
     const { data } = await supabase.from('services')
-      // --- FIX: เพิ่ม service_updates(*) เข้าไปในคำสั่งดึงข้อมูล ---
       .select('*, service_items(*), service_assignees(job_role, user:user_id(first_name, last_name)), service_payments(*), service_updates(*)')
       .order('created_at', { ascending: false });
     if (data) setServices(data);
@@ -65,7 +64,7 @@ const ServiceMain = () => {
   if (view === 'detail') return <ServiceDetail service={selectedService} onBack={() => setView('list')} onEdit={() => setView('form')} onDelete={() => handleDelete(selectedService.id)} />;
 
   return (
-    <div className="max-w-[1600px] mx-auto space-y-6 animate-in fade-in duration-500">
+    <div className="max-w-[1600px] mx-auto space-y-6 animate-in fade-in duration-500 pb-20">
       
       {/* Header */}
       <div className="flex flex-col md:flex-row justify-between items-center bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
@@ -92,7 +91,7 @@ const ServiceMain = () => {
          </div>
 
          <div className="flex flex-wrap items-center gap-2 px-2">
-            {/* Status Filter */}
+            {/* Status Filter Updated */}
             <div className="relative">
                <select 
                  className="appearance-none bg-gray-50 hover:bg-gray-100 px-4 py-3 pl-10 pr-8 rounded-xl text-sm font-semibold text-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 cursor-pointer border-none"
@@ -101,10 +100,9 @@ const ServiceMain = () => {
                  <option value="All">ทุกสถานะ</option>
                  <option value="Waiting">รอทำ</option>
                  <option value="In Progress">ส่งทำ</option>
-                 <option value="Done">ทำเสร็จแล้ว</option>
-                 <option value="Tested">ทดสอบแล้ว</option>
-                 <option value="Completed">เรียบร้อย</option>
-                 <option value="Cancelled">ยกเลิก</option>
+                 <option value="Tested">รอเทส</option>
+                 <option value="Delivered">รอส่ง</option>
+                 <option value="Completed">ออเดอร์เรียบร้อย</option>
                </select>
                <Filter size={16} className="absolute left-3.5 top-3.5 text-gray-400 pointer-events-none"/>
             </div>

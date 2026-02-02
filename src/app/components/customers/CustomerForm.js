@@ -1,77 +1,111 @@
-import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Save, Loader2, MapPin, User, Phone } from 'lucide-react';
+import React, { useState } from 'react';
+import { ArrowLeft, Save, Loader2, User, Phone, MapPin, MessageSquare, Map, Wand2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-import { parseAddress } from './AddressParser';
-import ContactChannels from './ContactChannels';
 import ImageUploader from './ImageUploader';
 
 const CustomerForm = ({ onCancel, onSuccess, initialData }) => {
   const [loading, setLoading] = useState(false);
-
-  const normalizeImages = (imgs) => (imgs || []).map(url => ({ url, file: null }));
+  
+  const normalizeImages = (imgs) => {
+    return (imgs || []).map(img => (typeof img === 'string' ? { url: img, file: null } : img));
+  };
 
   const [formData, setFormData] = useState(initialData ? {
     ...initialData,
-    fullName: `${initialData.first_name} ${initialData.last_name || ''}`.trim(),
-    images: normalizeImages(initialData.images)
+    images: normalizeImages(initialData.images),
+    social_channels: initialData.social_channels || []
   } : {
-    code: `CUS-${new Date().getFullYear()}${(new Date().getMonth()+1).toString().padStart(2,0)}-${Math.floor(1000 + Math.random() * 9000)}`,
-    fullName: '', nickname: '', phone: '',
-    social_channels: [{ type: 'Line', value: '' }],
-    address_raw: '', address_parsed: {},
-    images: [], notes: '',
-    total_spent: 0
+    first_name: '',
+    last_name: '',
+    nickname: '',
+    phone: '',
+    address_raw: '',
+    location_url: '',
+    images: [],
+    social_channels: [], 
+    notes: ''
   });
 
-  const handlePhoneChange = (e) => {
-    let value = e.target.value.replace(/\D/g, '');
-    if (value.length > 10) value = value.slice(0, 10);
-    if (value.length > 6) value = `${value.slice(0, 3)}-${value.slice(3, 6)}-${value.slice(6)}`;
-    else if (value.length > 3) value = `${value.slice(0, 3)}-${value.slice(3)}`;
-    setFormData({ ...formData, phone: value });
+  const [newSocial, setNewSocial] = useState({ type: 'Line', value: '' });
+
+  // ฟังก์ชันแยกที่อยู่แบบง่าย (Smart Parse)
+  const parseAddress = (rawAddress) => {
+    if (!rawAddress) return null;
+    
+    let addr = { raw: rawAddress, prov: '', dist: '', subdist: '', zip: '' };
+    
+    // 1. หาจังหวัด
+    const provMatch = rawAddress.match(/(?:จังหวัด|จ\.)\s*([^\s0-9]+)/) || rawAddress.match(/\s(กรุงเทพมหานคร|กรุงเทพฯ|กทม|กระบี่|ขอนแก่น|...)/); // (ใส่รายชื่อจังหวัดครบๆ จะดีมาก แต่ย่อๆ ไว้ก่อน)
+    if (provMatch) addr.prov = provMatch[1];
+    else if (rawAddress.includes('กทม')) addr.prov = 'กรุงเทพมหานคร';
+
+    // 2. หาอำเภอ/เขต
+    const distMatch = rawAddress.match(/(?:อำเภอ|อ\.|เขต)\s*([^\s0-9]+)/);
+    if (distMatch) addr.dist = distMatch[1];
+
+    // 3. หาตำบล/แขวง
+    const subdistMatch = rawAddress.match(/(?:ตำบล|ต\.|แขวง)\s*([^\s0-9]+)/);
+    if (subdistMatch) addr.subdist = subdistMatch[1];
+
+    // 4. หารหัสไปรษณีย์ (เลข 5 หลักติดกัน)
+    const zipMatch = rawAddress.match(/\b\d{5}\b/);
+    if (zipMatch) addr.zip = zipMatch[0];
+
+    return addr;
   };
 
-  useEffect(() => {
-    const parsed = parseAddress(formData.address_raw);
-    setFormData(prev => ({ ...prev, address_parsed: parsed }));
-  }, [formData.address_raw]);
+  // Auto-parse เมื่อ Address เปลี่ยน
+  const handleAddressChange = (e) => {
+    const raw = e.target.value;
+    const parsed = parseAddress(raw);
+    setFormData(prev => ({ 
+        ...prev, 
+        address_raw: raw,
+        address_parsed: parsed // อัปเดตข้อมูลที่แยกแล้ว
+    }));
+  };
+
+  const handleAddSocial = () => {
+    if (!newSocial.value) return;
+    setFormData({ ...formData, social_channels: [...formData.social_channels, newSocial] });
+    setNewSocial({ type: 'Line', value: '' });
+  };
+
+  const removeSocial = (idx) => {
+    const newSocials = formData.social_channels.filter((_, i) => i !== idx);
+    setFormData({ ...formData, social_channels: newSocials });
+  };
 
   const handleSubmit = async (e) => {
-    e.stopPropagation(); // หยุดการส่ง Event ไปยัง Form แม่ (OrderForm)
     e.preventDefault();
-    
+    if (!formData.first_name || !formData.phone) return alert('กรุณากรอกชื่อและเบอร์โทร');
+
     setLoading(true);
     try {
-      const uploadedImageUrls = await Promise.all(formData.images.map(async (imgObj) => {
+      const uploadedImages = await Promise.all(formData.images.map(async (imgObj) => {
         if (imgObj.file) {
-          const file = imgObj.file;
-          const fileExt = file.name.split('.').pop();
-          const fileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`;
-          const filePath = `${fileName}`;
-          const { error: uploadError } = await supabase.storage.from('customers').upload(filePath, file);
-          if (uploadError) throw uploadError;
-          const { data } = supabase.storage.from('customers').getPublicUrl(filePath);
+          const fileName = `cust-${Date.now()}-${Math.random()}`;
+          await supabase.storage.from('customers').upload(fileName, imgObj.file);
+          const { data } = supabase.storage.from('customers').getPublicUrl(fileName);
           return data.publicUrl;
         }
-        return imgObj.url; 
+        return imgObj.url;
       }));
 
-      const nameParts = formData.fullName.trim().split(' ');
-      const firstName = nameParts[0];
-      const lastName = nameParts.slice(1).join(' ');
+      // Parse อีกรอบก่อนบันทึกเพื่อความชัวร์
+      const finalParsedAddress = parseAddress(formData.address_raw);
 
       const payload = {
-        code: formData.code,
-        first_name: firstName,
-        last_name: lastName,
+        first_name: formData.first_name,
+        last_name: formData.last_name,
         nickname: formData.nickname,
         phone: formData.phone,
-        social_channels: formData.social_channels,
         address_raw: formData.address_raw,
-        address_parsed: formData.address_parsed,
-        notes: formData.notes,
-        images: uploadedImageUrls,
-        total_spent: formData.total_spent
+        address_parsed: finalParsedAddress, // บันทึกข้อมูลที่แยกแล้วลง DB
+        location_url: formData.location_url,
+        images: uploadedImages,
+        social_channels: formData.social_channels,
+        notes: formData.notes
       };
 
       if (initialData?.id) {
@@ -91,72 +125,116 @@ const CustomerForm = ({ onCancel, onSuccess, initialData }) => {
   const labelClass = "block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5 ml-1";
 
   return (
-    <form onSubmit={handleSubmit} className="max-w-4xl mx-auto pb-20 animate-in slide-in-from-bottom-4 duration-500">
+    <form onSubmit={handleSubmit} className="max-w-4xl mx-auto pb-20 animate-in slide-in-from-bottom-4">
       <div className="flex justify-between items-center bg-white/80 backdrop-blur-md p-4 rounded-2xl sticky top-2 z-20 shadow-sm border border-gray-100 mb-6">
         <div className="flex items-center gap-4">
           <button type="button" onClick={onCancel} className="p-2 hover:bg-gray-100 rounded-full text-gray-500"><ArrowLeft size={20} /></button>
           <h1 className="text-xl font-bold text-gray-900">{initialData ? 'แก้ไขข้อมูลลูกค้า' : 'เพิ่มลูกค้าใหม่'}</h1>
         </div>
-        <button type="submit" disabled={loading} className="bg-gray-900 hover:bg-black text-white px-6 py-2.5 rounded-xl font-medium shadow-lg flex items-center gap-2">
+        <button type="submit" disabled={loading} className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-xl font-medium shadow-lg flex items-center gap-2">
           {loading ? <Loader2 size={18} className="animate-spin"/> : <Save size={18} />} บันทึก
         </button>
       </div>
 
-      {/* ... (ส่วนแสดงผลเหมือนเดิม) ... */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="space-y-6">
-          <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 text-center">
-            <h3 className="font-bold text-gray-800 mb-4 text-left flex items-center gap-2"><User size={18}/> รูปโปรไฟล์</h3>
-            <ImageUploader images={formData.images} onChange={imgs => setFormData({...formData, images: imgs})} />
-          </div>
-          <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
-            <label className={labelClass}>รหัสลูกค้า (Auto)</label>
-            <input disabled className={`${inputClass} bg-gray-100 font-mono text-gray-500 cursor-not-allowed`} value={formData.code} />
-          </div>
+        
+        {/* Left: Info */}
+        <div className="md:col-span-2 space-y-6">
+           <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100">
+              <h3 className="font-bold text-gray-800 text-lg border-b border-gray-50 pb-4 mb-6 flex items-center gap-2"><User size={20} className="text-indigo-500"/> ข้อมูลทั่วไป</h3>
+              <div className="grid grid-cols-2 gap-4 mb-4">
+                <div>
+                   <label className={labelClass}>ชื่อจริง *</label>
+                   <input required className={inputClass} value={formData.first_name} onChange={e => setFormData({...formData, first_name: e.target.value})} />
+                </div>
+                <div>
+                   <label className={labelClass}>นามสกุล</label>
+                   <input className={inputClass} value={formData.last_name} onChange={e => setFormData({...formData, last_name: e.target.value})} />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4 mb-4">
+                <div>
+                   <label className={labelClass}>ชื่อเล่น</label>
+                   <input className={inputClass} value={formData.nickname} onChange={e => setFormData({...formData, nickname: e.target.value})} />
+                </div>
+                <div>
+                   <label className={labelClass}>เบอร์โทร *</label>
+                   <input required className={inputClass} value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} />
+                </div>
+              </div>
+
+              <div className="mb-4">
+                 <label className={labelClass}>ที่อยู่จัดส่ง</label>
+                 <textarea 
+                    className={inputClass} 
+                    rows="3" 
+                    value={formData.address_raw} 
+                    onChange={handleAddressChange} 
+                    placeholder="บ้านเลขที่, ถนน, แขวง/ตำบล, เขต/อำเภอ, จังหวัด, รหัสไปรษณีย์"
+                 />
+                 {/* Live Preview of Parsed Address */}
+                 {formData.address_parsed && (formData.address_parsed.prov || formData.address_parsed.dist) && (
+                    <div className="mt-2 text-xs text-gray-500 bg-gray-50 p-2 rounded-lg flex flex-wrap gap-2 items-center">
+                        <Wand2 size={12} className="text-indigo-400"/>
+                        <span className="font-bold text-gray-600">ระบบแยกข้อมูล:</span>
+                        {formData.address_parsed.subdist && <span className="bg-white border px-1.5 rounded">ต.{formData.address_parsed.subdist}</span>}
+                        {formData.address_parsed.dist && <span className="bg-white border px-1.5 rounded">อ.{formData.address_parsed.dist}</span>}
+                        {formData.address_parsed.prov && <span className="bg-white border px-1.5 rounded">จ.{formData.address_parsed.prov}</span>}
+                        {formData.address_parsed.zip && <span className="bg-white border px-1.5 rounded">{formData.address_parsed.zip}</span>}
+                    </div>
+                 )}
+              </div>
+
+              <div className="mb-4">
+                 <label className={labelClass}><span className="flex items-center gap-1"><Map size={14}/> ลิงก์แผนที่ (Google Maps URL)</span></label>
+                 <input 
+                    className={`${inputClass} text-blue-600 underline`} 
+                    placeholder="https://maps.app.goo.gl/..." 
+                    value={formData.location_url || ''} 
+                    onChange={e => setFormData({...formData, location_url: e.target.value})} 
+                 />
+              </div>
+
+              <div>
+                 <label className={labelClass}>หมายเหตุ</label>
+                 <textarea className={inputClass} rows="2" value={formData.notes} onChange={e => setFormData({...formData, notes: e.target.value})} />
+              </div>
+           </div>
+
+           {/* Social Media */}
+           <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100">
+              <h3 className="font-bold text-gray-800 text-lg border-b border-gray-50 pb-4 mb-6 flex items-center gap-2"><MessageSquare size={20} className="text-pink-500"/> ช่องทางติดต่ออื่นๆ</h3>
+              
+              <div className="space-y-3 mb-4">
+                 {formData.social_channels.map((soc, i) => (
+                    <div key={i} className="flex items-center gap-3 bg-gray-50 p-3 rounded-xl">
+                       <span className="font-bold text-gray-600 w-24 uppercase text-xs">{soc.type}</span>
+                       <span className="flex-1 text-sm">{soc.value}</span>
+                       <button type="button" onClick={() => removeSocial(i)} className="text-gray-400 hover:text-red-500">ลบ</button>
+                    </div>
+                 ))}
+              </div>
+
+              <div className="flex gap-2">
+                 <select className="bg-gray-50 border-transparent rounded-xl px-3 py-2 text-sm outline-none font-medium" value={newSocial.type} onChange={e => setNewSocial({...newSocial, type: e.target.value})}>
+                    <option value="Line">Line</option>
+                    <option value="Facebook">Facebook</option>
+                    <option value="Instagram">Instagram</option>
+                    <option value="WhatsApp">WhatsApp</option>
+                    <option value="TikTok">TikTok</option>
+                 </select>
+                 <input className="flex-1 bg-gray-50 border-transparent rounded-xl px-3 py-2 text-sm outline-none" placeholder="ระบุ ID หรือ ชื่อบัญชี..." value={newSocial.value} onChange={e => setNewSocial({...newSocial, value: e.target.value})} />
+                 <button type="button" onClick={handleAddSocial} className="bg-indigo-100 text-indigo-700 px-4 rounded-xl text-sm font-bold hover:bg-indigo-200">เพิ่ม</button>
+              </div>
+           </div>
         </div>
 
-        <div className="md:col-span-2 space-y-6">
-          <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100 space-y-5">
-            <h3 className="font-bold text-gray-800 border-b pb-2 mb-4">ข้อมูลส่วนตัว</h3>
-            <div className="grid grid-cols-1 gap-4">
-              <div>
-                <label className={labelClass}>ชื่อ - นามสกุล</label>
-                <input required className={inputClass} placeholder="ระบุชื่อ-นามสกุล..." value={formData.fullName} onChange={e => setFormData({...formData, fullName: e.target.value})} />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className={labelClass}>ชื่อเล่น</label>
-                <input className={inputClass} placeholder="ชื่อเล่น" value={formData.nickname} onChange={e => setFormData({...formData, nickname: e.target.value})} />
-              </div>
-              <div>
-                <label className={labelClass}>เบอร์โทรศัพท์</label>
-                <input className={inputClass} placeholder="0xx-xxx-xxxx" value={formData.phone} onChange={handlePhoneChange} maxLength={12} />
-              </div>
-            </div>
-            <div>
-              <label className={labelClass}>ช่องทางติดต่อเพิ่มเติม</label>
-              <ContactChannels contacts={formData.social_channels} onChange={c => setFormData({...formData, social_channels: c})} />
-            </div>
-          </div>
-
-          <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100 space-y-5">
-            <h3 className="font-bold text-gray-800 border-b pb-2 mb-4 flex items-center gap-2"><MapPin size={18}/> ที่อยู่ (Smart Address)</h3>
-            <div>
-              <label className={labelClass}>ที่อยู่จัดส่ง</label>
-              <textarea className={inputClass} rows="3" placeholder="พิมพ์ที่อยู่ยาวๆ ที่นี่..." value={formData.address_raw} onChange={e => setFormData({...formData, address_raw: e.target.value})} />
-            </div>
-            <div className="grid grid-cols-2 gap-3 p-4 bg-indigo-50/50 rounded-xl border border-indigo-100 text-sm">
-              <div><span className="text-gray-500">จังหวัด:</span> <span className="font-bold text-indigo-700">{formData.address_parsed?.prov || '-'}</span></div>
-              <div><span className="text-gray-500">เขต/อำเภอ:</span> <span className="font-bold text-indigo-700">{formData.address_parsed?.dist || '-'}</span></div>
-              <div><span className="text-gray-500">แขวง/ตำบล:</span> <span className="font-bold text-indigo-700">{formData.address_parsed?.subdist || '-'}</span></div>
-              <div><span className="text-gray-500">รหัสปณ.:</span> <span className="font-bold text-indigo-700">{formData.address_parsed?.zip || '-'}</span></div>
-            </div>
-            <div>
-              <label className={labelClass}>หมายเหตุ</label>
-              <textarea className={inputClass} rows="2" placeholder="บันทึกช่วยจำ..." value={formData.notes} onChange={e => setFormData({...formData, notes: e.target.value})} />
-            </div>
-          </div>
+        {/* Right: Images */}
+        <div className="space-y-6">
+           <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+              <h3 className="font-bold text-gray-800 mb-4">รูปภาพลูกค้า</h3>
+              <ImageUploader images={formData.images} onChange={imgs => setFormData({...formData, images: imgs})} />
+           </div>
         </div>
       </div>
     </form>

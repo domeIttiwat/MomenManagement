@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowLeft, Edit, Trash2, Eye, EyeOff, Layers, Package, Wrench, Bike, Check, Tag, Box, TrendingUp, DollarSign, ShoppingBag, Puzzle, MapPin } from 'lucide-react';
+import { ArrowLeft, Edit, Trash2, Eye, EyeOff, Layers, Package, Wrench, Bike, Check, Tag, Box, TrendingUp, DollarSign, ShoppingBag, Puzzle, MapPin, ChevronDown, ChevronUp } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 
 const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCost }) => {
@@ -7,6 +7,9 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
   const [fasteners, setFasteners] = useState([]);
   const [bundles, setBundles] = useState([]);
   const [selectedImg, setSelectedImg] = useState(null);
+  
+  // State สำหรับเปิด/ปิด Accordion ของแต่ละรุ่น
+  const [expandedVariants, setExpandedVariants] = useState({});
 
   // อัปเดตข้อมูลเมื่อเปลี่ยนสินค้า
   useEffect(() => {
@@ -17,7 +20,13 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
         // 1. Fetch Variants
         if (product.has_variants) {
           const { data } = await supabase.from('product_variants').select('*').eq('product_id', product.id).order('sell_price');
-          if (data) setVariants(data);
+          if (data) {
+              setVariants(data);
+              // Default expand all
+              const initialExpanded = {};
+              data.forEach(v => initialExpanded[v.id] = false); // Default collapsed to keep clean
+              setExpandedVariants(initialExpanded);
+          }
         } else {
           setVariants([]);
         }
@@ -27,7 +36,6 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
         if (fData) setFasteners(fData);
 
         // 3. Fetch Bundles (ข้อมูลส่วนประกอบ)
-        // FIX: เพิ่ม cost_price ในการ select เพื่อเอามาคำนวณต้นทุนรวม
         const { data: bData } = await supabase.from('product_bundles').select('*, product:child_product_id(name, sku, cost_price)').eq('parent_product_id', product.id);
         if (bData) setBundles(bData);
       };
@@ -35,6 +43,10 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
       fetchData();
     }
   }, [product]);
+
+  const toggleVariantExpand = (id) => {
+    setExpandedVariants(prev => ({ ...prev, [id]: !prev[id] }));
+  };
 
   if (!product) return (
     <div className="flex flex-col items-center justify-center p-20 text-center text-gray-500">
@@ -51,12 +63,21 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
   const profit = sellPrice - costPrice;
   const { soldCount, timesOrdered, totalSalesVal, totalProfitVal } = product.stats || { soldCount: 0, timesOrdered: 0, totalSalesVal: 0, totalProfitVal: 0 };
   
-  // ตรวจสอบว่ามีข้อมูลหรือไม่
   const hasBundlesData = bundles.length > 0 || product.hasBundles;
   const hasFastenersData = fasteners.length > 0 || product.hasFasteners;
-
-  // คำนวณต้นทุนรวมของ Bundle
   const totalBundleCost = bundles.reduce((sum, b) => sum + ((b.product?.cost_price || 0) * (b.quantity || 1)), 0);
+
+  // Group Bundles
+  const commonBundles = bundles.filter(b => b.parent_variant_id === null);
+  const variantBundles = {};
+  variants.forEach(v => {
+      variantBundles[v.id] = bundles.filter(b => b.parent_variant_id === v.id);
+  });
+
+  // Prepare Categories for Display
+  const displayCategories = product.categoryNames && product.categoryNames.length > 0 
+    ? product.categoryNames 
+    : [product.categories?.name || 'Uncategorized'];
 
   return (
     <div className="space-y-8 pb-10">
@@ -87,7 +108,7 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        {/* Left: Images (Sticky on Desktop) */}
+        {/* Left: Images */}
         <div className="lg:col-span-5 space-y-4">
           <div className="sticky top-24 space-y-4">
             <div className="aspect-square bg-gray-50 rounded-3xl overflow-hidden border border-gray-100 relative shadow-sm group">
@@ -155,14 +176,17 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
           {/* Header Info */}
           <div>
             <div className="flex flex-wrap items-center gap-2 mb-3">
-              <span className="text-xs font-bold tracking-wider text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full uppercase border border-indigo-100">
-                {product.categories?.name || 'Uncategorized'}
-              </span>
+              {/* Categories */}
+              {displayCategories.map((cat, idx) => (
+                <span key={idx} className="text-xs font-bold tracking-wider text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full uppercase border border-indigo-100">
+                  {cat}
+                </span>
+              ))}
+
               <span className="text-xs font-medium text-gray-500 bg-gray-100 px-2 py-1 rounded-md font-mono flex items-center gap-1">
                 <Tag size={12}/> {product.sku}
               </span>
               
-              {/* Feature Badges (แสดงเมื่อมีข้อมูล) */}
               {hasBundlesData && (
                 <span className="text-xs font-bold text-purple-600 bg-purple-50 border border-purple-100 px-2 py-1 rounded-md flex items-center gap-1">
                    <Puzzle size={12}/> มีส่วนประกอบ (Bundles)
@@ -203,12 +227,12 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
             )}
           </div>
 
-          {/* Bundles Detail */}
+          {/* Bundles Detail (NEW GROUPING) */}
           {hasBundlesData && (
             <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
                 <div className="flex justify-between items-center mb-4">
                     <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2 uppercase tracking-wider">
-                    <Puzzle size={16} className="text-purple-500" /> ส่วนประกอบ (Parts Bundle)
+                      <Puzzle size={16} className="text-purple-500" /> ส่วนประกอบ (Parts Bundle)
                     </h3>
                     {showCost && (
                         <div className="text-xs bg-amber-50 text-amber-700 px-3 py-1 rounded-lg border border-amber-100">
@@ -216,27 +240,76 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
                         </div>
                     )}
                 </div>
-                <div className="space-y-2">
-                    {bundles.map((b, i) => (
-                        <div key={i} className="flex justify-between items-center bg-gray-50 p-3 rounded-xl border border-gray-100">
-                            <div className="flex items-center gap-3">
-                                <Package size={16} className="text-gray-400"/>
-                                <div>
-                                    <p className="text-sm font-bold text-gray-800">{b.product?.name}</p>
-                                    <p className="text-xs text-gray-500">{b.product?.sku}</p>
-                                </div>
-                            </div>
-                            <div className="flex items-center gap-3">
-                                {showCost && (
-                                    <div className="text-right mr-2 hidden sm:block">
-                                        <p className="text-[10px] text-gray-400">ทุนต่อชิ้น</p>
-                                        <p className="text-xs font-bold text-amber-600">฿{b.product?.cost_price?.toLocaleString()}</p>
+                
+                <div className="space-y-4">
+                    {/* Common Parts */}
+                    {commonBundles.length > 0 && (
+                        <div>
+                            <p className="text-xs font-bold text-gray-500 bg-gray-50 px-3 py-1 rounded-lg mb-2 inline-block border border-gray-200">อะไหล่พื้นฐาน (Common Parts)</p>
+                            <div className="space-y-2">
+                                {commonBundles.map((b, i) => (
+                                    <div key={i} className="flex justify-between items-center bg-white p-3 rounded-xl border border-gray-100 hover:border-purple-200 transition-colors">
+                                        <div className="flex items-center gap-3">
+                                            <Package size={16} className="text-gray-400"/>
+                                            <div>
+                                                <p className="text-sm font-bold text-gray-800">{b.product?.name}</p>
+                                                <p className="text-xs text-gray-500">{b.product?.sku}</p>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-3">
+                                            {showCost && (
+                                                <div className="text-right mr-2 hidden sm:block">
+                                                    <p className="text-[10px] text-gray-400">ทุนต่อชิ้น</p>
+                                                    <p className="text-xs font-bold text-amber-600">฿{b.product?.cost_price?.toLocaleString()}</p>
+                                                </div>
+                                            )}
+                                            <span className="text-xs font-bold bg-gray-50 px-2 py-1 rounded border border-gray-200">x{b.quantity}</span>
+                                        </div>
                                     </div>
-                                )}
-                                <span className="text-xs font-bold bg-white px-2 py-1 rounded border border-gray-200">x{b.quantity}</span>
+                                ))}
                             </div>
                         </div>
-                    ))}
+                    )}
+
+                    {/* Variant Specific Parts */}
+                    {variants.map(v => {
+                        const vBundles = variantBundles[v.id];
+                        if (!vBundles || vBundles.length === 0) return null;
+                        const isExpanded = expandedVariants[v.id];
+
+                        return (
+                            <div key={v.id} className="border border-indigo-100 rounded-xl overflow-hidden">
+                                <div 
+                                    onClick={() => toggleVariantExpand(v.id)}
+                                    className="bg-indigo-50 p-3 flex justify-between items-center cursor-pointer hover:bg-indigo-100 transition-colors"
+                                >
+                                    <div className="flex items-center gap-2">
+                                        <span className="w-2 h-2 bg-indigo-500 rounded-full"></span>
+                                        <span className="text-xs font-bold text-indigo-800">เฉพาะรุ่น: {v.name}</span>
+                                        <span className="text-[10px] bg-white px-2 py-0.5 rounded-full text-indigo-600 border border-indigo-200">{vBundles.length} รายการ</span>
+                                    </div>
+                                    {isExpanded ? <ChevronUp size={14} className="text-indigo-500"/> : <ChevronDown size={14} className="text-indigo-500"/>}
+                                </div>
+                                
+                                {isExpanded && (
+                                    <div className="p-3 space-y-2 bg-white">
+                                        {vBundles.map((b, i) => (
+                                            <div key={i} className="flex justify-between items-center p-2 rounded-lg hover:bg-gray-50 border border-transparent hover:border-gray-100 transition-colors">
+                                                <div className="flex items-center gap-2">
+                                                    <div className="w-1 h-1 bg-gray-300 rounded-full"></div>
+                                                    <p className="text-sm text-gray-700">{b.product?.name}</p>
+                                                </div>
+                                                <div className="flex items-center gap-3">
+                                                    {showCost && <span className="text-xs text-amber-600 font-medium">฿{b.product?.cost_price?.toLocaleString()}</span>}
+                                                    <span className="text-xs font-bold bg-gray-100 px-2 py-0.5 rounded text-gray-600">x{b.quantity}</span>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })}
                 </div>
             </div>
           )}
@@ -257,7 +330,15 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
                             <div className="space-y-1">
                                 {loc.bolts_usage?.map((bolt, idx) => (
                                     <div key={idx} className="flex justify-between text-xs text-gray-600">
-                                        <span>• {bolt.name}</span>
+                                        <div className="flex flex-col">
+                                            <span>• {bolt.name}</span>
+                                            {/* แสดงรุ่นย่อยของน็อต (ถ้ามี) */}
+                                            {bolt.parent_variant_id && (
+                                                <span className="text-[9px] text-indigo-500 ml-2">
+                                                    (สำหรับ: {variants.find(v => v.id === bolt.parent_variant_id)?.name || 'Unknown'})
+                                                </span>
+                                            )}
+                                        </div>
                                         <span className="font-medium">x{bolt.qty}</span>
                                     </div>
                                 ))}

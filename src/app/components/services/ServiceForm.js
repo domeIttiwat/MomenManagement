@@ -27,7 +27,6 @@ const ServiceForm = ({ onCancel, onSuccess, initialData }) => {
         method: p.method || 'Transfer',
         fee_amount: p.fee_amount || 0
     })),
-    // --- FIX: โหลดข้อมูล updates ---
     updates: (initialData.service_updates || []).map(u => ({
         ...u,
         images: (u.images || []).map(url => ({ url, file: null }))
@@ -35,18 +34,23 @@ const ServiceForm = ({ onCancel, onSuccess, initialData }) => {
     images: (initialData.images || []).map(url => ({ url, file: null })),
     appointment_date: initialData.appointment_date ? initialData.appointment_date.split('T')[0] : '',
     received_date: initialData.received_date ? initialData.received_date.split('T')[0] : getLocalDate(),
-    completed_date: initialData.completed_date ? initialData.completed_date.split('T')[0] : ''
+    completed_date: initialData.completed_date ? initialData.completed_date.split('T')[0] : '',
+    
+    // Default Status Updated
+    status: initialData.status || 'Waiting', 
+    waiting_reason: initialData.waiting_reason || 'รอคิว' 
   } : {
     service_number: `SRV-${new Date().getFullYear().toString().substr(-2)}${(new Date().getMonth()+1).toString().padStart(2,0)}-${Math.floor(1000 + Math.random() * 9000)}`,
     received_date: getLocalDate(),
     appointment_date: '',
     completed_date: '',
-    status: 'Waiting',
+    status: 'Waiting', // ค่าเริ่มต้น: รอทำ
+    waiting_reason: 'รอคิว', // เหตุผลเริ่มต้น
     customer: null,
     assignees: [],
     items: [],
     payments: [],
-    updates: [], // New State for Updates
+    updates: [],
     images: [],
     shipping_cost: 0,
     discount: 0,
@@ -54,6 +58,13 @@ const ServiceForm = ({ onCancel, onSuccess, initialData }) => {
     service_fee: 0,
     notes: ''
   });
+  
+  // State สำหรับ "อื่นๆ" ใน waiting_reason
+  const [customWaitingReason, setCustomWaitingReason] = useState(
+    (formData.status === 'Waiting' && !['รออะไหล่', 'รอคิว'].includes(formData.waiting_reason)) 
+    ? formData.waiting_reason 
+    : ''
+  );
 
   const itemsTotal = formData.items.reduce((sum, item) => sum + (item.sell_price * item.quantity), 0);
   const subtotal = itemsTotal + parseFloat(formData.service_fee || 0);
@@ -85,9 +96,12 @@ const ServiceForm = ({ onCancel, onSuccess, initialData }) => {
   const handleStatusChange = (e) => {
     const status = e.target.value;
     let completedDate = formData.completed_date;
+    
+    // ถ้าสถานะเป็น Completed (ออเดอร์เรียบร้อย) และยังไม่มีวันที่ ให้ใส่วันปัจจุบัน
     if (status === 'Completed' && !completedDate) {
         completedDate = getLocalDate();
     }
+    
     setFormData({...formData, status, completed_date: completedDate});
   };
 
@@ -97,7 +111,6 @@ const ServiceForm = ({ onCancel, onSuccess, initialData }) => {
     
     setLoading(true);
     try {
-      // 1. Upload Main Images
       const uploadedImages = await Promise.all(formData.images.map(async (img) => {
         if (img.file) {
           const fileName = `srv-${Date.now()}-${Math.random()}`;
@@ -108,7 +121,6 @@ const ServiceForm = ({ onCancel, onSuccess, initialData }) => {
         return img.url;
       }));
 
-      // 2. Upload Update Images & Prepare Updates Payload
       const processedUpdates = await Promise.all(formData.updates.map(async (upd) => {
           const updateImgs = await Promise.all(upd.images.map(async (img) => {
              if (img.file) {
@@ -126,11 +138,18 @@ const ServiceForm = ({ onCancel, onSuccess, initialData }) => {
           };
       }));
 
+      // จัดการ Waiting Reason
+      let finalWaitingReason = null;
+      if (formData.status === 'Waiting') {
+         finalWaitingReason = formData.waiting_reason === 'อื่นๆ' ? customWaitingReason : formData.waiting_reason;
+      }
+
       const payload = {
         service_number: formData.service_number,
         customer_id: formData.customer.id,
         customer_cache: formData.customer,
         status: formData.status,
+        waiting_reason: finalWaitingReason, // บันทึกเหตุผล
         received_date: formData.received_date,
         appointment_date: formData.appointment_date || null,
         completed_date: formData.status === 'Completed' ? formData.completed_date : null,
@@ -154,7 +173,6 @@ const ServiceForm = ({ onCancel, onSuccess, initialData }) => {
         await supabase.from('service_items').delete().eq('service_id', serviceId);
         await supabase.from('service_assignees').delete().eq('service_id', serviceId);
         await supabase.from('service_payments').delete().eq('service_id', serviceId);
-        // --- FIX: ลบ updates เดิม ---
         await supabase.from('service_updates').delete().eq('service_id', serviceId);
       } else {
         const { data, error } = await supabase.from('services').insert([payload]).select().single();
@@ -162,7 +180,6 @@ const ServiceForm = ({ onCancel, onSuccess, initialData }) => {
         serviceId = data.id;
       }
 
-      // Insert Items
       if (formData.items.length > 0) {
         await supabase.from('service_items').insert(formData.items.map(i => ({
           service_id: serviceId,
@@ -175,7 +192,6 @@ const ServiceForm = ({ onCancel, onSuccess, initialData }) => {
         })));
       }
 
-      // --- FIX: บันทึก Updates ---
       if (processedUpdates.length > 0) {
           await supabase.from('service_updates').insert(processedUpdates.map(u => ({
               service_id: serviceId,
@@ -214,7 +230,6 @@ const ServiceForm = ({ onCancel, onSuccess, initialData }) => {
 
   const inputClass = "w-full px-4 py-2 bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 rounded-xl transition-all outline-none text-gray-700 font-medium";
   const labelClass = "block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5 ml-1";
-
   const handleFocus = (e) => e.target.select();
 
   return (
@@ -229,11 +244,7 @@ const ServiceForm = ({ onCancel, onSuccess, initialData }) => {
           </div>
         </div>
         <div className="flex gap-2">
-            <button 
-                type="button" 
-                onClick={() => setShowPreview(true)}
-                className="bg-white text-indigo-700 border border-indigo-100 hover:bg-indigo-50 px-4 py-2.5 rounded-xl font-medium flex items-center gap-2 transition-all"
-            >
+            <button type="button" onClick={() => setShowPreview(true)} className="bg-white text-indigo-700 border border-indigo-100 hover:bg-indigo-50 px-4 py-2.5 rounded-xl font-medium flex items-center gap-2 transition-all">
                 <Printer size={18} /> พรีวิวใบงาน
             </button>
             <button type="submit" disabled={loading} className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-xl font-medium shadow-lg flex gap-2">
@@ -245,44 +256,75 @@ const ServiceForm = ({ onCancel, onSuccess, initialData }) => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left Column */}
         <div className="lg:col-span-2 space-y-6">
-          
           <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 space-y-5">
             <h3 className="font-bold text-gray-800 text-lg border-b border-gray-50 pb-3 flex items-center gap-2">
               <User size={20} className="text-indigo-500"/> ข้อมูลลูกค้า & วันที่
             </h3>
             
-            <CustomerSelector 
-              selectedCustomer={formData.customer} 
-              onSelect={c => setFormData({...formData, customer: c})} 
-            />
+            <CustomerSelector selectedCustomer={formData.customer} onSelect={c => setFormData({...formData, customer: c})} />
             
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                <div><label className={labelClass}>วันที่รับรถ</label><input type="date" className={inputClass} value={formData.received_date} onChange={e => setFormData({...formData, received_date: e.target.value})} /></div>
                <div><label className={labelClass}>วันนัดส่งคืน (Optional)</label><input type="date" className={inputClass} value={formData.appointment_date} onChange={e => setFormData({...formData, appointment_date: e.target.value})} /></div>
+               
+               {/* Status Dropdown */}
                <div>
                  <label className={labelClass}>สถานะงาน</label>
                  <select className={inputClass} value={formData.status} onChange={handleStatusChange}>
                    <option value="Waiting">รอทำ</option>
                    <option value="In Progress">ส่งทำ</option>
-                   <option value="Done">ทำเสร็จแล้ว</option>
-                   <option value="Tested">ทดสอบแล้ว</option>
-                   <option value="Completed">เรียบร้อย</option>
+                   <option value="Tested">รอเทส</option>
+                   <option value="Delivered">รอส่ง</option>
+                   <option value="Completed">ออเดอร์เรียบร้อย</option>
                    <option value="Cancelled">ยกเลิก</option>
                  </select>
                </div>
             </div>
 
-            {(formData.status === 'Completed') && (
-                 <div className="animate-in fade-in slide-in-from-left-2">
-                   <label className={`${labelClass} text-green-600`}>วันที่ส่งรถคืน/เสร็จสิ้น</label>
-                   <div className="relative">
-                      <input type="date" className={`${inputClass} border-green-200 bg-green-50 text-green-800 focus:ring-green-500/20`} value={formData.completed_date} onChange={e => setFormData({...formData, completed_date: e.target.value})} />
-                      <CheckCircle className="absolute right-3 top-2.5 text-green-500 pointer-events-none" size={16}/>
-                   </div>
-                 </div>
-               )}
+            {/* Waiting Reasons Sub-Menu */}
+            {formData.status === 'Waiting' && (
+                <div className="bg-amber-50 p-4 rounded-xl border border-amber-100 animate-in fade-in slide-in-from-top-2">
+                    <label className={`${labelClass} text-amber-800 mb-2`}>สาเหตุการรอ (Waiting Reason)</label>
+                    <div className="flex flex-wrap gap-3">
+                        {['รออะไหล่', 'รอคิว', 'อื่นๆ'].map(reason => (
+                            <label key={reason} className="flex items-center gap-2 cursor-pointer bg-white px-3 py-1.5 rounded-lg border border-amber-200 text-sm text-gray-700 hover:bg-amber-50 transition-colors">
+                                <input 
+                                    type="radio" 
+                                    name="waiting_reason"
+                                    className="accent-amber-600"
+                                    checked={formData.waiting_reason === reason || (reason === 'อื่นๆ' && !['รออะไหล่', 'รอคิว'].includes(formData.waiting_reason))}
+                                    onChange={() => setFormData({...formData, waiting_reason: reason === 'อื่นๆ' ? customWaitingReason : reason})}
+                                />
+                                {reason}
+                            </label>
+                        ))}
+                    </div>
+                    {/* Custom Reason Input */}
+                    {(!['รออะไหล่', 'รอคิว'].includes(formData.waiting_reason)) && (
+                        <input 
+                            className="mt-3 w-full border border-amber-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-500/20"
+                            placeholder="ระบุสาเหตุอื่นๆ..."
+                            value={customWaitingReason}
+                            onChange={e => {
+                                setCustomWaitingReason(e.target.value);
+                                setFormData({...formData, waiting_reason: e.target.value});
+                            }}
+                        />
+                    )}
+                </div>
+            )}
 
-            <div><label className={labelClass}>ทีมงานผู้รับผิดชอบ</label><ServiceTeamSelector assignees={formData.assignees} onChange={a => setFormData({...formData, assignees: a})} /></div>
+            {formData.status === 'Completed' && (
+              <div className="bg-green-50 p-4 rounded-xl border border-green-100 flex items-center gap-4 animate-in fade-in slide-in-from-top-2">
+                <div className="font-bold text-green-700 text-sm whitespace-nowrap">วันที่เสร็จสิ้น:</div>
+                <input type="date" className="w-full px-4 py-2 bg-white border border-green-200 rounded-lg text-sm text-green-800 focus:outline-none focus:ring-2 focus:ring-green-500/50" value={formData.completed_date} onChange={e => setFormData({...formData, completed_date: e.target.value})} required/>
+              </div>
+            )}
+
+            <div className="flex items-center gap-2">
+              <input type="checkbox" id="showTax" className="w-4 h-4 accent-indigo-600 rounded" checked={formData.show_tax_id} onChange={e => setFormData({...formData, show_tax_id: e.target.checked})}/>
+              <label htmlFor="showTax" className="text-sm font-medium text-gray-700 cursor-pointer">แสดงเลขผู้เสียภาษีลูกค้าในบิล</label>
+            </div>
           </div>
 
           <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 min-h-[300px]">
@@ -291,14 +333,12 @@ const ServiceForm = ({ onCancel, onSuccess, initialData }) => {
           </div>
 
           <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
-             <h3 className="font-bold text-gray-800 mb-4 text-lg flex items-center gap-2">
-               <History size={20} className="text-indigo-500"/> อัปเดตความคืบหน้า (Job Timeline)
-             </h3>
+             <h3 className="font-bold text-gray-800 mb-4 text-lg flex items-center gap-2"><History size={20} className="text-indigo-500"/> อัปเดตความคืบหน้า (Job Timeline)</h3>
              <ServiceUpdateManager updates={formData.updates} onChange={u => setFormData({...formData, updates: u})} />
           </div>
         </div>
 
-        {/* Right Column */}
+        {/* Right Column (เหมือนเดิม) */}
         <div className="space-y-6">
           <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
             <h3 className="font-bold text-gray-800 mb-4 text-lg">สรุปค่าใช้จ่าย</h3>
@@ -322,24 +362,20 @@ const ServiceForm = ({ onCancel, onSuccess, initialData }) => {
                </div>
             </div>
           </div>
-
-          <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
-             <h3 className="font-bold text-gray-800 mb-4">การชำระเงิน / มัดจำ</h3>
-             <PaymentManager payments={formData.payments} onChange={p => setFormData({...formData, payments: p})} grandTotal={grandTotal} />
+          <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 animate-in fade-in slide-in-from-bottom-2">
+              <h3 className="font-bold text-gray-800 mb-4">การชำระเงิน</h3>
+              <PaymentManager payments={formData.payments} onChange={p => setFormData({...formData, payments: p})} grandTotal={grandTotal} />
           </div>
-
           <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
-             <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><FileText size={18}/> รูปภาพรถ / อาการ</h3>
-             <ImageUploader images={formData.images} onChange={imgs => setFormData({...formData, images: imgs})} />
+            <h3 className="font-bold text-gray-800 mb-4">รูปภาพอ้างอิง</h3>
+            <ImageUploader images={formData.images} onChange={imgs => setFormData({...formData, images: imgs})} />
           </div>
-
           <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
-             <h3 className="font-bold text-gray-800 mb-2">หมายเหตุ</h3>
-             <textarea className="w-full bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 rounded-xl p-3 text-sm transition-all outline-none" rows="3" value={formData.notes} onChange={e => setFormData({...formData, notes: e.target.value})} placeholder="บันทึกเพิ่มเติม..." />
+            <h3 className="font-bold text-gray-800 mb-2">หมายเหตุ</h3>
+            <textarea className="w-full bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 rounded-xl p-3 text-sm transition-all outline-none" rows="3" value={formData.notes} onChange={e => setFormData({...formData, notes: e.target.value})} placeholder="บันทึกเพิ่มเติม..." />
           </div>
         </div>
       </div>
-
       {showPreview && <ServiceBillPreview service={previewServiceData} onClose={() => setShowPreview(false)} />}
     </form>
   );

@@ -1,29 +1,25 @@
 import React, { useState, useEffect } from 'react';
-import { Phone, MapPin, User, DollarSign } from 'lucide-react';
+import { Phone, MapPin, User, DollarSign, Map } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 
 const CustomerListItem = ({ customer, onClick }) => {
   const mainContact = customer.social_channels?.[0];
-  // สร้าง State เก็บยอดเงินจริง
   const [realTotalSpent, setRealTotalSpent] = useState(customer.total_spent || 0);
 
-  // ดึงยอดรวมจากออเดอร์จริงของลูกค้าคนนี้ (ไม่รวมรายการที่ยกเลิก)
   useEffect(() => {
     const fetchTotal = async () => {
       if (!customer?.id) return;
-
       const { data } = await supabase
         .from('orders')
         .select('grand_total')
         .eq('customer_id', customer.id)
-        .neq('status', 'Cancelled'); // ไม่นับออเดอร์ที่ยกเลิก
+        .neq('status', 'Cancelled');
       
       if (data) {
         const sum = data.reduce((acc, curr) => acc + (curr.grand_total || 0), 0);
         setRealTotalSpent(sum);
       }
     };
-
     fetchTotal();
   }, [customer.id]);
 
@@ -57,9 +53,23 @@ const CustomerListItem = ({ customer, onClick }) => {
         ) : <span className="text-gray-400 text-xs">-</span>}
       </td>
       <td className="px-6 py-5">
-        <div className="flex items-center gap-1.5 text-sm text-gray-600 bg-gray-50 px-3 py-1.5 rounded-lg w-fit border border-gray-100">
-          <MapPin size={14} className="text-indigo-400"/>
-          {customer.address_parsed?.prov || 'ไม่ระบุ'}
+        <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 text-sm text-gray-600 bg-gray-50 px-3 py-1.5 rounded-lg w-fit border border-gray-100">
+                <MapPin size={14} className="text-indigo-400"/>
+                {customer.address_parsed?.prov || 'ไม่ระบุ'}
+            </div>
+            {customer.location_url && (
+                <a 
+                    href={customer.location_url} 
+                    target="_blank" 
+                    rel="noreferrer" 
+                    onClick={(e) => e.stopPropagation()} // ไม่ให้กดแล้วเด้งเข้าหน้า Detail
+                    className="p-1.5 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-colors"
+                    title="เปิดแผนที่"
+                >
+                    <Map size={16}/>
+                </a>
+            )}
         </div>
       </td>
       <td className="px-6 py-5">

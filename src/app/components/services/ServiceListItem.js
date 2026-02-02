@@ -1,36 +1,25 @@
 import React from 'react';
-import { Wrench, Calendar, User, Clock, Wallet } from 'lucide-react';
+import { Wrench, Calendar, User, Clock, Wallet, CheckCircle2, AlertCircle, Truck, PauseCircle, XCircle, PlayCircle } from 'lucide-react';
 
 const ServiceListItem = ({ service, onClick }) => {
-  const getStatusColor = (s) => {
-    switch(s) {
-      case 'Received': return 'bg-gray-100 text-gray-600 border-gray-200';
-      case 'Checking': return 'bg-yellow-100 text-yellow-700 border-yellow-200';
-      case 'In Progress': return 'bg-blue-100 text-blue-700 border-blue-200';
-      case 'Done': return 'bg-indigo-100 text-indigo-700 border-indigo-200';
-      case 'Tested': return 'bg-orange-100 text-orange-700 border-orange-200';
-      case 'Completed': return 'bg-emerald-100 text-emerald-700 border-emerald-200';
-      case 'Delivered': return 'bg-teal-100 text-teal-700 border-teal-200';
-      case 'Cancelled': return 'bg-red-100 text-red-700 border-red-200';
-      default: return 'bg-gray-100';
+  // Logic การแสดงผลสถานะ (Unified Status Logic)
+  const getStatusDisplay = (status, reason) => {
+    switch (status) {
+      case 'Waiting':
+        if (reason === 'รอคิว') return { color: 'bg-orange-100 text-orange-700 border-orange-200', icon: PauseCircle, label: 'รอคิว' };
+        if (reason === 'รออะไหล่') return { color: 'bg-red-100 text-red-700 border-red-200', icon: AlertCircle, label: 'รออะไหล่' };
+        return { color: 'bg-yellow-100 text-yellow-800 border-yellow-200', icon: Clock, label: reason ? `รอ: ${reason}` : 'รอดำเนินการ' };
+      
+      case 'In Progress': return { color: 'bg-blue-100 text-blue-700 border-blue-200', icon: Wrench, label: 'กำลังซ่อม' };
+      case 'Tested': return { color: 'bg-purple-100 text-purple-700 border-purple-200', icon: PlayCircle, label: 'ทดสอบแล้ว' };
+      case 'Delivered': return { color: 'bg-teal-100 text-teal-700 border-teal-200', icon: Truck, label: 'ส่งมอบแล้ว' };
+      case 'Completed': return { color: 'bg-green-100 text-green-700 border-green-200', icon: CheckCircle2, label: 'เรียบร้อย' };
+      case 'Cancelled': return { color: 'bg-gray-100 text-gray-500 border-gray-200', icon: XCircle, label: 'ยกเลิก' };
+      default: return { color: 'bg-gray-50 text-gray-600 border-gray-200', icon: Clock, label: status };
     }
   };
 
-  const getStatusLabel = (status) => {
-    const labels = {
-        'Waiting': 'รอทำ',
-        'In Progress': 'ส่งทำ',
-        'Done': 'ทำเสร็จแล้ว',
-        'Tested': 'ทดสอบแล้ว',
-        'Completed': 'เรียบร้อย',
-        'Cancelled': 'ยกเลิก',
-        'Received': 'รับรถเข้า',
-        'Checking': 'กำลังตรวจเช็ค',
-        'Quoted': 'เสนอราคาแล้ว',
-        'Delivered': 'ส่งมอบแล้ว'
-    };
-    return labels[status] || status;
-  };
+  const statusInfo = getStatusDisplay(service.status, service.waiting_reason);
 
   // Payment Status Logic
   const getPaymentStatus = () => {
@@ -116,8 +105,8 @@ const ServiceListItem = ({ service, onClick }) => {
         </div>
       </td>
       <td className="px-6 py-4 text-center">
-         <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase border border-transparent ${getStatusColor(service.status)}`}>
-           {getStatusLabel(service.status)}
+         <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase border flex items-center justify-center gap-1 w-fit mx-auto ${statusInfo.color}`}>
+           <statusInfo.icon size={12}/> {statusInfo.label}
          </span>
       </td>
       <td className="px-6 py-4 text-center">

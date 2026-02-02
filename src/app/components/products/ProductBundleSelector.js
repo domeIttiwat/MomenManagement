@@ -10,14 +10,25 @@ const ProductBundleSelector = ({ bundles = [], onChange, variants = [] }) => {
   const [isAdding, setIsAdding] = useState(false); // ควบคุมการเปิด Modal ค้นหา
   const [targetVariants, setTargetVariants] = useState([]); // เก็บ ID ของรุ่นที่จะเพิ่มอะไหล่ลงไป
   
+  const [sparePartCategoryId, setSparePartCategoryId] = useState(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     setMounted(true);
+    const fetchCatId = async () => {
+      try {
+        const { data } = await supabase.from('categories')
+          .select('id')
+          .or('name.ilike.Spare Parts,name.ilike.Parts,name.ilike.อะไหล่,name.ilike.ชิ้นส่วน')
+          .limit(1);
+        if (data && data.length > 0) setSparePartCategoryId(data[0].id);
+      } catch (err) { console.error(err); }
+    };
+    fetchCatId();
   }, []);
 
-  // Search Logic (ปลดล็อก: ค้นหาจากทุกหมวดหมู่)
+  // Search Logic
   useEffect(() => {
     if (!isAdding) return;
     
@@ -58,7 +69,7 @@ const ProductBundleSelector = ({ bundles = [], onChange, variants = [] }) => {
     let addedCount = 0;
 
     targetVariants.forEach(vId => {
-        // FIX: ลบการเช็คซ้ำ (exists) ออก เพื่อให้เพิ่มรายการเดิมซ้ำได้ตามต้องการ
+        // ลบการเช็คซ้ำ (exists) ออก เพื่อให้เพิ่มรายการเดิมซ้ำได้ตามต้องการ
         newBundles.push({
             child_product_id: product.id,
             product: product, 
@@ -70,8 +81,8 @@ const ProductBundleSelector = ({ bundles = [], onChange, variants = [] }) => {
 
     if (addedCount > 0) {
         onChange(newBundles);
-        // Alert เล็กน้อยเพื่อให้รู้ว่ากดติด
-        // alert(`เพิ่ม "${product.name}" เรียบร้อย`);
+        // FIX: ปิดหน้าต่างทันทีหลังจากเพิ่มสำเร็จ
+        setIsAdding(false);
     } else {
         alert('กรุณาเลือกสเปคที่ต้องการเพิ่มลงไปก่อน');
     }
@@ -92,11 +103,11 @@ const ProductBundleSelector = ({ bundles = [], onChange, variants = [] }) => {
     
     if (newProduct && newProduct.id) {
         addProductToBundle(newProduct);
-        alert(`สร้างและเพิ่มสินค้า "${newProduct.name}" เรียบร้อย`);
+        // ปิดหน้าต่างค้นหาด้วยเพื่อให้เห็นผลลัพธ์ที่หน้าหลัก
         setIsAdding(false);
     } else {
         setSearch(''); 
-        alert('สร้างสินค้าเรียบร้อย (กรุณาค้นหาเพื่อเพิ่มรายการ)');
+        alert('สร้างอะไหล่เรียบร้อย (กรุณาค้นหาเพื่อเพิ่มรายการ)');
     }
   };
 
@@ -130,7 +141,7 @@ const ProductBundleSelector = ({ bundles = [], onChange, variants = [] }) => {
                 onChange={e => updateQty(originalIndex, e.target.value)}
             />
         </div>
-        <button type="button" onClick={() => removeBundle(originalIndex)} className="text-gray-300 hover:text-red-500 p-1"><Trash2 size={14}/></button>
+        <button onClick={() => removeBundle(originalIndex)} className="text-gray-300 hover:text-red-500 p-1"><Trash2 size={14}/></button>
     </div>
   );
 
@@ -139,13 +150,13 @@ const ProductBundleSelector = ({ bundles = [], onChange, variants = [] }) => {
       {/* 1. Common Parts Section */}
       <div className="bg-blue-50/50 p-4 rounded-2xl border border-blue-100">
          <div className="flex justify-between items-center mb-3">
-            <h4 className="font-bold text-blue-800 text-sm flex items-center gap-2"><Layers size={16}/> ส่วนประกอบพื้นฐาน (ใช้ทุกรุ่น)</h4>
+            <h4 className="font-bold text-blue-800 text-sm flex items-center gap-2"><Layers size={16}/> อะไหล่พื้นฐาน (ใช้ทุกรุ่น)</h4>
             <button type="button" onClick={() => startAdd(null)} className="text-[10px] bg-white border border-blue-200 text-blue-600 px-2 py-1 rounded hover:bg-blue-50 flex items-center gap-1 font-bold">
                 <Plus size={12}/> เพิ่ม
             </button>
          </div>
          <div className="space-y-1">
-             {commonBundles.length > 0 ? commonBundles.map(b => renderItem(b, bundles.indexOf(b))) : <p className="text-center text-xs text-gray-400 py-2">ไม่มีส่วนประกอบพื้นฐาน</p>}
+             {commonBundles.length > 0 ? commonBundles.map(b => renderItem(b, bundles.indexOf(b))) : <p className="text-center text-xs text-gray-400 py-2">ไม่มีอะไหล่พื้นฐาน</p>}
          </div>
       </div>
 
@@ -164,7 +175,7 @@ const ProductBundleSelector = ({ bundles = [], onChange, variants = [] }) => {
                         </button>
                      </div>
                      <div className="space-y-1">
-                         {variantBundles[v.id]?.length > 0 ? variantBundles[v.id].map(b => renderItem(b, bundles.indexOf(b))) : <p className="text-center text-xs text-gray-400 py-2">ใช้ส่วนประกอบพื้นฐานเหมือนกัน</p>}
+                         {variantBundles[v.id]?.length > 0 ? variantBundles[v.id].map(b => renderItem(b, bundles.indexOf(b))) : <p className="text-center text-xs text-gray-400 py-2">ใช้อะไหล่พื้นฐานเหมือนกัน</p>}
                      </div>
                  </div>
              ))}
@@ -173,7 +184,7 @@ const ProductBundleSelector = ({ bundles = [], onChange, variants = [] }) => {
 
       {/* Cost Summary */}
       <div className="flex justify-between items-center p-4 bg-amber-50 rounded-2xl border border-amber-100 mt-4">
-        <span className="text-sm font-bold text-amber-800">ต้นทุนรวมส่วนประกอบ (โดยประมาณ)</span>
+        <span className="text-sm font-bold text-amber-800">ต้นทุนรวมอะไหล่ (โดยประมาณ)</span>
         <span className="text-xl font-black text-amber-600">฿{totalBundleCost.toLocaleString()}</span>
       </div>
 
@@ -182,15 +193,14 @@ const ProductBundleSelector = ({ bundles = [], onChange, variants = [] }) => {
           <div className="fixed inset-0 z-[100] bg-black/60 flex items-center justify-center p-4 backdrop-blur-sm">
              <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh] animate-in zoom-in-95">
                 <div className="p-4 border-b bg-gray-50 flex justify-between items-center">
-                   <h3 className="font-bold text-gray-800">เลือกสินค้า/อะไหล่ประกอบ</h3>
-                   <button type="button" onClick={() => setIsAdding(false)}><X size={20}/></button>
+                   <h3 className="font-bold text-gray-800">เลือกอะไหล่ประกอบ</h3>
+                   <button onClick={() => setIsAdding(false)}><X size={20}/></button>
                 </div>
                 
                 {/* Target Selectors */}
                 <div className="p-3 bg-indigo-50 border-b border-indigo-100">
                     <p className="text-xs font-bold text-indigo-700 mb-2">เพิ่มลงใน:</p>
                     <div className="flex flex-wrap gap-2">
-                        {/* FIX: เพิ่ม type="button" ป้องกัน submit form */}
                         <button 
                             type="button"
                             onClick={() => toggleTargetVariant(null)}
@@ -215,8 +225,8 @@ const ProductBundleSelector = ({ bundles = [], onChange, variants = [] }) => {
                    <div className="relative">
                       <Search className="absolute left-3 top-2.5 text-gray-400" size={16}/>
                       <input 
-                        className="w-full pl-9 pr-3 py-2 bg-gray-100 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500/20"
-                        placeholder="ค้นหาสินค้า..." 
+                        className="w-full pl-10 pr-4 py-2 bg-gray-100 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500/20"
+                        placeholder="ค้นหา (ทุกหมวดหมู่)..." 
                         value={search} 
                         onChange={e => setSearch(e.target.value)} 
                         autoFocus
@@ -236,7 +246,7 @@ const ProductBundleSelector = ({ bundles = [], onChange, variants = [] }) => {
                              {p.images?.[0] && <img src={p.images[0]} className="w-full h-full object-cover"/>}
                           </div>
                           <div className="flex-1 min-w-0">
-                             <p className="text-sm font-bold text-gray-800 truncate">{p.name}</p>
+                             <p className="text-sm font-bold text-gray-800">{p.name}</p>
                              <p className="text-xs text-gray-500">{p.sku}</p>
                           </div>
                           <div className="text-right">
@@ -256,13 +266,11 @@ const ProductBundleSelector = ({ bundles = [], onChange, variants = [] }) => {
       {showCreateForm && mounted && createPortal(
         <div className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4 backdrop-blur-sm">
           <div className="bg-white rounded-2xl w-full max-w-5xl max-h-[90vh] overflow-y-auto shadow-2xl">
-            {/* FIX: เพิ่ม div ดัก event submit ไม่ให้ทะลุไป form หลัก */}
             <div className="p-2" onSubmit={(e) => e.stopPropagation()}>
                 <ProductForm 
                     onCancel={() => setShowCreateForm(false)} 
                     onSuccess={handleCreateSuccess}
-                    // ปลดล็อก: ไม่ส่ง initialData category เพื่อให้เลือกหมวดหมู่ได้อิสระ
-                    initialData={null}
+                    initialData={sparePartCategoryId ? { category_id: sparePartCategoryId } : null}
                 />
             </div>
           </div>
