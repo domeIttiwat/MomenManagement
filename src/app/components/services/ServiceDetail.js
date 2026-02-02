@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, Edit, Trash2, Printer, Wrench, User, Calendar, Clock, DollarSign, CreditCard, Banknote, Landmark, X, History, FileText, CheckCircle2, AlertCircle, Truck, PauseCircle, XCircle, PlayCircle, Send, Paperclip, MoreHorizontal, Image as ImageIcon, MessageCircle, Loader2 } from 'lucide-react';
+import { ArrowLeft, Edit, Trash2, Printer, Wrench, User, Calendar, Clock, DollarSign, CreditCard, Banknote, Landmark, X, History, FileText, CheckCircle2, AlertCircle, Truck, PauseCircle, XCircle, PlayCircle, Send, Paperclip, Loader2, Image as ImageIcon, MessageCircle } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import ServiceBillPreview from './ServiceBillPreview';
 
@@ -198,8 +198,6 @@ const ServiceDetail = ({ service, onBack, onEdit, onDelete }) => {
 
   return (
     <div className="max-w-6xl mx-auto space-y-6 pb-10">
-      
-      {/* Lightbox */}
       {lightboxImg && (
         <div className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center p-4 cursor-zoom-out" onClick={() => setLightboxImg(null)}>
           <img src={lightboxImg} className="max-w-full max-h-[90vh] rounded-lg shadow-2xl object-contain" />
@@ -208,7 +206,7 @@ const ServiceDetail = ({ service, onBack, onEdit, onDelete }) => {
       )}
 
       {/* Navbar */}
-      <div className="flex justify-between items-center bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
+      <div className="flex justify-between items-center bg-white p-4 rounded-2xl shadow-sm border border-gray-100 sticky top-2 z-20">
         <button onClick={onBack} className="flex items-center gap-2 text-gray-600 hover:text-gray-900 font-medium px-2 py-1 rounded-lg hover:bg-gray-50 transition-colors">
           <ArrowLeft size={20}/> กลับหน้ารายการ
         </button>
@@ -222,6 +220,7 @@ const ServiceDetail = ({ service, onBack, onEdit, onDelete }) => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
            <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100">
+              {/* Header Info */}
               <div className="flex justify-between items-start mb-6">
                  <div>
                     <span className="text-xs font-bold text-gray-400 uppercase tracking-wider bg-gray-50 px-2 py-1 rounded">Job No.</span>
@@ -233,20 +232,22 @@ const ServiceDetail = ({ service, onBack, onEdit, onDelete }) => {
                         </div>
                         <div className="flex">
                             <span className={`text-xs px-2 py-1 rounded-lg border inline-flex items-center gap-1 font-bold ${getDurationColorClass(totalDays, isFinished)}`}>
-                                <Clock size={12}/> 
-                                {isFinished ? `เสร็จสิ้น (ใช้เวลา ${durationText})` : `อยู่ในศูนย์มาแล้ว ${durationText}`}
+                                <Clock size={12}/> {isFinished ? `เสร็จสิ้น (ใช้เวลา ${durationText})` : `อยู่ในศูนย์มาแล้ว ${durationText}`}
                             </span>
                         </div>
                     </div>
                  </div>
                  <div className="flex flex-col items-end gap-2">
-                    <span className="px-4 py-2 bg-blue-50 text-blue-700 rounded-lg font-bold text-sm border border-blue-100 shadow-sm">{service.status}</span>
+                    <span className={`px-4 py-2 rounded-lg font-bold text-sm border shadow-sm flex items-center gap-2 ${statusInfo.color}`}>
+                       <statusInfo.icon size={16}/> {statusInfo.label}
+                    </span>
                     <span className={`px-3 py-1 rounded-lg text-xs font-bold border ${payStatus.color} flex items-center gap-1`}>
                        <DollarSign size={12}/> {payStatus.label}
                     </span>
                  </div>
               </div>
 
+              {/* Customer */}
               <div className="p-4 bg-gray-50 rounded-xl border border-gray-100 mb-6 flex items-center gap-4">
                  <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center text-gray-400 shadow-sm border border-gray-200"><User size={24}/></div>
                  <div>
@@ -293,15 +294,15 @@ const ServiceDetail = ({ service, onBack, onEdit, onDelete }) => {
               </div>
            </div>
 
-           {/* Timeline Feed (Facebook Style - Input Bottom) */}
+           {/* Timeline Feed (Facebook Style) */}
            <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
               <h3 className="font-bold text-gray-800 mb-6 flex items-center gap-2 text-lg">
                  <MessageCircle size={20} className="text-indigo-500"/> ความคืบหน้างาน (Updates)
               </h3>
               
-              {/* Feed List (Top) */}
+              {/* Feed List */}
               <div className="relative pl-4 border-l-2 border-indigo-100 ml-2 space-y-6 mb-6">
-                {updates.length > 0 ? updates.map((update) => (
+                {updates.length > 0 ? updates.map((update, i) => (
                     <div key={update.id} className="relative group">
                        <div className="absolute -left-[23px] top-1 w-3 h-3 bg-white border-2 border-indigo-500 rounded-full shadow-sm z-10"></div>
                        
@@ -318,6 +319,18 @@ const ServiceDetail = ({ service, onBack, onEdit, onDelete }) => {
                                       <button onClick={() => setEditingUpdateId(null)} className="text-xs text-gray-500 px-3 py-1 rounded hover:bg-gray-100">ยกเลิก</button>
                                       <button onClick={() => saveEditUpdate(update.id)} className="text-xs bg-indigo-600 text-white px-3 py-1 rounded font-bold hover:bg-indigo-700">บันทึก</button>
                                   </div>
+                               </div>
+                               <div className="flex gap-2 overflow-x-auto pb-1 mt-2">
+                                    {editData.images?.map((img, imgIdx) => (
+                                        <div key={imgIdx} className="relative group/img w-16 h-16 shrink-0">
+                                            <img src={img.url} className="w-full h-full object-cover rounded-lg border"/>
+                                            <button onClick={() => removeNewImage(imgIdx, true)} className="absolute -top-1 -right-1 bg-black/50 text-white rounded-full p-0.5 hover:bg-red-500"><X size={10}/></button>
+                                        </div>
+                                    ))}
+                                    <label className="w-16 h-16 rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 cursor-pointer hover:border-indigo-400 hover:text-indigo-500 bg-white">
+                                        <Paperclip size={20}/>
+                                        <input type="file" multiple accept="image/*" className="hidden" onChange={handleFileSelect} ref={fileInputRef} />
+                                    </label>
                                </div>
                            </div>
                        ) : (
@@ -465,14 +478,25 @@ const ServiceDetail = ({ service, onBack, onEdit, onDelete }) => {
               <h3 className="font-bold text-gray-800 mb-4">ทีมงาน</h3>
               <div className="space-y-2">
                  {service.service_assignees?.map((a, i) => (
-                   <div key={i} className="flex items-center gap-2 text-sm text-gray-600 bg-gray-50 p-2 rounded-lg">
-                      <User size={14} className="text-indigo-400"/> {a.user?.first_name} <span className="text-xs text-gray-400">({a.job_role})</span>
+                   <div key={i} className="flex items-center gap-2 p-2 rounded-lg border border-gray-100 bg-gray-50">
+                      <div className="w-8 h-8 rounded-full bg-white border border-gray-200 flex items-center justify-center overflow-hidden shrink-0">
+                        {a.user?.avatar_url ? (
+                          <img src={a.user.avatar_url} alt={a.user.first_name} className="w-full h-full object-cover"/>
+                        ) : (
+                          <span className="text-xs font-bold text-gray-400">{a.user?.first_name?.[0]}</span>
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-800 truncate">{a.user?.first_name} {a.user?.last_name}</p>
+                        <p className="text-xs text-indigo-500">{a.job_role}</p>
+                      </div>
                    </div>
                  ))}
-                 {(!service.service_assignees || service.service_assignees.length === 0) && <p className="text-gray-400 text-sm text-center">ไม่ได้ระบุผู้รับผิดชอบ</p>}
+                 {(!service.service_assignees || service.service_assignees.length === 0) && <p className="text-gray-400 text-sm text-center">-</p>}
               </div>
            </div>
-
+           
+           {/* ... (Images, Notes like before) */}
            {service.images?.length > 0 && (
               <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
                  <h3 className="font-bold text-gray-800 mb-4">รูปภาพ</h3>

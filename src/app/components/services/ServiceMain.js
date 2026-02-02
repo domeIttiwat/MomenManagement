@@ -19,7 +19,8 @@ const ServiceMain = () => {
   const fetchServices = async () => {
     setLoading(true);
     const { data } = await supabase.from('services')
-      .select('*, service_items(*), service_assignees(job_role, user:user_id(first_name, last_name)), service_payments(*), service_updates(*)')
+      // เพิ่ม avatar_url ในการดึงข้อมูล user
+      .select('*, service_items(*), service_assignees(job_role, user:user_id(first_name, last_name, avatar_url)), service_payments(*), service_updates(*)')
       .order('created_at', { ascending: false });
     if (data) setServices(data);
     setLoading(false);
@@ -91,7 +92,7 @@ const ServiceMain = () => {
          </div>
 
          <div className="flex flex-wrap items-center gap-2 px-2">
-            {/* Status Filter Updated */}
+            {/* Status Filter */}
             <div className="relative">
                <select 
                  className="appearance-none bg-gray-50 hover:bg-gray-100 px-4 py-3 pl-10 pr-8 rounded-xl text-sm font-semibold text-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 cursor-pointer border-none"
@@ -100,9 +101,10 @@ const ServiceMain = () => {
                  <option value="All">ทุกสถานะ</option>
                  <option value="Waiting">รอทำ</option>
                  <option value="In Progress">ส่งทำ</option>
-                 <option value="Tested">รอเทส</option>
-                 <option value="Delivered">รอส่ง</option>
-                 <option value="Completed">ออเดอร์เรียบร้อย</option>
+                 <option value="Done">ทำเสร็จแล้ว</option>
+                 <option value="Tested">ทดสอบแล้ว</option>
+                 <option value="Completed">เรียบร้อย</option>
+                 <option value="Cancelled">ยกเลิก</option>
                </select>
                <Filter size={16} className="absolute left-3.5 top-3.5 text-gray-400 pointer-events-none"/>
             </div>
