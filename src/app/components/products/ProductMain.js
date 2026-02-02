@@ -20,26 +20,39 @@ const ProductMain = () => {
   const [showCategoryFilter, setShowCategoryFilter] = useState(false);
   const [sortOption, setSortOption] = useState('name_asc');
 
-  const fetchAllData = async () => {
+  // Initialization
+  useEffect(() => {
+    initData();
+  }, []);
+
+  const initData = async () => {
     setLoading(true);
-    await Promise.all([fetchCategories(), fetchProducts()]);
+    // 1. ดึงหมวดหมู่ก่อน เพื่อเอามา Map
+    const cats = await fetchCategories();
+    // 2. ดึงสินค้า และส่งหมวดหมู่ไปช่วย Map
+    await fetchProducts(cats);
     setLoading(false);
   };
 
   const fetchCategories = async () => {
     try {
       const { data } = await supabase.from('categories').select('*').order('name');
-      if (data) setCategories(data);
+      if (data) {
+        // Filter unique names just in case
+        const unique = data.filter((v,i,a)=>a.findIndex(t=>(t.name === v.name))===i);
+        setCategories(unique);
+        return unique;
+      }
     } catch (err) {
       console.error('Error fetching categories:', err);
     }
+    return [];
   };
 
-  const fetchProducts = async () => {
+  const fetchProducts = async (catsList = []) => {
     try {
-        // --- TIER 1: Full Fetch ---
-        // FIX: ลบ 'categories(name)' ออก เพื่อแก้ปัญหา Ambiguous relationship
-        // เราจะใช้ข้อมูลจาก 'product_categories(...)' แทน
+        // TIER 1: Full Fetch
+        // ดึง category_id มาด้วยเพื่อใช้เป็น Fallback
         const { data: prodData, error } = await supabase
         .from('products')
         .select(`
@@ -55,14 +68,13 @@ const ProductMain = () => {
         if (error) throw error;
         
         if (prodData) {
-            processProductData(prodData);
+            processProductData(prodData, catsList);
             return; 
         }
     } catch (err) {
-        console.warn('Tier 1 failed (Bundle/Fastener tables might be missing), trying Tier 2...', err.message);
+        console.warn('Tier 1 failed, trying Tier 2...', err.message);
         
-        // --- TIER 2: Standard Fetch (Fallback) ---
-        // FIX: ลบ 'categories(name)' ออกเช่นกัน
+        // TIER 2: Fallback
         try {
             const { data: stdData, error: stdError } = await supabase
             .from('products')
@@ -76,36 +88,31 @@ const ProductMain = () => {
             
             if (stdError) throw stdError;
             if (stdData) {
-                processProductData(stdData);
-                return;
+                processProductData(stdData, catsList);
             }
 
         } catch (stdErr) {
-            console.error('Tier 2 Fetch failed:', stdErr.message);
-
-            // --- TIER 3: Basic Fetch ---
-            try {
-                const { data: basicData, error: basicError } = await supabase
-                .from('products')
-                .select('*')
-                .order('created_at', { ascending: false });
-                
-                if (basicError) throw basicError;
-                if (basicData) {
-                    processProductData(basicData);
-                }
-            } catch (criticalErr) {
-                alert('ไม่สามารถโหลดข้อมูลสินค้าได้เลย');
-            }
+            console.error('Tier 2 failed:', stdErr.message);
+            // Tier 3: Basic
+             try {
+                const { data: basic, error: bErr } = await supabase.from('products').select('*').order('created_at', { ascending: false });
+                if(bErr) throw bErr;
+                processProductData(basic, catsList);
+             } catch(finalErr) {
+                console.error('All fetch failed');
+             }
         }
     }
   };
 
-  const processProductData = (data) => {
+  const processProductData = (data, catsList) => {
     if (!data) return;
     
+    // Create Map for ID -> Name
+    const catMap = {};
+    catsList.forEach(c => catMap[c.id] = c.name);
+
     const productsWithStats = data.map(p => {
-        // Stats Calculation
         const sales = p.order_items || [];
         const soldCount = sales.reduce((sum, item) => sum + (item.quantity || 0), 0);
         const timesOrdered = sales.length;
@@ -116,29 +123,19 @@ const ProductMain = () => {
         const hasBundles = p.product_bundles?.length > 0;
         const hasFasteners = p.product_fasteners?.length > 0;
 
-        // --- Robust Category Parsing ---
+        // --- HYBRID CATEGORY PARSING ---
         const catSet = new Set();
         
-        // 1. จากหมวดหมู่หลัก (categories) - (Legacy support if still needed/returned)
-        if (p.categories) {
-            if (Array.isArray(p.categories)) {
-                p.categories.forEach(c => c.name && catSet.add(c.name));
-            } else if (p.categories.name) {
-                catSet.add(p.categories.name);
-            }
-        }
-
-        // 2. จากหลายหมวดหมู่ (product_categories) - Main source now
+        // 1. จากระบบใหม่ (Many-to-Many)
         if (p.product_categories && Array.isArray(p.product_categories)) {
             p.product_categories.forEach(pc => {
-                if (pc.categories) {
-                    if (Array.isArray(pc.categories)) {
-                        pc.categories.forEach(c => c.name && catSet.add(c.name));
-                    } else if (pc.categories.name) {
-                        catSet.add(pc.categories.name);
-                    }
-                }
+                if (pc.categories?.name) catSet.add(pc.categories.name);
             });
+        }
+        
+        // 2. จากระบบเก่า (Fallback using category_id)
+        if (catSet.size === 0 && p.category_id && catMap[p.category_id]) {
+            catSet.add(catMap[p.category_id]);
         }
         
         let categoryNames = Array.from(catSet);
@@ -155,8 +152,6 @@ const ProductMain = () => {
     });
     setProducts(productsWithStats);
   };
-
-  useEffect(() => { fetchAllData(); }, []);
 
   const toggleCategory = (catName) => {
     setSelectedCategories(prev => 
@@ -175,9 +170,10 @@ const ProductMain = () => {
       result = result.filter(p => p.name?.toLowerCase().includes(s) || p.sku?.toLowerCase().includes(s));
     }
 
-    // 2. Filter Category
+    // 2. Filter Category (Improved)
     if (selectedCategories.length > 0) {
       result = result.filter(p => 
+        // เช็คว่าสินค้ามีหมวดหมู่ที่ตรงกับที่เลือกอย่างน้อย 1 อัน
         p.categoryNames && p.categoryNames.some(cat => selectedCategories.includes(cat))
       );
     }
@@ -196,7 +192,7 @@ const ProductMain = () => {
   }, [products, search, selectedCategories, sortOption]);
 
   if (view === 'fasteners') return <FastenerManager onBack={() => setView('list')} />;
-  if (view === 'form') return <ProductForm onCancel={() => setView('list')} onSuccess={() => { setView('list'); fetchAllData(); }} initialData={selectedProduct} />;
+  if (view === 'form') return <ProductForm onCancel={() => setView('list')} onSuccess={() => { setView('list'); initData(); }} initialData={selectedProduct} />;
   
   if (view === 'detail' && selectedProduct) return (
     <ProductDetail 
@@ -205,7 +201,7 @@ const ProductMain = () => {
       onEdit={() => setView('form')} 
       showCost={showCost} 
       setShowCost={setShowCost} 
-      onDelete={() => { fetchAllData(); setView('list'); }} 
+      onDelete={() => { initData(); setView('list'); }} 
     />
   );
 

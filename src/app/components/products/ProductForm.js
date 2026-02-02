@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Save, Loader2, Info, Wrench, Package, Layers } from 'lucide-react';
+import { ArrowLeft, Save, Loader2, Info, Wrench, Layers } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import ImageUploader from './ImageUploader';
 import CategoryManager from './CategoryManager';
@@ -30,7 +30,7 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
     cost_price: 0, 
     sell_price: 0, 
     has_variants: false,
-    // stock_quantity: 0 // ตัดออก
+    // ลบ compatibility_mode และ compatible_models ออก
   });
   
   const [variants, setVariants] = useState([]);
@@ -113,7 +113,6 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
 
     setLoading(true);
     try {
-      // 1. Upload Images
       const uploadedImageUrls = await Promise.all(formData.images.map(async (imgObj) => {
         if (imgObj.file) {
           const fileName = `${Date.now()}-${Math.random()}`;
@@ -132,17 +131,19 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
         images: uploadedImageUrls,
         cost_price: formData.has_variants ? 0 : formData.cost_price,
         sell_price: formData.has_variants ? 0 : formData.sell_price,
-        // stock_quantity: formData.has_variants ? 0 : formData.stock_quantity, // ตัดออกถาวร
         has_variants: formData.has_variants,
+        // ลบ compatibility payload ออก
       };
 
       let productId = initialData?.id;
       let resultData = null;
       
       if (productId) {
-        const { data } = await supabase.from('products').update(productPayload).eq('id', productId).select().single();
-        resultData = data;
+        await supabase.from('products').update(productPayload).eq('id', productId);
         await supabase.from('product_categories').delete().eq('product_id', productId);
+        // สามารถใช้ productPayload เดิมได้เลย เพราะ Supabase จะ ignore คอลัมน์ที่ไม่มีใน payload 
+        // แต่ถ้าในตารางมีคอลัมน์อยู่แล้วเราไม่ส่งไป มันก็จะคงค่าเดิมไว้ (สำหรับการ Update)
+        // กรณีนี้เราจะไปลบคอลัมน์ออกทีหลัง ดังนั้นโค้ดนี้ปลอดภัย
       } else {
         const { data, error } = await supabase.from('products').insert([productPayload]).select().single();
         if (error) throw error;
@@ -168,8 +169,7 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
             sku: v.sku || `${formData.sku}-${v.name.replace(/\s+/g, '')}`, 
             options: v.options,
             cost_price: Number(v.cost_price), 
-            sell_price: Number(v.sell_price),
-            // stock_quantity: Number(v.stock_quantity) // ตัดออก
+            sell_price: Number(v.sell_price)
           })));
         }
       }
@@ -219,6 +219,7 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         
+        {/* Sidebar Tabs */}
         <div className="space-y-6">
            <div className="bg-white p-4 rounded-3xl shadow-sm border border-gray-100">
               <div className="space-y-2">
@@ -244,6 +245,7 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
            </div>
         </div>
 
+        {/* Main Content */}
         <div className="lg:col-span-2 space-y-6">
            
            {activeTab === 'info' && (
