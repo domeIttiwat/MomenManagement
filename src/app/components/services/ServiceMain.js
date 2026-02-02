@@ -19,8 +19,8 @@ const ServiceMain = () => {
   const fetchServices = async () => {
     setLoading(true);
     const { data } = await supabase.from('services')
-      // เพิ่ม avatar_url ในการดึงข้อมูล user
-      .select('*, service_items(*), service_assignees(job_role, user:user_id(first_name, last_name, avatar_url)), service_payments(*), service_updates(*)')
+      // --- FIX: เพิ่ม user_id ใน service_assignees ---
+      .select('*, service_items(*), service_assignees(user_id, job_role, user:user_id(first_name, last_name, avatar_url)), service_payments(*), service_updates(*)')
       .order('created_at', { ascending: false });
     if (data) setServices(data);
     setLoading(false);

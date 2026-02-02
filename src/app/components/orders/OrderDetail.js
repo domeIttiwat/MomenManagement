@@ -8,7 +8,7 @@ const OrderDetail = ({ order, onBack, onEdit, onDelete, showProfit, setShowProfi
   const [showBill, setShowBill] = useState(false);
   const [lightboxImg, setLightboxImg] = useState(null);
   
-  // Timeline State
+  // Timeline State (Code Timeline เดิม...)
   const [updates, setUpdates] = useState(order?.order_updates || []);
   const [newUpdate, setNewUpdate] = useState({ description: '', date: new Date().toISOString().split('T')[0], images: [] });
   const [isPosting, setIsPosting] = useState(false);
@@ -24,7 +24,9 @@ const OrderDetail = ({ order, onBack, onEdit, onDelete, showProfit, setShowProfi
     const { data } = await supabase.from('order_updates').select('*').eq('order_id', order.id).order('created_at', { ascending: true });
     if (data) setUpdates(data);
   };
-
+  
+  // (ฟังก์ชัน handleFileSelect, removeNewImage, handlePostUpdate, ฯลฯ เหมือนเดิม)
+  // ... (เพื่อความกระชับ ขอละไว้ ใส่ตามเดิมได้เลยครับ)
   const handleFileSelect = (e) => {
     const files = Array.from(e.target.files);
     if (files.length > 0) {
@@ -118,6 +120,7 @@ const OrderDetail = ({ order, onBack, onEdit, onDelete, showProfit, setShowProfi
      }
   };
 
+
   if (!order) return null;
 
   const totalCost = order.order_items?.reduce((sum, item) => sum + (item.cost_price * item.quantity), 0) || 0;
@@ -191,6 +194,7 @@ const OrderDetail = ({ order, onBack, onEdit, onDelete, showProfit, setShowProfi
   return (
     <div className="max-w-7xl mx-auto space-y-8 pb-10 animate-in slide-in-from-right-4 fade-in duration-300">
       
+      {/* Lightbox Modal */}
       {lightboxImg && (
         <div className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center p-4 cursor-zoom-out" onClick={() => setLightboxImg(null)}>
           <img src={lightboxImg} className="max-w-full max-h-[90vh] rounded-lg shadow-2xl object-contain animate-in zoom-in-95 duration-200" />
@@ -238,8 +242,6 @@ const OrderDetail = ({ order, onBack, onEdit, onDelete, showProfit, setShowProfi
                     <Clock size={16}/> 
                     {new Date(order.order_date).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' })}
                   </span>
-                  
-                  {/* Duration Badge */}
                   <span className={`text-xs px-2 py-0.5 rounded border flex items-center gap-1 font-bold ${getDurationColorClass(totalDays)}`}>
                     {order.status === 'Completed' ? `เสร็จใน ${durationText}` : `รอ ${durationText}`}
                   </span>
@@ -340,25 +342,60 @@ const OrderDetail = ({ order, onBack, onEdit, onDelete, showProfit, setShowProfi
             </div>
           </div>
 
-          {/* Timeline Feed (Facebook Style - Input Bottom) */}
-           <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+          {/* Timeline Feed */}
+          <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
               <h3 className="font-bold text-gray-800 mb-6 flex items-center gap-2 text-lg">
                  <MessageCircle size={20} className="text-indigo-500"/> ความคืบหน้า (Timeline)
               </h3>
               
-              {/* Feed List */}
+              <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 mb-6">
+                 <div className="flex gap-3 mb-3">
+                    <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 font-bold shrink-0">
+                       <User size={20}/>
+                    </div>
+                    <div className="flex-1">
+                       <textarea 
+                          className="w-full bg-white border border-gray-300 rounded-xl p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none resize-none"
+                          placeholder="บันทึกความคืบหน้า..."
+                          rows="2"
+                          value={newUpdate.description}
+                          onChange={e => setNewUpdate({...newUpdate, description: e.target.value})}
+                       />
+                    </div>
+                 </div>
+                 <div className="flex justify-between items-center pl-12">
+                     <div className="flex gap-2">
+                         <input type="date" className="text-xs border rounded-lg px-2 py-1 bg-white" value={newUpdate.date} onChange={e => setNewUpdate({...newUpdate, date: e.target.value})}/>
+                         <div className="relative">
+                            <label className="cursor-pointer text-gray-500 hover:text-indigo-600 flex items-center gap-1 text-xs px-2 py-1 hover:bg-gray-100 rounded-lg transition-colors">
+                                <Paperclip size={14}/> แนบรูป
+                                <input type="file" multiple accept="image/*" className="hidden" onChange={handleFileSelect} ref={fileInputRef} />
+                            </label>
+                         </div>
+                     </div>
+                     <button onClick={handlePostUpdate} disabled={isPosting || (!newUpdate.description.trim() && newUpdate.images.length === 0)} className="bg-indigo-600 text-white px-4 py-1.5 rounded-lg text-sm font-bold hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-2">
+                        {isPosting ? <Loader2 size={14} className="animate-spin"/> : <Send size={14}/>} โพสต์
+                     </button>
+                 </div>
+                 {newUpdate.images.length > 0 && (
+                    <div className="flex gap-2 mt-3 pl-12 overflow-x-auto">
+                        {newUpdate.images.map((img, i) => (
+                            <div key={i} className="relative w-16 h-16 shrink-0 group">
+                                <img src={img.url} className="w-full h-full object-cover rounded-lg border"/>
+                                <button onClick={() => removeNewImage(i)} className="absolute -top-1 -right-1 bg-black/50 text-white rounded-full p-0.5 hover:bg-red-500"><X size={10}/></button>
+                            </div>
+                        ))}
+                    </div>
+                 )}
+              </div>
+
               <div className="relative pl-4 border-l-2 border-indigo-100 ml-2 space-y-6 mb-6">
                 {updates.length > 0 ? updates.map((update, i) => (
                     <div key={update.id} className="relative group">
                        <div className="absolute -left-[23px] top-1 w-3 h-3 bg-white border-2 border-indigo-500 rounded-full shadow-sm z-10"></div>
-                       
                        {editingUpdateId === update.id ? (
                            <div className="bg-white p-4 rounded-xl border-2 border-indigo-500 shadow-lg">
-                               <textarea 
-                                  className="w-full border rounded-lg p-2 text-sm mb-2"
-                                  value={editData.description}
-                                  onChange={e => setEditData({...editData, description: e.target.value})}
-                               />
+                               <textarea className="w-full border rounded-lg p-2 text-sm mb-2" value={editData.description} onChange={e => setEditData({...editData, description: e.target.value})}/>
                                <div className="flex justify-between items-center">
                                   <input type="date" value={editData.date} onChange={e => setEditData({...editData, date: e.target.value})} className="text-xs border rounded px-2 py-1"/>
                                   <div className="flex gap-2">
@@ -395,62 +432,33 @@ const OrderDetail = ({ order, onBack, onEdit, onDelete, showProfit, setShowProfi
                     <div className="text-center py-6 text-gray-400 text-sm italic">ยังไม่มีการอัปเดต</div>
                 )}
               </div>
-
-              {/* Post Box */}
-              <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 mb-6">
-                 <div className="flex gap-3 mb-3">
-                    <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 font-bold shrink-0">
-                       <User size={20}/>
-                    </div>
-                    <div className="flex-1">
-                       <textarea 
-                          className="w-full bg-white border border-gray-300 rounded-xl p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none resize-none"
-                          placeholder="บันทึกความคืบหน้า..."
-                          rows="2"
-                          value={newUpdate.description}
-                          onChange={e => setNewUpdate({...newUpdate, description: e.target.value})}
-                       />
-                    </div>
-                 </div>
-                 <div className="flex justify-between items-center pl-12">
-                     <div className="flex gap-2">
-                         <input 
-                            type="date" 
-                            className="text-xs border rounded-lg px-2 py-1 bg-white"
-                            value={newUpdate.date}
-                            onChange={e => setNewUpdate({...newUpdate, date: e.target.value})}
-                         />
-                         <div className="relative">
-                            <label className="cursor-pointer text-gray-500 hover:text-indigo-600 flex items-center gap-1 text-xs px-2 py-1 hover:bg-gray-100 rounded-lg transition-colors">
-                                <Paperclip size={14}/> แนบรูป
-                                <input type="file" multiple accept="image/*" className="hidden" onChange={handleFileSelect} ref={fileInputRef} />
-                            </label>
-                         </div>
-                     </div>
-                     <button 
-                        onClick={handlePostUpdate} 
-                        disabled={isPosting || (!newUpdate.description.trim() && newUpdate.images.length === 0)}
-                        className="bg-indigo-600 text-white px-4 py-1.5 rounded-lg text-sm font-bold hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-2 transition-all"
-                     >
-                        {isPosting ? <Loader2 size={14} className="animate-spin"/> : <Send size={14}/>} โพสต์
-                     </button>
-                 </div>
-                 {/* Image Previews */}
-                 {newUpdate.images.length > 0 && (
-                    <div className="flex gap-2 mt-3 pl-12 overflow-x-auto">
-                        {newUpdate.images.map((img, i) => (
-                            <div key={i} className="relative w-16 h-16 shrink-0 group">
-                                <img src={img.url} className="w-full h-full object-cover rounded-lg border"/>
-                                <button onClick={() => removeNewImage(i)} className="absolute -top-1 -right-1 bg-black/50 text-white rounded-full p-0.5 hover:bg-red-500"><X size={10}/></button>
-                            </div>
-                        ))}
-                    </div>
-                 )}
-              </div>
-           </div>
+          </div>
         </div>
 
         <div className="space-y-6">
+           {/* Assignees (NEW) */}
+           <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+              <h3 className="font-bold text-gray-800 mb-4">ผู้รับผิดชอบ</h3>
+              <div className="space-y-2">
+                 {order.order_assignees?.map((a, i) => (
+                   <div key={i} className="flex items-center gap-2 p-2 rounded-lg border border-gray-100 bg-gray-50">
+                      <div className="w-8 h-8 rounded-full bg-white border border-gray-200 flex items-center justify-center overflow-hidden shrink-0">
+                        {a.user?.avatar_url ? (
+                          <img src={a.user.avatar_url} alt={a.user.first_name} className="w-full h-full object-cover"/>
+                        ) : (
+                          <span className="text-xs font-bold text-gray-400">{a.user?.first_name?.[0]}</span>
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-800 truncate">{a.user?.first_name} {a.user?.last_name}</p>
+                        <p className="text-xs text-indigo-500">{a.job_role}</p>
+                      </div>
+                   </div>
+                 ))}
+                 {(!order.order_assignees || order.order_assignees.length === 0) && <p className="text-gray-400 text-sm text-center">-</p>}
+              </div>
+           </div>
+
            <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
               <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><CreditCard size={18} className="text-indigo-500"/> ประวัติการชำระเงิน</h3>
               <div className="space-y-3 relative">

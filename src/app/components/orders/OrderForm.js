@@ -7,7 +7,8 @@ import PaymentManager from './PaymentManager';
 import ImageUploader from './ImageUploader';
 import BillPreview from './BillPreview';
 import NumericInput from '../products/NumericInput';
-import OrderUpdateManager from './OrderUpdateManager'; // Import ใหม่
+import OrderUpdateManager from './OrderUpdateManager';
+import OrderTeamSelector from './OrderTeamSelector'; // Import ใหม่
 
 const OrderForm = ({ onCancel, onSuccess, initialData }) => {
   const [loading, setLoading] = useState(false);
@@ -29,6 +30,7 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
         ...initialData,
         customer: initialData.customer_cache || null, 
         items: initialData.order_items || [], 
+        assignees: initialData.order_assignees || [], // โหลด Assignees เดิม
         payments: (initialData.order_payments || []).map(p => ({
           ...p,
           date: p.payment_date ? p.payment_date.split('T')[0] : p.date,
@@ -36,7 +38,6 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
           fee_percent: p.fee_percent || 0,
           fee_amount: p.fee_amount || 0
         })),
-        // --- FIX: Map Updates ---
         updates: (initialData.order_updates || []).map(u => ({
           ...u,
           images: (u.images || []).map(url => ({ url, file: null }))
@@ -58,9 +59,10 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
       completed_at: '',
       status: 'Quotation',
       customer: null,
+      assignees: [], // New State
       items: [],
       payments: [],
-      updates: [], // New State for Updates
+      updates: [],
       images: [], 
       shipping_cost: 0,
       discount: 0,
@@ -106,6 +108,7 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
     customer_cache: formData.customer,
     order_items: formData.items,
     order_payments: formData.payments,
+    order_assignees: formData.assignees,
     subtotal,
     vat_amount: vatAmount,
     grand_total: grandTotal
@@ -118,18 +121,16 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
     
     setLoading(true);
     try {
-      // 1. Upload Images
-      const uploadedImages = await Promise.all(formData.images.map(async (img) => {
-        if (img.file) {
+      const uploadedImages = await Promise.all(formData.images.map(async (imgObj) => {
+        if (imgObj.file) {
           const fileName = `ord-${Date.now()}-${Math.random()}`;
-          await supabase.storage.from('orders').upload(fileName, img.file);
+          await supabase.storage.from('orders').upload(fileName, imgObj.file);
           const { data } = supabase.storage.from('orders').getPublicUrl(fileName);
           return data.publicUrl;
         }
-        return img.url;
+        return imgObj.url;
       }));
 
-      // 2. Upload Updates Images
       const processedUpdates = await Promise.all(formData.updates.map(async (upd) => {
           const updateImgs = await Promise.all(upd.images.map(async (img) => {
              if (img.file) {
@@ -173,6 +174,7 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
         await supabase.from('order_items').delete().eq('order_id', orderId);
         await supabase.from('order_payments').delete().eq('order_id', orderId);
         await supabase.from('order_updates').delete().eq('order_id', orderId);
+        await supabase.from('order_assignees').delete().eq('order_id', orderId); // Clear old assignees
       } else {
         const { data } = await supabase.from('orders').insert([orderPayload]).select().single();
         orderId = data.id;
@@ -190,13 +192,21 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
       }));
       await supabase.from('order_items').insert(itemsPayload);
 
-      // --- Insert Updates ---
       if (processedUpdates.length > 0) {
         await supabase.from('order_updates').insert(processedUpdates.map(u => ({
             order_id: orderId,
             description: u.description,
             update_date: u.update_date,
             images: u.images
+        })));
+      }
+
+      // Insert Assignees
+      if (formData.assignees.length > 0) {
+        await supabase.from('order_assignees').insert(formData.assignees.map(a => ({
+          order_id: orderId,
+          user_id: a.user_id,
+          job_role: a.job_role
         })));
       }
 
@@ -265,7 +275,7 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
               <div><label className={labelClass}>เลขที่ใบกำกับภาษี</label><input type="text" className={inputClass} placeholder="INV-XXXX" value={formData.invoice_number || ''} onChange={e => setFormData({...formData, invoice_number: e.target.value})} /></div>
               <div>
                 <label className={labelClass}>สถานะ</label>
-                <select className={inputClass} value={formData.status} onChange={e => {
+                <select className={inputClass} value={formData.status} onChange={(e) => {
                     const status = e.target.value;
                     const completedAt = status === 'Completed' && !formData.completed_at ? getLocalDate() : formData.completed_at;
                     setFormData({...formData, status, completed_at: completedAt});
@@ -286,6 +296,13 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
                 <input type="date" className="w-full px-4 py-2 bg-white border border-green-200 rounded-lg text-sm text-green-800 focus:outline-none focus:ring-2 focus:ring-green-500/50" value={formData.completed_at} onChange={e => setFormData({...formData, completed_at: e.target.value})} required/>
               </div>
             )}
+            
+            {/* Team Selector (เพิ่มใหม่) */}
+            <div>
+               <label className={labelClass}>ผู้รับผิดชอบ (Team)</label>
+               <OrderTeamSelector assignees={formData.assignees} onChange={a => setFormData({...formData, assignees: a})} />
+            </div>
+
             <div className="flex items-center gap-2">
               <input type="checkbox" id="showTax" className="w-4 h-4 accent-indigo-600 rounded" checked={formData.show_tax_id} onChange={e => setFormData({...formData, show_tax_id: e.target.checked})}/>
               <label htmlFor="showTax" className="text-sm font-medium text-gray-700 cursor-pointer">แสดงเลขผู้เสียภาษีลูกค้าในบิล</label>

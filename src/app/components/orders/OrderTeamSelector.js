@@ -3,9 +3,9 @@ import { UserPlus, X, User, Search, Briefcase } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 
 // ปรับหน้าที่ตามที่กำหนด
-const PREDEFINED_ROLES = ['รับงาน', 'ช่างเทคนิค', 'QC', 'ผู้นำส่ง', 'อื่นๆ'];
+const PREDEFINED_ROLES = ['ผู้ขาย', 'ช่างเทคนิค', 'QC', 'ผู้นำส่ง', 'อื่นๆ'];
 
-const ServiceTeamSelector = ({ assignees = [], onChange }) => {
+const OrderTeamSelector = ({ assignees = [], onChange }) => {
   const [users, setUsers] = useState([]);
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -20,12 +20,12 @@ const ServiceTeamSelector = ({ assignees = [], onChange }) => {
 
   const addAssignee = (user) => {
     if (assignees.some(a => a.user_id === user.id)) return;
-    
-    // FIX: สร้าง Object ใหม่ที่สมบูรณ์ (รวม user_id)
+    // Default role เป็น "ผู้ขาย"
+    // ใช้ Functional Update หรือ Spread ให้ถูกต้อง
     const newAssignee = { 
         user_id: user.id, 
-        user: user, // เก็บข้อมูลไว้แสดงผล
-        job_role: 'รับงาน' // Default
+        user: user, // เก็บข้อมูล User เต็มๆ ไว้แสดงผลทันที
+        job_role: 'ผู้ขาย' 
     };
     onChange([...assignees, newAssignee]);
     setIsOpen(false);
@@ -37,9 +37,11 @@ const ServiceTeamSelector = ({ assignees = [], onChange }) => {
   };
 
   const updateRole = (idx, role) => {
-    // FIX: ใช้ .map เพื่อ update แบบ immutable
+    // FIX: ใช้ map เพื่อสร้าง Array ใหม่ ไม่ให้ Mutate State เดิมตรงๆ
     const newAssignees = assignees.map((item, i) => {
-        if (i === idx) return { ...item, job_role: role };
+        if (i === idx) {
+            return { ...item, job_role: role };
+        }
         return item;
     });
     onChange(newAssignees);
@@ -58,7 +60,7 @@ const ServiceTeamSelector = ({ assignees = [], onChange }) => {
           const selectValue = isCustomRole ? 'อื่นๆ' : (a.job_role || 'อื่นๆ');
 
           return (
-            <div key={i} className="flex items-center gap-3 bg-white border border-gray-200 rounded-xl p-3 shadow-sm group animate-in slide-in-from-left-2">
+            <div key={i} className="flex items-center gap-3 bg-white border border-gray-200 rounded-xl p-3 shadow-sm group">
               <div className="w-10 h-10 rounded-full bg-indigo-50 flex items-center justify-center overflow-hidden border border-indigo-100 shrink-0">
                 {a.user?.avatar_url ? (
                   <img src={a.user.avatar_url} className="w-full h-full object-cover" />
@@ -69,8 +71,12 @@ const ServiceTeamSelector = ({ assignees = [], onChange }) => {
               
               <div className="flex-1 min-w-0 grid grid-cols-1 sm:grid-cols-2 gap-2 items-center">
                 <div>
-                   <p className="text-sm font-bold text-gray-800 truncate">{a.user?.first_name} {a.user?.last_name}</p>
-                   <p className="text-xs text-gray-500 truncate">{a.user?.nickname ? `(${a.user.nickname})` : ''}</p>
+                   <p className="text-sm font-bold text-gray-800 truncate">
+                     {a.user ? `${a.user.first_name} ${a.user.last_name}` : 'ไม่พบข้อมูลผู้ใช้'}
+                   </p>
+                   <p className="text-xs text-gray-500 truncate">
+                     {a.user?.nickname ? `(${a.user.nickname})` : ''}
+                   </p>
                 </div>
                 
                 <div className="flex flex-col gap-1">
@@ -107,7 +113,7 @@ const ServiceTeamSelector = ({ assignees = [], onChange }) => {
             onClick={() => setIsOpen(!isOpen)}
             className="w-full py-3 border-2 border-dashed border-gray-300 rounded-xl flex items-center justify-center gap-2 text-gray-500 hover:border-indigo-500 hover:text-indigo-600 hover:bg-indigo-50 transition-all font-medium"
           >
-            <UserPlus size={18} /> เพิ่มทีมงานรับผิดชอบ
+            <UserPlus size={18} /> เพิ่มผู้รับผิดชอบ
           </button>
 
           {isOpen && (
@@ -150,4 +156,4 @@ const ServiceTeamSelector = ({ assignees = [], onChange }) => {
     </div>
   );
 };
-export default ServiceTeamSelector;
+export default OrderTeamSelector;

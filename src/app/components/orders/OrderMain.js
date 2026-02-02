@@ -22,8 +22,8 @@ const OrderMain = ({ initialNavData, onViewCustomer }) => {
   const fetchOrders = async () => {
     setLoading(true);
     const { data } = await supabase.from('orders')
-      // --- FIX: เพิ่ม order_updates(*) ---
-      .select('*, order_items(*), order_payments(*), order_updates(*)')
+      // --- FIX: เพิ่ม user_id ใน order_assignees ---
+      .select('*, order_items(*), order_payments(*), order_updates(*), order_assignees(user_id, job_role, user:user_id(first_name, last_name, avatar_url))')
       .order('created_at', { ascending: false });
     if (data) setOrders(data);
     setLoading(false);
@@ -31,6 +31,7 @@ const OrderMain = ({ initialNavData, onViewCustomer }) => {
 
   useEffect(() => { fetchOrders(); }, []);
 
+  // ... (Code ส่วนที่เหลือเหมือนเดิมทุกประการ)
   useEffect(() => {
     if (initialNavData && initialNavData.target === 'order' && initialNavData.data) {
       setSelectedOrder(initialNavData.data);
@@ -122,15 +123,18 @@ const OrderMain = ({ initialNavData, onViewCustomer }) => {
         </div>
         
         <div className="flex flex-wrap items-center gap-2 px-2">
+          {/* Show History Toggle */}
           <button 
             onClick={() => setShowHistory(!showHistory)} 
             className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all ${showHistory ? 'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200' : 'text-gray-500 hover:bg-gray-50'}`}
+            title="แสดงออเดอร์ที่เสร็จสิ้น/ยกเลิก"
           >
              <History size={18} /> {showHistory ? 'แสดงทั้งหมด' : 'ดูประวัติเก่า'}
           </button>
 
           <div className="w-px h-8 bg-gray-200 mx-2 hidden md:block" />
 
+          {/* Status Filter */}
           <div className="relative">
              <select 
                className="appearance-none bg-gray-50 hover:bg-gray-100 px-4 py-3 pl-10 pr-8 rounded-xl text-sm font-semibold text-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 cursor-pointer border-none"
@@ -148,6 +152,7 @@ const OrderMain = ({ initialNavData, onViewCustomer }) => {
              <Filter size={16} className="absolute left-3.5 top-3.5 text-gray-400 pointer-events-none"/>
           </div>
 
+          {/* Sort */}
           <div className="relative">
              <select 
                className="appearance-none bg-gray-50 hover:bg-gray-100 px-4 py-3 pl-10 pr-8 rounded-xl text-sm font-semibold text-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 cursor-pointer border-none"
@@ -163,6 +168,7 @@ const OrderMain = ({ initialNavData, onViewCustomer }) => {
 
           <div className="w-px h-8 bg-gray-200 mx-2 hidden md:block" />
           
+          {/* Profit Toggle */}
           <button 
             onClick={() => setShowProfit(!showProfit)} 
             className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all ${showProfit ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200' : 'text-gray-500 hover:bg-gray-50'}`}
