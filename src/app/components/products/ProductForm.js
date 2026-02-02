@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Save, Loader2, Info, Wrench, Layers } from 'lucide-react';
+import { ArrowLeft, Save, Loader2, Info, Wrench, Package, Layers, Sparkles } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import ImageUploader from './ImageUploader';
 import CategoryManager from './CategoryManager';
 import VariantManager from './VariantManager';
 import ProductFastenerSelector from './ProductFastenerSelector';
 import ProductBundleSelector from './ProductBundleSelector';
+import ProductAccessorySelector from './ProductAccessorySelector'; // Import ใหม่
 import NumericInput from './NumericInput';
 
 const ProductForm = ({ onCancel, onSuccess, initialData }) => {
@@ -30,13 +31,15 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
     cost_price: 0, 
     sell_price: 0, 
     has_variants: false,
-    // ลบ compatibility_mode และ compatible_models ออก
+    stock_quantity: 0
   });
   
   const [variants, setVariants] = useState([]);
   const [fasteners, setFasteners] = useState([]);
   const [bundles, setBundles] = useState([]);
+  const [accessories, setAccessories] = useState([]); // State สำหรับ Accessories
 
+  // Fetch Full Data
   useEffect(() => {
     const fetchFullProductData = async () => {
       if (!initialData?.id) return; 
@@ -44,25 +47,14 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
       try {
         const { data: prod, error } = await supabase
           .from('products')
-          .select(`
-            *,
-            product_categories (category_id)
-          `)
+          .select(`*, product_categories (category_id)`)
           .eq('id', initialData.id)
           .single();
 
         if (prod) {
           const categoryIds = prod.product_categories?.map(pc => pc.category_id) || [];
-          if (categoryIds.length === 0 && prod.category_id) {
-             categoryIds.push(prod.category_id);
-          }
-
-          setFormData(prev => ({
-            ...prev,
-            ...prod,
-            images: normalizeImages(prod.images),
-            category_ids: categoryIds
-          }));
+          if (categoryIds.length === 0 && prod.category_id) categoryIds.push(prod.category_id);
+          setFormData(prev => ({ ...prev, ...prod, images: normalizeImages(prod.images), category_ids: categoryIds }));
         }
 
         if (initialData.has_variants) {
@@ -76,14 +68,18 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
         const { data: bData } = await supabase.from('product_bundles').select('*, product:child_product_id(*)').eq('parent_product_id', initialData.id);
         if (bData) setBundles(bData);
 
+        // Fetch Accessories
+        const { data: accData } = await supabase.from('product_compatible_accessories').select('*, product:accessory_id(*)').eq('product_id', initialData.id);
+        if (accData) setAccessories(accData);
+
       } catch (err) {
         console.error("Error fetching product details:", err);
       }
     };
-
     fetchFullProductData();
   }, [initialData?.id]); 
 
+  // Check Category for Tab Display
   useEffect(() => {
     const fetchCatNames = async () => {
       if (formData.category_ids && formData.category_ids.length > 0) {
@@ -96,15 +92,11 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
     fetchCatNames();
   }, [formData.category_ids]);
 
-  const isSparePart = currentCategoryNames.some(name => 
-    name === 'Spare Parts' || name === 'อะไหล่' || name === 'Parts'
-  );
+  const isSparePart = currentCategoryNames.some(name => name.toLowerCase().includes('spare') || name.includes('อะไหล่'));
+  const isVehicle = currentCategoryNames.some(name => name.toLowerCase().includes('scooter') || name.toLowerCase().includes('bike'));
 
-  useEffect(() => {
-    if (isSparePart && activeTab === 'bundles') {
-      setActiveTab('info');
-    }
-  }, [isSparePart, activeTab]);
+  // Logic: ถ้าเป็นรถ -> มี Bundle และ Accessories
+  // ถ้าเป็นอะไหล่ -> ไม่มี Bundle, ไม่มี Accessories (หรืออาจจะมีก็ได้ถ้าอยากใส่)
 
   const handleSubmit = async (e) => {
     e.stopPropagation();
@@ -126,40 +118,34 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
       const productPayload = {
         name: formData.name,
         sku: formData.sku,
-        category_id: formData.category_ids.length > 0 ? formData.category_ids[0] : null,
+        category_id: formData.category_ids[0], 
         description: formData.description,
         images: uploadedImageUrls,
         cost_price: formData.has_variants ? 0 : formData.cost_price,
         sell_price: formData.has_variants ? 0 : formData.sell_price,
         has_variants: formData.has_variants,
-        // ลบ compatibility payload ออก
       };
 
       let productId = initialData?.id;
       let resultData = null;
       
       if (productId) {
-        await supabase.from('products').update(productPayload).eq('id', productId);
+        const { data } = await supabase.from('products').update(productPayload).eq('id', productId).select().single();
+        resultData = data;
         await supabase.from('product_categories').delete().eq('product_id', productId);
-        // สามารถใช้ productPayload เดิมได้เลย เพราะ Supabase จะ ignore คอลัมน์ที่ไม่มีใน payload 
-        // แต่ถ้าในตารางมีคอลัมน์อยู่แล้วเราไม่ส่งไป มันก็จะคงค่าเดิมไว้ (สำหรับการ Update)
-        // กรณีนี้เราจะไปลบคอลัมน์ออกทีหลัง ดังนั้นโค้ดนี้ปลอดภัย
       } else {
         const { data, error } = await supabase.from('products').insert([productPayload]).select().single();
         if (error) throw error;
-        if (!data) throw new Error("บันทึกสำเร็จ แต่ฐานข้อมูลไม่ส่ง ID กลับมา (กรุณาเช็ค RLS Policy)");
         productId = data.id;
         resultData = data;
       }
 
+      // Categories
       if (formData.category_ids.length > 0) {
-          const catPayload = formData.category_ids.map(cId => ({
-              product_id: productId,
-              category_id: cId
-          }));
-          await supabase.from('product_categories').insert(catPayload);
+          await supabase.from('product_categories').insert(formData.category_ids.map(cId => ({ product_id: productId, category_id: cId })));
       }
 
+      // Variants
       if (formData.has_variants) {
         if (initialData?.id) await supabase.from('product_variants').delete().eq('product_id', productId);
         if (variants.length > 0) {
@@ -174,6 +160,7 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
         }
       }
 
+      // Bundles
       if (!isSparePart) {
         if (initialData?.id) await supabase.from('product_bundles').delete().eq('parent_product_id', productId);
         if (bundles.length > 0) {
@@ -186,6 +173,7 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
         }
       }
 
+      // Fasteners
       if (initialData?.id) await supabase.from('product_fasteners').delete().eq('product_id', productId);
       if (fasteners.length > 0) {
         await supabase.from('product_fasteners').insert(fasteners.map(f => ({
@@ -194,6 +182,15 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
             location_image: f.location_image,
             bolts_usage: f.bolts_usage
         })));
+      }
+
+      // Accessories (NEW)
+      if (initialData?.id) await supabase.from('product_compatible_accessories').delete().eq('product_id', productId);
+      if (accessories.length > 0) {
+          await supabase.from('product_compatible_accessories').insert(accessories.map(acc => ({
+              product_id: productId,
+              accessory_id: acc.accessory_id
+          })));
       }
 
       onSuccess(resultData);
@@ -230,6 +227,13 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
                  {!isSparePart && (
                     <button type="button" onClick={() => setActiveTab('bundles')} className={`w-full text-left px-4 py-3 rounded-xl font-bold text-sm flex items-center gap-3 transition-all ${activeTab === 'bundles' ? 'bg-purple-50 text-purple-600' : 'text-gray-500 hover:bg-gray-50'}`}>
                         <Layers size={18}/> ส่วนประกอบ (Bundles)
+                    </button>
+                 )}
+
+                 {/* Show Accessories tab only for Vehicles */}
+                 {isVehicle && (
+                     <button type="button" onClick={() => setActiveTab('accessories')} className={`w-full text-left px-4 py-3 rounded-xl font-bold text-sm flex items-center gap-3 transition-all ${activeTab === 'accessories' ? 'bg-pink-50 text-pink-600' : 'text-gray-500 hover:bg-gray-50'}`}>
+                        <Sparkles size={18}/> ชุดแต่งที่รองรับ
                     </button>
                  )}
 
@@ -298,6 +302,16 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
                   <p className="text-gray-400 text-sm mt-1">เลือกอะไหล่หรือสินค้าลูกที่ใช้ประกอบเป็นสินค้านี้</p>
                 </div>
                 <ProductBundleSelector bundles={bundles} onChange={setBundles} variants={variants} />
+             </div>
+           )}
+
+           {activeTab === 'accessories' && isVehicle && (
+             <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100 animate-in fade-in">
+                <div className="mb-6">
+                  <h3 className="font-bold text-gray-800 text-lg">ชุดแต่งที่รองรับ (Compatible Accessories)</h3>
+                  <p className="text-gray-400 text-sm mt-1">เลือกรายการชุดแต่งหรืออุปกรณ์เสริมที่สามารถติดตั้งกับรถรุ่นนี้ได้ (เพื่อช่วยขาย)</p>
+                </div>
+                <ProductAccessorySelector accessories={accessories} onChange={setAccessories} />
              </div>
            )}
 

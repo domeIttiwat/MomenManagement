@@ -30,12 +30,12 @@ const CustomerForm = ({ onCancel, onSuccess, initialData }) => {
 
   // ฟังก์ชันแยกที่อยู่แบบง่าย (Smart Parse)
   const parseAddress = (rawAddress) => {
-    if (!rawAddress) return null;
+    if (!rawAddress) return {};
     
     let addr = { raw: rawAddress, prov: '', dist: '', subdist: '', zip: '' };
     
     // 1. หาจังหวัด
-    const provMatch = rawAddress.match(/(?:จังหวัด|จ\.)\s*([^\s0-9]+)/) || rawAddress.match(/\s(กรุงเทพมหานคร|กรุงเทพฯ|กทม|กระบี่|ขอนแก่น|...)/); // (ใส่รายชื่อจังหวัดครบๆ จะดีมาก แต่ย่อๆ ไว้ก่อน)
+    const provMatch = rawAddress.match(/(?:จังหวัด|จ\.)\s*([^\s0-9]+)/) || rawAddress.match(/\s(กรุงเทพมหานคร|กรุงเทพฯ|กทม|กระบี่|ขอนแก่น|เชียงใหม่|...)/); 
     if (provMatch) addr.prov = provMatch[1];
     else if (rawAddress.includes('กทม')) addr.prov = 'กรุงเทพมหานคร';
 
@@ -54,14 +54,13 @@ const CustomerForm = ({ onCancel, onSuccess, initialData }) => {
     return addr;
   };
 
-  // Auto-parse เมื่อ Address เปลี่ยน
   const handleAddressChange = (e) => {
     const raw = e.target.value;
     const parsed = parseAddress(raw);
     setFormData(prev => ({ 
         ...prev, 
         address_raw: raw,
-        address_parsed: parsed // อัปเดตข้อมูลที่แยกแล้ว
+        address_parsed: parsed 
     }));
   };
 
@@ -92,7 +91,6 @@ const CustomerForm = ({ onCancel, onSuccess, initialData }) => {
         return imgObj.url;
       }));
 
-      // Parse อีกรอบก่อนบันทึกเพื่อความชัวร์
       const finalParsedAddress = parseAddress(formData.address_raw);
 
       const payload = {
@@ -101,21 +99,41 @@ const CustomerForm = ({ onCancel, onSuccess, initialData }) => {
         nickname: formData.nickname,
         phone: formData.phone,
         address_raw: formData.address_raw,
-        address_parsed: finalParsedAddress, // บันทึกข้อมูลที่แยกแล้วลง DB
+        address_parsed: finalParsedAddress,
         location_url: formData.location_url,
         images: uploadedImages,
         social_channels: formData.social_channels,
         notes: formData.notes
       };
 
+      let error;
       if (initialData?.id) {
-        await supabase.from('customers').update(payload).eq('id', initialData.id);
+        // กรณีแก้ไข: ไม่ต้องยุ่งกับ code
+        const res = await supabase.from('customers').update(payload).eq('id', initialData.id);
+        error = res.error;
       } else {
-        await supabase.from('customers').insert([payload]);
+        // กรณีสร้างใหม่: สร้างรหัสลูกค้าอัตโนมัติ (C-YYMM-XXXX)
+        const d = new Date();
+        const code = `C-${d.getFullYear().toString().substr(-2)}${String(d.getMonth() + 1).padStart(2, '0')}-${Math.floor(1000 + Math.random() * 9000)}`;
+        payload.code = code;
+
+        const res = await supabase.from('customers').insert([payload]);
+        error = res.error;
       }
+
+      if (error) throw error;
       onSuccess();
     } catch (err) {
-      alert('Error: ' + err.message);
+      console.error('Detailed Error:', JSON.stringify(err, null, 2));
+      let msg = err.message || JSON.stringify(err);
+      
+      if (err.code === '42703') {
+        msg = `ฐานข้อมูลยังไม่รองรับข้อมูลใหม่ (Column not found). กรุณารัน SQL อัปเดตตาราง customers เพิ่ม address_parsed และ location_url`;
+      } else if (err.code === '23502') {
+        msg = `ข้อมูลไม่ครบถ้วน (Not Null Constraint). ระบบพยายามสร้างรหัสลูกค้าให้อัตโนมัติแล้ว กรุณาลองใหม่อีกครั้ง`;
+      }
+      
+      alert('บันทึกไม่สำเร็จ: ' + msg);
     } finally {
       setLoading(false);
     }

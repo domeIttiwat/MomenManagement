@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowLeft, Edit, Trash2, Eye, EyeOff, Layers, Package, Wrench, Tag, Box, TrendingUp, DollarSign, ShoppingBag, Puzzle, MapPin, ChevronDown, ChevronUp } from 'lucide-react';
+import { ArrowLeft, Edit, Trash2, Eye, EyeOff, Layers, Package, Wrench, Bike, Check, Tag, Box, TrendingUp, DollarSign, ShoppingBag, Puzzle, MapPin, ChevronDown, ChevronUp, Sparkles } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 
 const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCost }) => {
   const [variants, setVariants] = useState([]);
   const [fasteners, setFasteners] = useState([]);
   const [bundles, setBundles] = useState([]);
+  const [accessories, setAccessories] = useState([]); // State สำหรับชุดแต่ง
   const [selectedImg, setSelectedImg] = useState(null);
   
   const [expandedVariants, setExpandedVariants] = useState({});
@@ -15,6 +16,7 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
       setSelectedImg(product.images?.[0] || null);
       
       const fetchData = async () => {
+        // 1. Fetch Variants
         if (product.has_variants) {
           const { data } = await supabase.from('product_variants').select('*').eq('product_id', product.id).order('sell_price');
           if (data) {
@@ -27,11 +29,17 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
           setVariants([]);
         }
 
+        // 2. Fetch Fasteners
         const { data: fData } = await supabase.from('product_fasteners').select('*').eq('product_id', product.id);
         if (fData) setFasteners(fData);
 
+        // 3. Fetch Bundles
         const { data: bData } = await supabase.from('product_bundles').select('*, product:child_product_id(name, sku, cost_price)').eq('parent_product_id', product.id);
         if (bData) setBundles(bData);
+
+        // 4. Fetch Accessories (NEW)
+        const { data: accData } = await supabase.from('product_compatible_accessories').select('*, product:accessory_id(id, name, sku, sell_price, cost_price, images)').eq('product_id', product.id);
+        if (accData) setAccessories(accData);
       };
       
       fetchData();
@@ -42,15 +50,7 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
     setExpandedVariants(prev => ({ ...prev, [id]: !prev[id] }));
   };
 
-  if (!product) return (
-    <div className="flex flex-col items-center justify-center p-20 text-center text-gray-500">
-      <Package size={48} className="mb-4 text-gray-300" />
-      <p className="mb-4 text-lg">ไม่พบข้อมูลสินค้า</p>
-      <button onClick={onBack} className="px-4 py-2 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 transition-colors flex items-center gap-2">
-        <ArrowLeft size={18} /> กลับหน้ารายการ
-      </button>
-    </div>
-  );
+  if (!product) return null;
 
   const sellPrice = product.sell_price || 0;
   const costPrice = product.cost_price || 0;
@@ -189,7 +189,7 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
             <h1 className="text-3xl sm:text-4xl font-extrabold text-gray-900 tracking-tight leading-tight">{product.name}</h1>
           </div>
 
-          {/* Pricing */}
+          {/* Pricing Card */}
           <div className="p-6 rounded-3xl border border-gray-100 shadow-sm bg-gradient-to-br from-white to-gray-50/50">
             {!product.has_variants ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
@@ -215,7 +215,88 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
             )}
           </div>
 
-          {/* Bundles */}
+          {/* 1. Variants Table (First Priority) */}
+          {product.has_variants && (
+            <div className="border border-gray-200 rounded-2xl overflow-hidden shadow-sm bg-white">
+               <div className="bg-gray-50/80 px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                 <h3 className="font-bold text-gray-800 flex items-center gap-2">
+                   <Box size={18} className="text-indigo-600"/> รายการสเปคสินค้า
+                 </h3>
+                 <span className="text-xs font-medium bg-white px-2 py-1 rounded-md border border-gray-200 text-gray-500">{variants.length} รายการ</span>
+               </div>
+               <div className="overflow-x-auto">
+                 <table className="w-full text-sm">
+                   <thead>
+                     <tr className="bg-gray-50/50 border-b border-gray-100 text-gray-500 uppercase text-xs tracking-wider font-semibold text-left">
+                       <th className="px-6 py-3">รุ่นย่อย / สเปค</th>
+                       <th className="px-6 py-3 text-right">ราคาขาย</th>
+                       {showCost && <><th className="px-6 py-3 text-right text-amber-600">ต้นทุน</th><th className="px-6 py-3 text-right text-emerald-600">กำไร/ชิ้น</th></>}
+                     </tr>
+                   </thead>
+                   <tbody className="divide-y divide-gray-50">
+                     {variants.map(v => (
+                       <tr key={v.id} className="hover:bg-indigo-50/30 transition-colors">
+                         <td className="px-6 py-4">
+                           <div className="font-bold text-gray-900">{v.name}</div>
+                           <div className="text-xs text-gray-400 font-mono mt-0.5">{v.sku}</div>
+                         </td>
+                         <td className="px-6 py-4 text-right font-bold text-lg text-gray-900">฿{v.sell_price.toLocaleString()}</td>
+                         {showCost && (
+                           <>
+                             <td className="px-6 py-4 text-right text-amber-700 font-medium">฿{v.cost_price.toLocaleString()}</td>
+                             <td className="px-6 py-4 text-right">
+                               <span className="text-emerald-700 bg-emerald-50 px-2 py-1 rounded-md font-bold text-xs border border-emerald-100">
+                                 +฿{(v.sell_price - v.cost_price).toLocaleString()}
+                                </span>
+                             </td>
+                           </>
+                         )}
+                       </tr>
+                     ))}
+                   </tbody>
+                 </table>
+               </div>
+            </div>
+          )}
+
+          {/* 2. Compatible Accessories (Redesigned & Reordered) */}
+          {accessories.length > 0 && (
+            <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
+                <h3 className="text-sm font-bold text-gray-900 mb-4 flex items-center gap-2 uppercase tracking-wider">
+                  <Sparkles size={16} className="text-indigo-500" /> ชุดแต่งที่แนะนำ (Accessories)
+                </h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                   {accessories.map((acc, i) => (
+                      <div key={i} className="flex items-center gap-3 bg-white p-3 rounded-xl border border-indigo-100 shadow-sm hover:border-indigo-300 transition-colors">
+                         <div className="w-12 h-12 bg-gray-50 rounded-lg overflow-hidden shrink-0 border border-gray-100">
+                             {acc.product?.images?.[0] ? <img src={acc.product.images[0]} className="w-full h-full object-cover"/> : <Package size={20} className="m-3 text-gray-300"/>}
+                         </div>
+                         <div className="flex-1 min-w-0">
+                            <p className="text-sm font-bold text-gray-800 truncate">{acc.product?.name}</p>
+                            <div className="flex items-center gap-2 mt-0.5">
+                                <span className="text-[10px] text-gray-500 font-mono bg-gray-100 px-1.5 rounded">{acc.product?.sku}</span>
+                                <span className="text-[10px] text-indigo-600 font-medium bg-indigo-50 px-1.5 rounded">ตรงรุ่น</span>
+                            </div>
+                         </div>
+                         <div className="text-right">
+                            <p className="text-sm font-bold text-indigo-600">฿{acc.product?.sell_price?.toLocaleString()}</p>
+                            {showCost && <p className="text-xs text-amber-600 font-medium">ทุน {acc.product?.cost_price?.toLocaleString()}</p>}
+                         </div>
+                      </div>
+                   ))}
+                </div>
+            </div>
+          )}
+
+          {/* 3. Description (Moved after Accessories) */}
+          <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
+            <h3 className="font-bold text-gray-900 mb-4 text-lg border-b border-gray-100 pb-2">รายละเอียดสินค้า</h3>
+            <div className="prose prose-sm sm:prose-base text-gray-600 max-w-none whitespace-pre-line leading-relaxed">
+              {product.description || <span className="text-gray-400 italic">ไม่มีรายละเอียดเพิ่มเติม</span>}
+            </div>
+          </div>
+
+          {/* 4. Bundles Detail (Moved after Description) */}
           {hasBundlesData && (
             <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
                 <div className="flex justify-between items-center mb-4">
@@ -267,7 +348,10 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
 
                         return (
                             <div key={v.id} className="border border-indigo-100 rounded-xl overflow-hidden">
-                                <div onClick={() => toggleVariantExpand(v.id)} className="bg-indigo-50 p-3 flex justify-between items-center cursor-pointer hover:bg-indigo-100 transition-colors">
+                                <div 
+                                    onClick={() => toggleVariantExpand(v.id)}
+                                    className="bg-indigo-50 p-3 flex justify-between items-center cursor-pointer hover:bg-indigo-100 transition-colors"
+                                >
                                     <div className="flex items-center gap-2">
                                         <span className="w-2 h-2 bg-indigo-500 rounded-full"></span>
                                         <span className="text-xs font-bold text-indigo-800">เฉพาะรุ่น: {v.name}</span>
@@ -275,6 +359,7 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
                                     </div>
                                     {isExpanded ? <ChevronUp size={14} className="text-indigo-500"/> : <ChevronDown size={14} className="text-indigo-500"/>}
                                 </div>
+                                
                                 {isExpanded && (
                                     <div className="p-3 space-y-2 bg-white">
                                         {vBundles.map((b, i) => (
@@ -298,7 +383,7 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
             </div>
           )}
 
-          {/* Fasteners */}
+          {/* 5. Fasteners Detail (Last) */}
           {hasFastenersData && (
              <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
                 <h3 className="text-sm font-bold text-gray-900 mb-4 flex items-center gap-2 uppercase tracking-wider">
@@ -332,55 +417,28 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
              </div>
           )}
 
-          {/* Variants */}
-          {product.has_variants && (
-            <div className="border border-gray-200 rounded-2xl overflow-hidden shadow-sm bg-white">
-               <div className="bg-gray-50/80 px-6 py-4 border-b border-gray-200 flex justify-between items-center">
-                 <h3 className="font-bold text-gray-800 flex items-center gap-2">
-                   <Box size={18} className="text-indigo-600"/> รายการสเปคสินค้า
-                 </h3>
-                 <span className="text-xs font-medium bg-white px-2 py-1 rounded-md border border-gray-200 text-gray-500">{variants.length} รายการ</span>
-               </div>
-               <div className="overflow-x-auto">
-                 <table className="w-full text-sm">
-                   <thead>
-                     <tr className="bg-gray-50/50 border-b border-gray-100 text-gray-500 uppercase text-xs tracking-wider font-semibold text-left">
-                       <th className="px-6 py-3">รุ่นย่อย / สเปค</th>
-                       <th className="px-6 py-3 text-right">ราคาขาย</th>
-                       {showCost && <><th className="px-6 py-3 text-right text-amber-600">ต้นทุน</th><th className="px-6 py-3 text-right text-emerald-600">กำไร/ชิ้น</th></>}
-                     </tr>
-                   </thead>
-                   <tbody className="divide-y divide-gray-50">
-                     {variants.map(v => (
-                       <tr key={v.id} className="hover:bg-indigo-50/30 transition-colors">
-                         <td className="px-6 py-4">
-                           <div className="font-bold text-gray-900">{v.name}</div>
-                           <div className="text-xs text-gray-400 font-mono mt-0.5">{v.sku}</div>
-                         </td>
-                         <td className="px-6 py-4 text-right font-bold text-lg text-gray-900">฿{v.sell_price.toLocaleString()}</td>
-                         {showCost && (
-                           <>
-                             <td className="px-6 py-4 text-right text-amber-700 font-medium">฿{v.cost_price.toLocaleString()}</td>
-                             <td className="px-6 py-4 text-right">
-                               <span className="text-emerald-700 bg-emerald-50 px-2 py-1 rounded-md font-bold text-xs border border-emerald-100">
-                                 +฿{(v.sell_price - v.cost_price).toLocaleString()}
-                                </span>
-                             </td>
-                           </>
-                         )}
-                       </tr>
-                     ))}
-                   </tbody>
-                 </table>
-               </div>
-            </div>
-          )}
+          {/* Compatibility Section */}
+          <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
+            <h3 className="text-sm font-bold text-gray-900 mb-4 flex items-center gap-2 uppercase tracking-wider">
+              <Bike size={16} className="text-indigo-500" /> รุ่นที่รองรับ (Compatibility)
+            </h3>
 
-          <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
-            <h3 className="font-bold text-gray-900 mb-4 text-lg border-b border-gray-100 pb-2">รายละเอียดสินค้า</h3>
-            <div className="prose prose-sm sm:prose-base text-gray-600 max-w-none whitespace-pre-line leading-relaxed">
-              {product.description || <span className="text-gray-400 italic">ไม่มีรายละเอียดเพิ่มเติม</span>}
-            </div>
+            {product.compatibility_mode === 'universal' ? (
+              <div className="flex items-center gap-3 text-emerald-700 bg-emerald-50/50 px-4 py-3 rounded-xl border border-emerald-100">
+                <div className="bg-emerald-100 p-2 rounded-full"><Check size={16} /></div>
+                <span className="font-semibold">Universal Part - ติดตั้งได้กับรถทุกรุ่น</span>
+              </div>
+            ) : product.compatible_models && product.compatible_models.length > 0 ? (
+              <div className="flex flex-wrap gap-2">
+                {product.compatible_models.map((model, idx) => (
+                  <span key={idx} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-gray-200 text-gray-700 text-sm font-medium shadow-sm hover:border-indigo-300 hover:text-indigo-600 transition-colors cursor-default">
+                    <Bike size={14} className="text-gray-400" /> {model}
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-gray-400 italic">ไม่ได้ระบุรุ่นที่รองรับ</p>
+            )}
           </div>
         </div>
       </div>

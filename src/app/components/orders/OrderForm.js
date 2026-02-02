@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ArrowLeft, Save, Loader2, Trash2, Receipt, Truck, Printer, PackagePlus, DollarSign, Calculator, History } from 'lucide-react';
+import { ArrowLeft, Save, Loader2, Trash2, Receipt, Truck, Printer, PackagePlus, DollarSign, Calculator, History, Sparkles } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import CustomerSelector from './CustomerSelector';
 import ProductSelector from './ProductSelector';
@@ -8,11 +8,15 @@ import ImageUploader from './ImageUploader';
 import BillPreview from './BillPreview';
 import NumericInput from '../products/NumericInput';
 import OrderUpdateManager from './OrderUpdateManager';
-import OrderTeamSelector from './OrderTeamSelector'; // Import ใหม่
+import OrderTeamSelector from './OrderTeamSelector';
+import AccessorySuggestionModal from './AccessorySuggestionModal';
 
 const OrderForm = ({ onCancel, onSuccess, initialData }) => {
   const [loading, setLoading] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  
+  // State for Suggestion Modal
+  const [suggestionProduct, setSuggestionProduct] = useState(null);
   
   const getLocalDate = () => {
     const d = new Date();
@@ -30,7 +34,7 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
         ...initialData,
         customer: initialData.customer_cache || null, 
         items: initialData.order_items || [], 
-        assignees: initialData.order_assignees || [], // โหลด Assignees เดิม
+        assignees: initialData.order_assignees || [],
         payments: (initialData.order_payments || []).map(p => ({
           ...p,
           date: p.payment_date ? p.payment_date.split('T')[0] : p.date,
@@ -59,7 +63,7 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
       completed_at: '',
       status: 'Quotation',
       customer: null,
-      assignees: [], // New State
+      assignees: [],
       items: [],
       payments: [],
       updates: [],
@@ -103,6 +107,43 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
     setFormData({ ...formData, discount: Math.max(0, round2(newDiscount)) });
   };
 
+  const handleAddItem = (item) => {
+    setFormData(prev => ({...prev, items: [...prev.items, item]}));
+    
+    // Check if item is a main product (not custom) and trigger suggestion modal
+    if (!item.is_custom) {
+        // FIX: Prepare object with ID for Modal (ใช้ product_id เป็น id แทน เพราะ item ใหม่ยังไม่มี id จริง)
+        const itemForModal = {
+            ...item,
+            id: item.product_id || item.id,
+            name: item.product_name || item.name
+        };
+        setSuggestionProduct(itemForModal);
+    }
+  };
+
+  const handleAddAccessories = (accessories) => {
+    const newItems = accessories.map(acc => ({
+        product_id: acc.id,
+        product_name: acc.name,
+        sku: acc.sku,
+        variant_name: '', // Accessories usually don't have selected variant here
+        cost_price: acc.cost_price, // Ensure cost price is passed
+        sell_price: acc.sell_price,
+        quantity: 1,
+        is_custom: false
+    }));
+    setFormData(prev => ({...prev, items: [...prev.items, ...newItems]}));
+  };
+
+  const handleRemoveItem = (idx) => setFormData({...formData, items: formData.items.filter((_, i) => i !== idx)});
+  const updateItem = (idx, field, value) => {
+    const newItems = [...formData.items];
+    newItems[idx][field] = value;
+    setFormData({...formData, items: newItems});
+  };
+  const handleFocus = (e) => e.target.select();
+
   const previewOrderData = {
     ...formData,
     customer_cache: formData.customer,
@@ -121,14 +162,14 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
     
     setLoading(true);
     try {
-      const uploadedImages = await Promise.all(formData.images.map(async (imgObj) => {
-        if (imgObj.file) {
+      const uploadedImages = await Promise.all(formData.images.map(async (img) => {
+        if (img.file) {
           const fileName = `ord-${Date.now()}-${Math.random()}`;
-          await supabase.storage.from('orders').upload(fileName, imgObj.file);
+          await supabase.storage.from('orders').upload(fileName, img.file);
           const { data } = supabase.storage.from('orders').getPublicUrl(fileName);
           return data.publicUrl;
         }
-        return imgObj.url;
+        return img.url;
       }));
 
       const processedUpdates = await Promise.all(formData.updates.map(async (upd) => {
@@ -174,7 +215,7 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
         await supabase.from('order_items').delete().eq('order_id', orderId);
         await supabase.from('order_payments').delete().eq('order_id', orderId);
         await supabase.from('order_updates').delete().eq('order_id', orderId);
-        await supabase.from('order_assignees').delete().eq('order_id', orderId); // Clear old assignees
+        await supabase.from('order_assignees').delete().eq('order_id', orderId);
       } else {
         const { data } = await supabase.from('orders').insert([orderPayload]).select().single();
         orderId = data.id;
@@ -201,7 +242,6 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
         })));
       }
 
-      // Insert Assignees
       if (formData.assignees.length > 0) {
         await supabase.from('order_assignees').insert(formData.assignees.map(a => ({
           order_id: orderId,
@@ -231,132 +271,141 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
     }
   };
 
-  const handleAddItem = (item) => setFormData({...formData, items: [...formData.items, item]});
-  const handleRemoveItem = (idx) => setFormData({...formData, items: formData.items.filter((_, i) => i !== idx)});
-  const updateItem = (idx, field, value) => {
-    const newItems = [...formData.items];
-    newItems[idx][field] = value;
-    setFormData({...formData, items: newItems});
+  const handleManualOpenSuggestion = (item) => {
+    // ต้องแปลง item ให้มี id (product_id) เพื่อให้ Modal ทำงานได้
+    const itemForModal = {
+        ...item,
+        id: item.product_id, // ใช้ product_id สำหรับค้นหาใน DB
+        name: item.product_name
+    };
+    setSuggestionProduct(itemForModal);
   };
-  const handleFocus = (e) => e.target.select();
 
   const inputClass = "w-full px-4 py-2 bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 rounded-xl transition-all outline-none text-gray-700 font-medium";
   const labelClass = "block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5 ml-1";
 
   return (
-    <form onSubmit={handleSubmit} className="max-w-7xl mx-auto pb-20 animate-in slide-in-from-bottom-4 fade-in duration-500">
-      {/* Sticky Header */}
-      <div className="flex justify-between items-center bg-white/80 backdrop-blur-md p-4 rounded-2xl sticky top-2 z-20 shadow-sm border border-gray-100 mb-6">
-        <div className="flex items-center gap-4">
-          <button type="button" onClick={onCancel} className="p-2 hover:bg-gray-100 rounded-full transition-colors text-gray-500"><ArrowLeft size={20} /></button>
-          <div>
-            <h1 className="text-xl font-bold text-gray-900">{initialData ? 'แก้ไขออเดอร์' : 'สร้างออเดอร์ใหม่'}</h1>
-            <p className="text-xs text-gray-500 font-mono">{formData.order_number}</p>
-          </div>
-        </div>
-        <div className="flex gap-2">
-          <button type="button" onClick={() => setShowPreview(true)} className="bg-white text-indigo-700 border border-indigo-100 hover:bg-indigo-50 px-4 py-2.5 rounded-xl font-medium flex items-center gap-2 transition-all">
-            <Printer size={18} /> พรีวิวเอกสาร
-          </button>
-          <button type="submit" disabled={loading} className="bg-gray-900 hover:bg-black text-white px-6 py-2.5 rounded-xl font-medium shadow-lg shadow-gray-200 flex items-center gap-2 active:scale-95 transition-all">
-            {loading ? <Loader2 size={18} className="animate-spin"/> : <Save size={18} />} บันทึก
-          </button>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Column */}
-        <div className="lg:col-span-2 space-y-6">
-          <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 space-y-5">
-            <h3 className="font-bold text-gray-800 text-lg border-b border-gray-50 pb-3">ข้อมูลลูกค้า & เอกสาร</h3>
-            <CustomerSelector selectedCustomer={formData.customer} onSelect={c => setFormData({...formData, customer: c})} />
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div><label className={labelClass}>วันที่สั่งซื้อ</label><input type="date" className={inputClass} value={formData.order_date} onChange={e => setFormData({...formData, order_date: e.target.value})} /></div>
-              <div><label className={labelClass}>เลขที่ใบกำกับภาษี</label><input type="text" className={inputClass} placeholder="INV-XXXX" value={formData.invoice_number || ''} onChange={e => setFormData({...formData, invoice_number: e.target.value})} /></div>
-              <div>
-                <label className={labelClass}>สถานะ</label>
-                <select className={inputClass} value={formData.status} onChange={(e) => {
-                    const status = e.target.value;
-                    const completedAt = status === 'Completed' && !formData.completed_at ? getLocalDate() : formData.completed_at;
-                    setFormData({...formData, status, completed_at: completedAt});
-                  }}>
-                  <option value="Quotation">เสนอราคา</option>
-                  <option value="Deposit">มัดจำ</option>
-                  <option value="Paid">ชำระแล้ว</option>
-                  <option value="Assembling">ประกอบ</option>
-                  <option value="Shipping">เตรียมส่ง</option>
-                  <option value="Completed">เสร็จสิ้น/เรียบร้อย</option>
-                  <option value="Cancelled">ยกเลิก</option>
-                </select>
-              </div>
-            </div>
-            {formData.status === 'Completed' && (
-              <div className="bg-green-50 p-4 rounded-xl border border-green-100 flex items-center gap-4 animate-in fade-in slide-in-from-top-2">
-                <div className="font-bold text-green-700 text-sm whitespace-nowrap">วันที่เสร็จสิ้น:</div>
-                <input type="date" className="w-full px-4 py-2 bg-white border border-green-200 rounded-lg text-sm text-green-800 focus:outline-none focus:ring-2 focus:ring-green-500/50" value={formData.completed_at} onChange={e => setFormData({...formData, completed_at: e.target.value})} required/>
-              </div>
-            )}
-            
-            {/* Team Selector (เพิ่มใหม่) */}
+    <>
+      <form onSubmit={handleSubmit} className="max-w-7xl mx-auto pb-20 animate-in slide-in-from-bottom-4 fade-in duration-500">
+        <div className="flex justify-between items-center bg-white/80 backdrop-blur-md p-4 rounded-2xl sticky top-2 z-20 shadow-sm border border-gray-100 mb-6">
+          <div className="flex items-center gap-4">
+            <button type="button" onClick={onCancel} className="p-2 hover:bg-gray-100 rounded-full transition-colors text-gray-500"><ArrowLeft size={20} /></button>
             <div>
-               <label className={labelClass}>ผู้รับผิดชอบ (Team)</label>
-               <OrderTeamSelector assignees={formData.assignees} onChange={a => setFormData({...formData, assignees: a})} />
-            </div>
-
-            <div className="flex items-center gap-2">
-              <input type="checkbox" id="showTax" className="w-4 h-4 accent-indigo-600 rounded" checked={formData.show_tax_id} onChange={e => setFormData({...formData, show_tax_id: e.target.checked})}/>
-              <label htmlFor="showTax" className="text-sm font-medium text-gray-700 cursor-pointer">แสดงเลขผู้เสียภาษีลูกค้าในบิล</label>
+              <h1 className="text-xl font-bold text-gray-900">{initialData ? 'แก้ไขออเดอร์' : 'สร้างออเดอร์ใหม่'}</h1>
+              <p className="text-xs text-gray-500 font-mono">{formData.order_number}</p>
             </div>
           </div>
+          <div className="flex gap-2">
+            <button type="button" onClick={() => setShowPreview(true)} className="bg-white text-indigo-700 border border-indigo-100 hover:bg-indigo-50 px-4 py-2.5 rounded-xl font-medium flex items-center gap-2 transition-all">
+              <Printer size={18} /> พรีวิวเอกสาร
+            </button>
+            <button type="submit" disabled={loading} className="bg-gray-900 hover:bg-black text-white px-6 py-2.5 rounded-xl font-medium shadow-lg shadow-gray-200 flex items-center gap-2 active:scale-95 transition-all">
+              {loading ? <Loader2 size={18} className="animate-spin"/> : <Save size={18} />} บันทึก
+            </button>
+          </div>
+        </div>
 
-          <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 min-h-[300px]">
-            <h3 className="font-bold text-gray-800 mb-4 text-lg">รายการสินค้า</h3>
-            <ProductSelector onAddProduct={handleAddItem} />
-            <div className="mt-4 space-y-3">
-              {formData.items.map((item, idx) => (
-                <div key={idx} className={`p-4 rounded-2xl border transition-all ${item.is_custom ? 'bg-indigo-50/30 border-indigo-200' : 'bg-gray-50 border-gray-100'} group`}>
-                  <div className="flex flex-col md:flex-row gap-4 items-start md:items-center">
-                    <div className="flex-1 w-full">
-                      {item.is_custom ? (
-                        <div className="flex items-center gap-2">
-                          <PackagePlus size={20} className="text-indigo-500 shrink-0" />
-                          <input className="bg-white border border-indigo-200 rounded-lg px-3 py-2 w-full text-sm font-bold text-indigo-900 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none" placeholder="ระบุชื่อรายการ..." value={item.product_name} onChange={(e) => updateItem(idx, 'product_name', e.target.value)} autoFocus={item.shouldFocus}/>
-                        </div>
-                      ) : (
-                        <div>
-                          <p className="font-bold text-gray-800 text-base">{item.product_name}</p>
-                          <div className="flex items-center gap-2 text-xs text-gray-500 mt-1">
-                            {item.variant_name && <span className="bg-white px-2 py-0.5 rounded border">{item.variant_name}</span>}
-                            {item.sku && <span className="font-mono text-[10px] bg-gray-100 px-1.5 rounded">{item.sku}</span>}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2 space-y-6">
+            <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 space-y-5">
+              <h3 className="font-bold text-gray-800 text-lg border-b border-gray-50 pb-3">ข้อมูลลูกค้า & เอกสาร</h3>
+              <CustomerSelector selectedCustomer={formData.customer} onSelect={c => setFormData({...formData, customer: c})} />
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div><label className={labelClass}>วันที่สั่งซื้อ</label><input type="date" className={inputClass} value={formData.order_date} onChange={e => setFormData({...formData, order_date: e.target.value})} /></div>
+                <div><label className={labelClass}>เลขที่ใบกำกับภาษี</label><input type="text" className={inputClass} placeholder="INV-XXXX" value={formData.invoice_number || ''} onChange={e => setFormData({...formData, invoice_number: e.target.value})} /></div>
+                <div>
+                  <label className={labelClass}>สถานะ</label>
+                  <select className={inputClass} value={formData.status} onChange={e => {
+                      const status = e.target.value;
+                      const completedAt = status === 'Completed' && !formData.completed_at ? getLocalDate() : formData.completed_at;
+                      setFormData({...formData, status, completed_at: completedAt});
+                    }}>
+                    <option value="Quotation">เสนอราคา</option>
+                    <option value="Deposit">มัดจำ</option>
+                    <option value="Paid">ชำระแล้ว</option>
+                    <option value="Assembling">ประกอบ</option>
+                    <option value="Shipping">เตรียมส่ง</option>
+                    <option value="Completed">เสร็จสิ้น/เรียบร้อย</option>
+                    <option value="Cancelled">ยกเลิก</option>
+                  </select>
+                </div>
+              </div>
+              {formData.status === 'Completed' && (
+                <div className="bg-green-50 p-4 rounded-xl border border-green-100 flex items-center gap-4 animate-in fade-in slide-in-from-top-2">
+                  <div className="font-bold text-green-700 text-sm whitespace-nowrap">วันที่เสร็จสิ้น:</div>
+                  <input type="date" className="w-full px-4 py-2 bg-white border border-green-200 rounded-lg text-sm text-green-800 focus:outline-none focus:ring-2 focus:ring-green-500/50" value={formData.completed_at} onChange={e => setFormData({...formData, completed_at: e.target.value})} required/>
+                </div>
+              )}
+              
+              <div>
+                 <label className={labelClass}>ผู้รับผิดชอบ (Team)</label>
+                 <OrderTeamSelector assignees={formData.assignees} onChange={a => setFormData({...formData, assignees: a})} />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <input type="checkbox" id="showTax" className="w-4 h-4 accent-indigo-600 rounded" checked={formData.show_tax_id} onChange={e => setFormData({...formData, show_tax_id: e.target.checked})}/>
+                <label htmlFor="showTax" className="text-sm font-medium text-gray-700 cursor-pointer">แสดงเลขผู้เสียภาษีลูกค้าในบิล</label>
+              </div>
+            </div>
+
+            <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 min-h-[300px]">
+              <h3 className="font-bold text-gray-800 mb-4 text-lg">รายการสินค้า</h3>
+              <ProductSelector onAddProduct={handleAddItem} />
+              <div className="mt-4 space-y-3">
+                {formData.items.map((item, idx) => (
+                  <div key={idx} className={`p-4 rounded-2xl border transition-all ${item.is_custom ? 'bg-indigo-50/30 border-indigo-200' : 'bg-gray-50 border-gray-100'} group`}>
+                    <div className="flex flex-col md:flex-row gap-4 items-start md:items-center">
+                      <div className="flex-1 w-full">
+                        {item.is_custom ? (
+                          <div className="flex items-center gap-2">
+                            <PackagePlus size={20} className="text-indigo-500 shrink-0" />
+                            <input className="bg-white border border-indigo-200 rounded-lg px-3 py-2 w-full text-sm font-bold text-indigo-900 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none" placeholder="ระบุชื่อรายการ..." value={item.product_name} onChange={(e) => updateItem(idx, 'product_name', e.target.value)} autoFocus={item.shouldFocus}/>
                           </div>
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-3 w-full md:w-auto justify-between md:justify-end bg-white/50 p-2 rounded-xl">
-                      {item.is_custom && (
-                        <div className="flex items-center gap-2 mr-2">
-                           <div className="flex flex-col"><label className="text-[10px] text-gray-400 font-bold ml-1">ทุน</label><div className="relative w-20"><NumericInput className="w-full text-right bg-white border border-gray-200 rounded-lg px-2 py-1 text-sm focus:border-amber-400 outline-none text-gray-600" value={item.cost_price} onChange={(val) => updateItem(idx, 'cost_price', val)} placeholder="0" onFocus={handleFocus} /></div></div>
-                           <div className="flex flex-col"><label className="text-[10px] text-indigo-500 font-bold ml-1">ขาย</label><div className="relative w-24"><NumericInput className="w-full text-right bg-white border border-indigo-200 rounded-lg px-2 py-1 text-sm font-bold text-indigo-700 focus:border-indigo-500 outline-none" value={item.sell_price} onChange={(val) => updateItem(idx, 'sell_price', val)} placeholder="0" onFocus={handleFocus} /></div></div>
-                        </div>
-                      )}
-                      <div className="flex items-center gap-2 bg-white rounded-lg border border-gray-200 px-2 py-1 h-[38px]">
-                        <span className="text-xs text-gray-400 font-bold">Qty</span>
-                        <input type="number" min="1" className="w-10 text-center text-sm font-bold outline-none" value={item.quantity} onChange={(e) => updateItem(idx, 'quantity', parseInt(e.target.value) || 1)} onFocus={handleFocus}/>
+                        ) : (
+                          <div>
+                            <div className="flex items-center gap-2">
+                                <p className="font-bold text-gray-800 text-base">{item.product_name}</p>
+                                {/* ปุ่มเปิด Modal ชุดแต่ง สำหรับสินค้าที่มีอยู่แล้ว */}
+                                <button 
+                                    type="button" 
+                                    onClick={() => handleManualOpenSuggestion(item)} 
+                                    className="text-pink-500 hover:text-pink-700 bg-pink-50 hover:bg-pink-100 p-1.5 rounded-full transition-colors"
+                                    title="เพิ่มชุดแต่ง"
+                                >
+                                    <Sparkles size={14}/>
+                                </button>
+                            </div>
+                            <div className="flex items-center gap-2 text-xs text-gray-500 mt-1">
+                              {item.variant_name && <span className="bg-white px-2 py-0.5 rounded border">{item.variant_name}</span>}
+                              {item.sku && <span className="font-mono text-[10px] bg-gray-100 px-1.5 rounded">{item.sku}</span>}
+                            </div>
+                          </div>
+                        )}
                       </div>
-                      <div className="text-right min-w-[80px]">
-                        <p className="text-sm font-bold text-gray-900">฿{(item.sell_price * item.quantity).toLocaleString()}</p>
-                        {item.is_custom && <p className={`text-[10px] ${(item.sell_price - item.cost_price) > 0 ? 'text-green-600' : 'text-red-400'}`}>กำไร: {((item.sell_price - item.cost_price) * item.quantity).toLocaleString()}</p>}
+                      <div className="flex items-center gap-3 w-full md:w-auto justify-between md:justify-end bg-white/50 p-2 rounded-xl">
+                        {item.is_custom && (
+                          <div className="flex items-center gap-2 mr-2">
+                             <div className="flex flex-col"><label className="text-[10px] text-gray-400 font-bold ml-1">ทุน</label><div className="relative w-20"><NumericInput className="w-full text-right bg-white border border-gray-200 rounded-lg px-2 py-1 text-sm focus:border-amber-400 outline-none text-gray-600" value={item.cost_price} onChange={(val) => updateItem(idx, 'cost_price', val)} placeholder="0" onFocus={handleFocus} /></div></div>
+                             <div className="flex flex-col"><label className="text-[10px] text-indigo-500 font-bold ml-1">ขาย</label><div className="relative w-24"><NumericInput className="w-full text-right bg-white border border-indigo-200 rounded-lg px-2 py-1 text-sm font-bold text-indigo-700 focus:border-indigo-500 outline-none" value={item.sell_price} onChange={(val) => updateItem(idx, 'sell_price', val)} placeholder="0" onFocus={handleFocus} /></div></div>
+                          </div>
+                        )}
+                        <div className="flex items-center gap-2 bg-white rounded-lg border border-gray-200 px-2 py-1 h-[38px]">
+                          <span className="text-xs text-gray-400 font-bold">Qty</span>
+                          <input type="number" min="1" className="w-10 text-center text-sm font-bold outline-none" value={item.quantity} onChange={(e) => updateItem(idx, 'quantity', parseInt(e.target.value) || 1)} onFocus={handleFocus}/>
+                        </div>
+                        <div className="text-right min-w-[80px]">
+                          <p className="text-sm font-bold text-gray-900">฿{(item.sell_price * item.quantity).toLocaleString()}</p>
+                          {item.is_custom && <p className={`text-[10px] ${(item.sell_price - item.cost_price) > 0 ? 'text-green-600' : 'text-red-400'}`}>กำไร: {((item.sell_price - item.cost_price) * item.quantity).toLocaleString()}</p>}
+                        </div>
+                        <button type="button" onClick={() => handleRemoveItem(idx)} className="text-gray-400 hover:text-red-500 p-2 rounded-lg hover:bg-white transition-colors"><Trash2 size={18}/></button>
                       </div>
-                      <button type="button" onClick={() => handleRemoveItem(idx)} className="text-gray-400 hover:text-red-500 p-2 rounded-lg hover:bg-white transition-colors"><Trash2 size={18}/></button>
                     </div>
                   </div>
-                </div>
-              ))}
-              {formData.items.length === 0 && <div className="flex flex-col items-center justify-center py-12 text-gray-400 border-2 border-dashed border-gray-100 rounded-2xl"><Receipt size={40} className="mb-2 opacity-20"/><p>ยังไม่มีรายการสินค้า</p></div>}
-            </div>
+                ))}
+                {formData.items.length === 0 && <div className="flex flex-col items-center justify-center py-12 text-gray-400 border-2 border-dashed border-gray-100 rounded-2xl"><Receipt size={40} className="mb-2 opacity-20"/><p>ยังไม่มีรายการสินค้า</p></div>}
+              </div>
           </div>
 
-          {/* New Section: Timeline */}
           <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
              <h3 className="font-bold text-gray-800 mb-4 text-lg flex items-center gap-2">
                <History size={20} className="text-indigo-500"/> อัปเดตความคืบหน้า (Job Timeline)
@@ -365,7 +414,6 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
           </div>
         </div>
 
-        {/* Right Column */}
         <div className="space-y-6">
           <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
             <h3 className="font-bold text-gray-800 mb-4 text-lg">สรุปยอดเงิน</h3>
@@ -413,7 +461,18 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
       </div>
 
       {showPreview && <BillPreview order={previewOrderData} onClose={() => setShowPreview(false)} />}
+      
+      {/* Suggestion Modal */}
+      {suggestionProduct && (
+          <AccessorySuggestionModal 
+              mainProduct={suggestionProduct} 
+              onClose={() => setSuggestionProduct(null)} 
+              onAdd={handleAddAccessories}
+              existingItems={formData.items} // ส่งรายการสินค้าที่มีอยู่เข้าไปตรวจสอบ
+          />
+      )}
     </form>
+    </>
   );
 };
 export default OrderForm;

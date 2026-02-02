@@ -20,17 +20,9 @@ const ProductMain = () => {
   const [showCategoryFilter, setShowCategoryFilter] = useState(false);
   const [sortOption, setSortOption] = useState('name_asc');
 
-  // Initialization
-  useEffect(() => {
-    initData();
-  }, []);
-
-  const initData = async () => {
+  const fetchAllData = async () => {
     setLoading(true);
-    // 1. ดึงหมวดหมู่ก่อน เพื่อเอามา Map
-    const cats = await fetchCategories();
-    // 2. ดึงสินค้า และส่งหมวดหมู่ไปช่วย Map
-    await fetchProducts(cats);
+    await Promise.all([fetchCategories(), fetchProducts()]);
     setLoading(false);
   };
 
@@ -38,21 +30,24 @@ const ProductMain = () => {
     try {
       const { data } = await supabase.from('categories').select('*').order('name');
       if (data) {
-        // Filter unique names just in case
+        // Filter Unique
         const unique = data.filter((v,i,a)=>a.findIndex(t=>(t.name === v.name))===i);
         setCategories(unique);
-        return unique;
+        
+        // --- FIX: ตั้งค่าเริ่มต้นเป็น Scooter ถ้ามี ---
+        const defaultCat = unique.find(c => c.name.toLowerCase().includes('scooter') || c.name.includes('สกู๊ตเตอร์'));
+        if (defaultCat) {
+            setSelectedCategories([defaultCat.name]);
+        }
       }
     } catch (err) {
       console.error('Error fetching categories:', err);
     }
-    return [];
   };
 
-  const fetchProducts = async (catsList = []) => {
+  const fetchProducts = async () => {
     try {
         // TIER 1: Full Fetch
-        // ดึง category_id มาด้วยเพื่อใช้เป็น Fallback
         const { data: prodData, error } = await supabase
         .from('products')
         .select(`
@@ -68,7 +63,7 @@ const ProductMain = () => {
         if (error) throw error;
         
         if (prodData) {
-            processProductData(prodData, catsList);
+            processProductData(prodData);
             return; 
         }
     } catch (err) {
@@ -88,7 +83,8 @@ const ProductMain = () => {
             
             if (stdError) throw stdError;
             if (stdData) {
-                processProductData(stdData, catsList);
+                processProductData(stdData);
+                return;
             }
 
         } catch (stdErr) {
@@ -97,7 +93,7 @@ const ProductMain = () => {
              try {
                 const { data: basic, error: bErr } = await supabase.from('products').select('*').order('created_at', { ascending: false });
                 if(bErr) throw bErr;
-                processProductData(basic, catsList);
+                processProductData(basic);
              } catch(finalErr) {
                 console.error('All fetch failed');
              }
@@ -105,13 +101,9 @@ const ProductMain = () => {
     }
   };
 
-  const processProductData = (data, catsList) => {
+  const processProductData = (data) => {
     if (!data) return;
     
-    // Create Map for ID -> Name
-    const catMap = {};
-    catsList.forEach(c => catMap[c.id] = c.name);
-
     const productsWithStats = data.map(p => {
         const sales = p.order_items || [];
         const soldCount = sales.reduce((sum, item) => sum + (item.quantity || 0), 0);
@@ -123,19 +115,12 @@ const ProductMain = () => {
         const hasBundles = p.product_bundles?.length > 0;
         const hasFasteners = p.product_fasteners?.length > 0;
 
-        // --- HYBRID CATEGORY PARSING ---
         const catSet = new Set();
-        
-        // 1. จากระบบใหม่ (Many-to-Many)
+        if (p.categories?.name) catSet.add(p.categories.name); // Legacy support
         if (p.product_categories && Array.isArray(p.product_categories)) {
             p.product_categories.forEach(pc => {
                 if (pc.categories?.name) catSet.add(pc.categories.name);
             });
-        }
-        
-        // 2. จากระบบเก่า (Fallback using category_id)
-        if (catSet.size === 0 && p.category_id && catMap[p.category_id]) {
-            catSet.add(catMap[p.category_id]);
         }
         
         let categoryNames = Array.from(catSet);
@@ -153,6 +138,8 @@ const ProductMain = () => {
     setProducts(productsWithStats);
   };
 
+  useEffect(() => { fetchAllData(); }, []);
+
   const toggleCategory = (catName) => {
     setSelectedCategories(prev => 
       prev.includes(catName) 
@@ -164,16 +151,13 @@ const ProductMain = () => {
   const filteredAndSorted = useMemo(() => {
     let result = [...products];
 
-    // 1. Search
     if (search) {
       const s = search.toLowerCase();
       result = result.filter(p => p.name?.toLowerCase().includes(s) || p.sku?.toLowerCase().includes(s));
     }
 
-    // 2. Filter Category (Improved)
     if (selectedCategories.length > 0) {
       result = result.filter(p => 
-        // เช็คว่าสินค้ามีหมวดหมู่ที่ตรงกับที่เลือกอย่างน้อย 1 อัน
         p.categoryNames && p.categoryNames.some(cat => selectedCategories.includes(cat))
       );
     }
@@ -192,7 +176,7 @@ const ProductMain = () => {
   }, [products, search, selectedCategories, sortOption]);
 
   if (view === 'fasteners') return <FastenerManager onBack={() => setView('list')} />;
-  if (view === 'form') return <ProductForm onCancel={() => setView('list')} onSuccess={() => { setView('list'); initData(); }} initialData={selectedProduct} />;
+  if (view === 'form') return <ProductForm onCancel={() => setView('list')} onSuccess={() => { setView('list'); fetchAllData(); }} initialData={selectedProduct} />;
   
   if (view === 'detail' && selectedProduct) return (
     <ProductDetail 
@@ -201,7 +185,7 @@ const ProductMain = () => {
       onEdit={() => setView('form')} 
       showCost={showCost} 
       setShowCost={setShowCost} 
-      onDelete={() => { initData(); setView('list'); }} 
+      onDelete={() => { fetchAllData(); setView('list'); }} 
     />
   );
 
