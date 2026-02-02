@@ -112,10 +112,10 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
     
     // Check if item is a main product (not custom) and trigger suggestion modal
     if (!item.is_custom) {
-        // FIX: Prepare object with ID for Modal (ใช้ product_id เป็น id แทน เพราะ item ใหม่ยังไม่มี id จริง)
+        // FIX: Prepare object with ID for Modal
         const itemForModal = {
             ...item,
-            id: item.product_id || item.id,
+            id: item.product_id || item.id, // Ensure ID is passed for lookup
             name: item.product_name || item.name
         };
         setSuggestionProduct(itemForModal);
@@ -127,8 +127,8 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
         product_id: acc.id,
         product_name: acc.name,
         sku: acc.sku,
-        variant_name: '', // Accessories usually don't have selected variant here
-        cost_price: acc.cost_price, // Ensure cost price is passed
+        variant_name: '', 
+        cost_price: acc.cost_price, 
         sell_price: acc.sell_price,
         quantity: 1,
         is_custom: false
@@ -144,6 +144,15 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
   };
   const handleFocus = (e) => e.target.select();
 
+  const handleManualOpenSuggestion = (item) => {
+    const itemForModal = {
+        ...item,
+        id: item.product_id || item.id, 
+        name: item.product_name || item.name
+    };
+    setSuggestionProduct(itemForModal);
+  };
+
   const previewOrderData = {
     ...formData,
     customer_cache: formData.customer,
@@ -154,6 +163,10 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
     vat_amount: vatAmount,
     grand_total: grandTotal
   };
+
+  // --- FIX: สร้าง Array ของ Product IDs ที่มีอยู่แล้ว เพื่อส่งไปเช็คใน Modal ---
+  // แปลงทุกอย่างเป็น String เพื่อความชัวร์ในการเทียบ
+  const existingProductIds = formData.items.map(item => String(item.product_id || item.id));
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -271,16 +284,6 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
     }
   };
 
-  const handleManualOpenSuggestion = (item) => {
-    // ต้องแปลง item ให้มี id (product_id) เพื่อให้ Modal ทำงานได้
-    const itemForModal = {
-        ...item,
-        id: item.product_id, // ใช้ product_id สำหรับค้นหาใน DB
-        name: item.product_name
-    };
-    setSuggestionProduct(itemForModal);
-  };
-
   const inputClass = "w-full px-4 py-2 bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 rounded-xl transition-all outline-none text-gray-700 font-medium";
   const labelClass = "block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5 ml-1";
 
@@ -365,7 +368,6 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
                           <div>
                             <div className="flex items-center gap-2">
                                 <p className="font-bold text-gray-800 text-base">{item.product_name}</p>
-                                {/* ปุ่มเปิด Modal ชุดแต่ง สำหรับสินค้าที่มีอยู่แล้ว */}
                                 <button 
                                     type="button" 
                                     onClick={() => handleManualOpenSuggestion(item)} 
@@ -414,6 +416,7 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
           </div>
         </div>
 
+        {/* Right Column */}
         <div className="space-y-6">
           <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
             <h3 className="font-bold text-gray-800 mb-4 text-lg">สรุปยอดเงิน</h3>
@@ -468,7 +471,7 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
               mainProduct={suggestionProduct} 
               onClose={() => setSuggestionProduct(null)} 
               onAdd={handleAddAccessories}
-              existingItems={formData.items} // ส่งรายการสินค้าที่มีอยู่เข้าไปตรวจสอบ
+              existingItems={formData.items} // FIX: ส่ง existingItems ไปด้วย
           />
       )}
     </form>
