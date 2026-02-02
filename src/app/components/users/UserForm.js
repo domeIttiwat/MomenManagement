@@ -5,8 +5,16 @@ import ImageUploader from '../customers/ImageUploader';
 
 const UserForm = ({ onCancel, onSuccess, initialData, roles }) => {
   const [loading, setLoading] = useState(false);
+  
+  // FIX: ใช้ || '' เพื่อป้องกันค่า null
   const [formData, setFormData] = useState(initialData ? {
     ...initialData,
+    first_name: initialData.first_name || '',
+    last_name: initialData.last_name || '',
+    nickname: initialData.nickname || '',
+    phone: initialData.phone || '',
+    role_id: initialData.role_id || '',
+    status: initialData.status || 'active',
     images: initialData.avatar_url ? [{ url: initialData.avatar_url, file: null }] : []
   } : {
     first_name: '', last_name: '', nickname: '', phone: '',
@@ -43,7 +51,7 @@ const UserForm = ({ onCancel, onSuccess, initialData, roles }) => {
         last_name: formData.last_name,
         nickname: formData.nickname,
         phone: formData.phone,
-        role_id: formData.role_id,
+        role_id: formData.role_id ? parseInt(formData.role_id) : null,
         status: formData.status,
         avatar_url: avatarUrl
       };
@@ -93,22 +101,22 @@ const UserForm = ({ onCancel, onSuccess, initialData, roles }) => {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className={labelClass}>ชื่อจริง</label>
-              <input required className={inputClass} value={formData.first_name} onChange={e => setFormData({...formData, first_name: e.target.value})} />
+              <input required className={inputClass} value={formData.first_name || ''} onChange={e => setFormData({...formData, first_name: e.target.value})} />
             </div>
             <div>
               <label className={labelClass}>นามสกุล</label>
-              <input className={inputClass} value={formData.last_name} onChange={e => setFormData({...formData, last_name: e.target.value})} />
+              <input className={inputClass} value={formData.last_name || ''} onChange={e => setFormData({...formData, last_name: e.target.value})} />
             </div>
           </div>
           
           <div className="grid grid-cols-2 gap-4">
              <div>
               <label className={labelClass}>ชื่อเล่น</label>
-              <input className={inputClass} value={formData.nickname} onChange={e => setFormData({...formData, nickname: e.target.value})} />
+              <input className={inputClass} value={formData.nickname || ''} onChange={e => setFormData({...formData, nickname: e.target.value})} />
             </div>
             <div>
               <label className={labelClass}>เบอร์โทร</label>
-              <input className={inputClass} value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} />
+              <input className={inputClass} value={formData.phone || ''} onChange={e => setFormData({...formData, phone: e.target.value})} />
             </div>
           </div>
 
@@ -117,14 +125,14 @@ const UserForm = ({ onCancel, onSuccess, initialData, roles }) => {
              <div className="grid grid-cols-2 gap-4">
                 <div>
                     <label className={labelClass}>ตำแหน่ง (Role)</label>
-                    <select className={inputClass} value={formData.role_id} onChange={e => setFormData({...formData, role_id: e.target.value})}>
+                    <select className={inputClass} value={formData.role_id || ''} onChange={e => setFormData({...formData, role_id: e.target.value})}>
                         <option value="">-- เลือกตำแหน่ง --</option>
-                        {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                        {roles && roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
                     </select>
                 </div>
                 <div>
                     <label className={labelClass}>สถานะบัญชี</label>
-                    <select className={inputClass} value={formData.status} onChange={e => setFormData({...formData, status: e.target.value})}>
+                    <select className={inputClass} value={formData.status || 'pending'} onChange={e => setFormData({...formData, status: e.target.value})}>
                         <option value="pending">รออนุมัติ (Pending)</option>
                         <option value="active">ใช้งานปกติ (Active)</option>
                         <option value="suspended">ระงับการใช้งาน (Suspended)</option>

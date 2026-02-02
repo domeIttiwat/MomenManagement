@@ -1,14 +1,124 @@
-import React, { useState } from 'react';
-import { ArrowLeft, Edit, Trash2, Printer, Wrench, User, Calendar, Clock, DollarSign, CreditCard, Banknote, Landmark, X, History, FileText, CheckCircle2, AlertCircle, Truck, PauseCircle, XCircle, PlayCircle } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { ArrowLeft, Edit, Trash2, Printer, Wrench, User, Calendar, Clock, DollarSign, CreditCard, Banknote, Landmark, X, History, FileText, CheckCircle2, AlertCircle, Truck, PauseCircle, XCircle, PlayCircle, Send, Paperclip, MoreHorizontal, Image as ImageIcon, MessageCircle, Loader2 } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
 import ServiceBillPreview from './ServiceBillPreview';
 
 const ServiceDetail = ({ service, onBack, onEdit, onDelete }) => {
   const [showBill, setShowBill] = useState(false);
   const [lightboxImg, setLightboxImg] = useState(null);
 
+  // Timeline State
+  const [updates, setUpdates] = useState(service?.service_updates || []);
+  const [newUpdate, setNewUpdate] = useState({ description: '', date: new Date().toISOString().split('T')[0], images: [] });
+  const [isPosting, setIsPosting] = useState(false);
+  const [editingUpdateId, setEditingUpdateId] = useState(null);
+  const [editData, setEditData] = useState({});
+  const fileInputRef = useRef(null);
+
+  useEffect(() => {
+     if (service?.id) fetchUpdates();
+  }, [service?.id]);
+
+  const fetchUpdates = async () => {
+    const { data } = await supabase.from('service_updates').select('*').eq('service_id', service.id).order('created_at', { ascending: true });
+    if (data) setUpdates(data);
+  };
+
+  const handleFileSelect = (e) => {
+    const files = Array.from(e.target.files);
+    if (files.length > 0) {
+        const newImages = files.map(file => ({
+            url: URL.createObjectURL(file),
+            file
+        }));
+        if (editingUpdateId) {
+             setEditData(prev => ({ ...prev, images: [...prev.images, ...newImages] }));
+        } else {
+             setNewUpdate(prev => ({ ...prev, images: [...prev.images, ...newImages] }));
+        }
+    }
+  };
+
+  const removeNewImage = (idx, isEdit = false) => {
+      if (isEdit) {
+          setEditData(prev => ({ ...prev, images: prev.images.filter((_, i) => i !== idx) }));
+      } else {
+          setNewUpdate(prev => ({ ...prev, images: prev.images.filter((_, i) => i !== idx) }));
+      }
+  };
+
+  const handlePostUpdate = async () => {
+    if (!newUpdate.description.trim() && newUpdate.images.length === 0) return;
+    setIsPosting(true);
+    try {
+      const uploadedImages = await Promise.all(newUpdate.images.map(async (imgObj) => {
+        if (imgObj.file) {
+          const fileName = `srv-upd-${Date.now()}-${Math.random()}`;
+          await supabase.storage.from('services').upload(fileName, imgObj.file);
+          const { data } = supabase.storage.from('services').getPublicUrl(fileName);
+          return data.publicUrl;
+        }
+        return imgObj.url;
+      }));
+
+      await supabase.from('service_updates').insert([{
+        service_id: service.id,
+        description: newUpdate.description,
+        update_date: newUpdate.date,
+        images: uploadedImages
+      }]);
+
+      setNewUpdate({ description: '', date: new Date().toISOString().split('T')[0], images: [] });
+      fetchUpdates();
+    } catch (err) {
+      alert('Error: ' + err.message);
+    } finally {
+      setIsPosting(false);
+    }
+  };
+
+  const handleDeleteUpdate = async (id) => {
+    if (!confirm('ลบรายการนี้?')) return;
+    await supabase.from('service_updates').delete().eq('id', id);
+    fetchUpdates();
+  };
+
+  const startEditUpdate = (update) => {
+    setEditingUpdateId(update.id);
+    setEditData({ 
+        description: update.description, 
+        date: update.update_date.split('T')[0],
+        images: (update.images || []).map(url => ({ url, file: null }))
+    });
+  };
+
+  const saveEditUpdate = async (id) => {
+     try {
+        const uploadedImages = await Promise.all(editData.images.map(async (imgObj) => {
+            if (imgObj.file) {
+                const fileName = `srv-upd-${Date.now()}-${Math.random()}`;
+                await supabase.storage.from('services').upload(fileName, imgObj.file);
+                const { data } = supabase.storage.from('services').getPublicUrl(fileName);
+                return data.publicUrl;
+            }
+            return imgObj.url;
+        }));
+
+        await supabase.from('service_updates').update({
+            description: editData.description,
+            update_date: editData.date,
+            images: uploadedImages
+        }).eq('id', id);
+
+        setEditingUpdateId(null);
+        fetchUpdates();
+     } catch(err) {
+         alert('Error updating: ' + err.message);
+     }
+  };
+
   if (!service) return <div className="p-10 text-center text-gray-500">ไม่พบข้อมูลงานซ่อม</div>;
 
-  // --- Status Logic (Unified) ---
   const getStatusDisplay = (status, reason) => {
     switch (status) {
       case 'Waiting':
@@ -26,9 +136,7 @@ const ServiceDetail = ({ service, onBack, onEdit, onDelete }) => {
   };
 
   const statusInfo = getStatusDisplay(service.status, service.waiting_reason);
-  // ------------------------------
 
-  // Duration Logic
   const getDurationInfo = () => {
     if (!service.received_date) return { text: '-', totalDays: 0, isFinished: false };
     const start = new Date(service.received_date);
@@ -52,22 +160,19 @@ const ServiceDetail = ({ service, onBack, onEdit, onDelete }) => {
   const { text: durationText, totalDays, isFinished } = getDurationInfo();
 
   const getDurationColorClass = (days, finished) => {
-    if (finished) return 'bg-gray-100 text-gray-500 border-gray-200';
+    if (finished) return 'bg-gray-100 text-gray-600 border-gray-200';
     if (days <= 7) return 'bg-green-100 text-green-700 border-green-200';
     if (days <= 30) return 'bg-blue-100 text-blue-700 border-blue-200';
     if (days <= 60) return 'bg-orange-100 text-orange-700 border-orange-200';
     return 'bg-red-100 text-red-700 border-red-200';
   };
 
-  // Payment Status Logic
   const getPaymentStatus = () => {
     const totalPaid = service.service_payments?.reduce((sum, p) => sum + Number(p.amount), 0) || 0;
     const grandTotal = service.grand_total || 0;
-
     if (grandTotal === 0 && totalPaid === 0) return { label: '-', color: 'bg-gray-100 text-gray-500' };
     if (totalPaid === 0) return { label: 'ยังไม่ได้ชำระ', color: 'bg-red-100 text-red-700 border-red-200' };
     if (totalPaid >= grandTotal) return { label: 'ชำระครบแล้ว', color: 'bg-green-100 text-green-700 border-green-200' };
-
     const isOnlyDeposit = service.service_payments?.length > 0 && service.service_payments.every(p => p.type === 'deposit');
     if (isOnlyDeposit) return { label: 'มัดจำแล้ว', color: 'bg-amber-100 text-amber-700 border-amber-200' };
     return { label: 'ชำระยังไม่ครบ', color: 'bg-orange-100 text-orange-700 border-orange-200' };
@@ -93,6 +198,8 @@ const ServiceDetail = ({ service, onBack, onEdit, onDelete }) => {
 
   return (
     <div className="max-w-6xl mx-auto space-y-6 pb-10">
+      
+      {/* Lightbox */}
       {lightboxImg && (
         <div className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center p-4 cursor-zoom-out" onClick={() => setLightboxImg(null)}>
           <img src={lightboxImg} className="max-w-full max-h-[90vh] rounded-lg shadow-2xl object-contain" />
@@ -126,24 +233,20 @@ const ServiceDetail = ({ service, onBack, onEdit, onDelete }) => {
                         </div>
                         <div className="flex">
                             <span className={`text-xs px-2 py-1 rounded-lg border inline-flex items-center gap-1 font-bold ${getDurationColorClass(totalDays, isFinished)}`}>
-                                <Clock size={12}/> {isFinished ? `เสร็จสิ้น (ใช้เวลา ${durationText})` : `อยู่ในศูนย์มาแล้ว ${durationText}`}
+                                <Clock size={12}/> 
+                                {isFinished ? `เสร็จสิ้น (ใช้เวลา ${durationText})` : `อยู่ในศูนย์มาแล้ว ${durationText}`}
                             </span>
                         </div>
                     </div>
                  </div>
                  <div className="flex flex-col items-end gap-2">
-                    <span className={`px-4 py-2 rounded-lg font-bold text-sm border shadow-sm flex items-center gap-2 ${statusInfo.color}`}>
-                       <statusInfo.icon size={16}/> {statusInfo.label}
-                    </span>
+                    <span className="px-4 py-2 bg-blue-50 text-blue-700 rounded-lg font-bold text-sm border border-blue-100 shadow-sm">{service.status}</span>
                     <span className={`px-3 py-1 rounded-lg text-xs font-bold border ${payStatus.color} flex items-center gap-1`}>
                        <DollarSign size={12}/> {payStatus.label}
                     </span>
                  </div>
               </div>
 
-              {/* ... (ส่วนอื่นๆ ของ Detail เหมือนเดิม) ... */}
-              {/* เพื่อความกระชับ ผมละโค้ดส่วนแสดงลูกค้าและรายการซ่อมไว้ (ให้ใช้ของเดิมได้เลย) 
-                  แต่ถ้าคุณต้องการให้ผมพิมพ์ซ้ำทั้งหมด บอกได้ครับ */}
               <div className="p-4 bg-gray-50 rounded-xl border border-gray-100 mb-6 flex items-center gap-4">
                  <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center text-gray-400 shadow-sm border border-gray-200"><User size={24}/></div>
                  <div>
@@ -189,36 +292,135 @@ const ServiceDetail = ({ service, onBack, onEdit, onDelete }) => {
                  </div>
               </div>
            </div>
-           
-           {/* Timeline & Updates */}
-           {service.service_updates && service.service_updates.length > 0 && (
-            <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
-                <h3 className="font-bold text-gray-800 mb-6 flex items-center gap-2"><History size={18} className="text-indigo-500"/> ความคืบหน้างาน (Timeline)</h3>
-                <div className="relative pl-4 border-l-2 border-indigo-100 ml-2 space-y-6">
-                {service.service_updates.map((update, i) => (
-                    <div key={i} className="relative">
-                        <div className="absolute -left-[23px] top-1 w-3 h-3 bg-indigo-500 rounded-full border-2 border-white shadow-sm"></div>
-                        <div className="text-xs text-gray-400 mb-1 flex items-center gap-2">
-                            <Calendar size={12}/> {new Date(update.update_date).toLocaleDateString('th-TH')}
-                        </div>
-                        <div className="bg-gray-50 rounded-xl p-3 border border-gray-100">
-                            <p className="text-sm text-gray-800 whitespace-pre-line mb-2">{update.description}</p>
-                            {update.images?.length > 0 && (
-                            <div className="flex gap-2 overflow-x-auto pb-1">
-                                {update.images.map((img, imgIdx) => (
-                                    <img key={imgIdx} src={img} className="w-16 h-16 rounded-lg object-cover cursor-pointer hover:opacity-80" onClick={() => setLightboxImg(img)} />
-                                ))}
-                            </div>
-                            )}
-                        </div>
+
+           {/* Timeline Feed (Facebook Style - Input Bottom) */}
+           <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+              <h3 className="font-bold text-gray-800 mb-6 flex items-center gap-2 text-lg">
+                 <MessageCircle size={20} className="text-indigo-500"/> ความคืบหน้างาน (Updates)
+              </h3>
+              
+              {/* Feed List (Top) */}
+              <div className="relative pl-4 border-l-2 border-indigo-100 ml-2 space-y-6 mb-6">
+                {updates.length > 0 ? updates.map((update) => (
+                    <div key={update.id} className="relative group">
+                       <div className="absolute -left-[23px] top-1 w-3 h-3 bg-white border-2 border-indigo-500 rounded-full shadow-sm z-10"></div>
+                       
+                       {editingUpdateId === update.id ? (
+                           <div className="bg-white p-4 rounded-xl border-2 border-indigo-500 shadow-lg">
+                               <textarea 
+                                  className="w-full border rounded-lg p-2 text-sm mb-2"
+                                  value={editData.description}
+                                  onChange={e => setEditData({...editData, description: e.target.value})}
+                               />
+                               <div className="flex justify-between items-center">
+                                  <input type="date" value={editData.date} onChange={e => setEditData({...editData, date: e.target.value})} className="text-xs border rounded px-2 py-1"/>
+                                  <div className="flex gap-2">
+                                      <button onClick={() => setEditingUpdateId(null)} className="text-xs text-gray-500 px-3 py-1 rounded hover:bg-gray-100">ยกเลิก</button>
+                                      <button onClick={() => saveEditUpdate(update.id)} className="text-xs bg-indigo-600 text-white px-3 py-1 rounded font-bold hover:bg-indigo-700">บันทึก</button>
+                                  </div>
+                               </div>
+                           </div>
+                       ) : (
+                           <div className="bg-gray-50 rounded-xl p-4 border border-gray-100 hover:border-indigo-200 transition-colors">
+                              <div className="flex justify-between items-start mb-2">
+                                 <div className="flex items-center gap-2 text-xs text-gray-500 font-medium">
+                                    <span className="text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md">{new Date(update.update_date).toLocaleDateString('th-TH')}</span>
+                                    <span className="text-gray-300">|</span>
+                                    <span>{new Date(update.created_at).toLocaleTimeString('th-TH', {hour: '2-digit', minute:'2-digit'})}</span>
+                                 </div>
+                                 <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <button onClick={() => startEditUpdate(update)} className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-white rounded-lg transition-colors"><Edit size={12}/></button>
+                                    <button onClick={() => handleDeleteUpdate(update.id)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-white rounded-lg transition-colors"><Trash2 size={12}/></button>
+                                 </div>
+                              </div>
+                              <p className="text-sm text-gray-800 whitespace-pre-line leading-relaxed">{update.description}</p>
+                              {update.images?.length > 0 && (
+                                <div className="flex gap-2 overflow-x-auto pb-1 mt-3">
+                                   {update.images.map((img, imgIdx) => (
+                                     <img key={imgIdx} src={img} className="w-20 h-20 rounded-lg object-cover cursor-pointer hover:opacity-90 border border-gray-200" onClick={() => setLightboxImg(img)} />
+                                   ))}
+                                </div>
+                              )}
+                           </div>
+                       )}
                     </div>
-                ))}
-                </div>
-            </div>
-          )}
+                )) : (
+                    <div className="text-center py-6 text-gray-400 text-sm italic">ยังไม่มีการอัปเดต</div>
+                )}
+              </div>
+
+              {/* Input Bar (Bottom) */}
+              <div className="flex gap-3 items-start pt-4 border-t border-gray-100">
+                  <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-gray-500 font-bold shrink-0">
+                       <User size={20}/>
+                  </div>
+                  <div className="flex-1 bg-gray-50 rounded-2xl p-2 border border-gray-200 focus-within:ring-2 focus-within:ring-indigo-500/20 focus-within:border-indigo-300 transition-all">
+                       <textarea 
+                          className="w-full bg-transparent border-none focus:ring-0 text-sm p-2 resize-none max-h-32 outline-none text-gray-800 placeholder-gray-400"
+                          placeholder="เขียนอัปเดตงาน..."
+                          rows="1"
+                          value={newUpdate.description}
+                          onChange={e => {
+                              setNewUpdate({...newUpdate, description: e.target.value});
+                              e.target.style.height = 'auto';
+                              e.target.style.height = e.target.scrollHeight + 'px';
+                          }}
+                       />
+                       
+                       {/* Image Preview in Input */}
+                       {newUpdate.images.length > 0 && (
+                          <div className="flex gap-2 overflow-x-auto p-2 pb-3">
+                              {newUpdate.images.map((img, i) => (
+                                  <div key={i} className="relative w-16 h-16 shrink-0 group/preview">
+                                      <img src={img.url} className="w-full h-full object-cover rounded-lg border"/>
+                                      <button onClick={() => removeNewImage(i)} className="absolute -top-1 -right-1 bg-gray-800 text-white rounded-full p-0.5 hover:bg-red-500"><X size={10}/></button>
+                                  </div>
+                              ))}
+                          </div>
+                       )}
+
+                       <div className="flex justify-between items-center px-2 pt-1 border-t border-gray-200 mt-1">
+                           <div className="flex gap-2 items-center">
+                               {/* Attach Image Button - Clean Icon */}
+                               <label className="cursor-pointer text-gray-500 hover:text-indigo-600 p-2 rounded-full hover:bg-gray-200 transition-colors" title="แนบรูป">
+                                  <ImageIcon size={20}/>
+                                  <input type="file" multiple accept="image/*" className="hidden" onChange={handleFileSelect} ref={fileInputRef} />
+                               </label>
+                               
+                               {/* Date Picker Button */}
+                               <div className="relative group/date">
+                                  <label className="cursor-pointer text-gray-500 hover:text-indigo-600 p-2 rounded-full hover:bg-gray-200 transition-colors flex items-center gap-1" title="เปลี่ยนวันที่">
+                                     <Calendar size={20}/>
+                                     <span className="text-xs font-medium text-gray-600">{new Date(newUpdate.date).toLocaleDateString('th-TH', {day: '2-digit', month: 'short'})}</span>
+                                  </label>
+                                  <input 
+                                      type="date" 
+                                      className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                                      value={newUpdate.date}
+                                      onChange={e => setNewUpdate({...newUpdate, date: e.target.value})}
+                                   />
+                               </div>
+                           </div>
+                           
+                           {/* Send Button */}
+                           <button 
+                              onClick={handlePostUpdate} 
+                              disabled={isPosting || (!newUpdate.description.trim() && newUpdate.images.length === 0)}
+                              className={`flex items-center gap-2 px-4 py-1.5 rounded-full text-sm font-bold transition-all ${
+                                (!newUpdate.description.trim() && newUpdate.images.length === 0) 
+                                ? 'bg-gray-200 text-gray-400 cursor-not-allowed' 
+                                : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-md active:scale-95'
+                              }`}
+                           >
+                              {isPosting ? <Loader2 size={16} className="animate-spin"/> : <Send size={16}/>} 
+                              <span>โพสต์</span>
+                           </button>
+                       </div>
+                  </div>
+              </div>
+           </div>
         </div>
 
-        {/* Right Column */}
         <div className="space-y-6">
            <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
               <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><CreditCard size={18} className="text-indigo-500"/> ประวัติการชำระเงิน</h3>

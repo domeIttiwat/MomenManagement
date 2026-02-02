@@ -1,10 +1,122 @@
-import React, { useState } from 'react';
-import { ArrowLeft, Edit, Trash2, Printer, FileText, User, Package, Clock, MapPin, Phone, CreditCard, DollarSign, X, Eye, EyeOff, Banknote, Landmark, MessageCircle, Facebook, Instagram, History, Calendar } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { ArrowLeft, Edit, Trash2, Printer, FileText, User, Package, Clock, MapPin, Phone, CreditCard, DollarSign, X, Eye, EyeOff, Banknote, Landmark, MessageCircle, Facebook, Instagram, History, Calendar, Send, Paperclip, Loader2, Image as ImageIcon } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
 import BillPreview from './BillPreview';
+import ImageUploader from './ImageUploader';
 
 const OrderDetail = ({ order, onBack, onEdit, onDelete, showProfit, setShowProfit, onViewCustomer }) => {
   const [showBill, setShowBill] = useState(false);
   const [lightboxImg, setLightboxImg] = useState(null);
+  
+  // Timeline State
+  const [updates, setUpdates] = useState(order?.order_updates || []);
+  const [newUpdate, setNewUpdate] = useState({ description: '', date: new Date().toISOString().split('T')[0], images: [] });
+  const [isPosting, setIsPosting] = useState(false);
+  const [editingUpdateId, setEditingUpdateId] = useState(null);
+  const [editData, setEditData] = useState({});
+  const fileInputRef = useRef(null);
+
+  useEffect(() => {
+    if (order?.id) fetchUpdates();
+  }, [order?.id]);
+
+  const fetchUpdates = async () => {
+    const { data } = await supabase.from('order_updates').select('*').eq('order_id', order.id).order('created_at', { ascending: true });
+    if (data) setUpdates(data);
+  };
+
+  const handleFileSelect = (e) => {
+    const files = Array.from(e.target.files);
+    if (files.length > 0) {
+        const newImages = files.map(file => ({
+            url: URL.createObjectURL(file),
+            file
+        }));
+        if (editingUpdateId) {
+             setEditData(prev => ({ ...prev, images: [...prev.images, ...newImages] }));
+        } else {
+             setNewUpdate(prev => ({ ...prev, images: [...prev.images, ...newImages] }));
+        }
+    }
+  };
+
+  const removeNewImage = (idx, isEdit = false) => {
+      if (isEdit) {
+          setEditData(prev => ({ ...prev, images: prev.images.filter((_, i) => i !== idx) }));
+      } else {
+          setNewUpdate(prev => ({ ...prev, images: prev.images.filter((_, i) => i !== idx) }));
+      }
+  };
+
+  const handlePostUpdate = async () => {
+    if (!newUpdate.description.trim() && newUpdate.images.length === 0) return;
+    setIsPosting(true);
+    try {
+      const uploadedImages = await Promise.all(newUpdate.images.map(async (imgObj) => {
+        if (imgObj.file) {
+          const fileName = `upd-${Date.now()}-${Math.random()}`;
+          await supabase.storage.from('orders').upload(fileName, imgObj.file);
+          const { data } = supabase.storage.from('orders').getPublicUrl(fileName);
+          return data.publicUrl;
+        }
+        return imgObj.url;
+      }));
+
+      await supabase.from('order_updates').insert([{
+        order_id: order.id,
+        description: newUpdate.description,
+        update_date: newUpdate.date,
+        images: uploadedImages
+      }]);
+
+      setNewUpdate({ description: '', date: new Date().toISOString().split('T')[0], images: [] });
+      fetchUpdates();
+    } catch (err) {
+      alert('Error: ' + err.message);
+    } finally {
+      setIsPosting(false);
+    }
+  };
+
+  const handleDeleteUpdate = async (id) => {
+    if (!confirm('ลบรายการนี้?')) return;
+    await supabase.from('order_updates').delete().eq('id', id);
+    fetchUpdates();
+  };
+
+  const startEditUpdate = (update) => {
+    setEditingUpdateId(update.id);
+    setEditData({ 
+        description: update.description, 
+        date: update.update_date.split('T')[0],
+        images: (update.images || []).map(url => ({ url, file: null }))
+    });
+  };
+
+  const saveEditUpdate = async (id) => {
+     try {
+        const uploadedImages = await Promise.all(editData.images.map(async (imgObj) => {
+            if (imgObj.file) {
+            const fileName = `upd-${Date.now()}-${Math.random()}`;
+            await supabase.storage.from('orders').upload(fileName, imgObj.file);
+            const { data } = supabase.storage.from('orders').getPublicUrl(fileName);
+            return data.publicUrl;
+            }
+            return imgObj.url;
+        }));
+
+        await supabase.from('order_updates').update({
+            description: editData.description,
+            update_date: editData.date,
+            images: uploadedImages
+        }).eq('id', id);
+
+        setEditingUpdateId(null);
+        fetchUpdates();
+     } catch(err) {
+         alert('Error updating: ' + err.message);
+     }
+  };
 
   if (!order) return null;
 
@@ -25,7 +137,7 @@ const OrderDetail = ({ order, onBack, onEdit, onDelete, showProfit, setShowProfi
     const start = new Date(order.order_date);
     const end = order.status === 'Completed' && order.completed_at ? new Date(order.completed_at) : new Date(); 
     start.setHours(0,0,0,0); end.setHours(0,0,0,0);
-    let diffTime = end - start;
+    let diffTime = end.getTime() - start.getTime();
     if (diffTime < 0) diffTime = 0;
     const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
     const years = Math.floor(diffDays / 365);
@@ -34,7 +146,7 @@ const OrderDetail = ({ order, onBack, onEdit, onDelete, showProfit, setShowProfi
     const parts = [];
     if (years > 0) parts.push(`${years} ปี`);
     if (months > 0) parts.push(`${months} เดือน`);
-    if (days > 0 || parts.length === 0) parts.push(`${days} วัน`); 
+    if (days > 0) parts.push(`${days} วัน`); 
     return { text: parts.join(' '), totalDays: diffDays };
   };
 
@@ -228,32 +340,114 @@ const OrderDetail = ({ order, onBack, onEdit, onDelete, showProfit, setShowProfi
             </div>
           </div>
 
-          {/* New Section: Timeline */}
-          {order.order_updates && order.order_updates.length > 0 && (
-            <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
-                <h3 className="font-bold text-gray-800 mb-6 flex items-center gap-2"><History size={18} className="text-indigo-500"/> ความคืบหน้างาน (Timeline)</h3>
-                <div className="relative pl-4 border-l-2 border-indigo-100 ml-2 space-y-6">
-                {order.order_updates.map((update, i) => (
-                    <div key={i} className="relative">
-                        <div className="absolute -left-[23px] top-1 w-3 h-3 bg-indigo-500 rounded-full border-2 border-white shadow-sm"></div>
-                        <div className="text-xs text-gray-400 mb-1 flex items-center gap-2">
-                            <Calendar size={12}/> {new Date(update.update_date).toLocaleDateString('th-TH')}
-                        </div>
-                        <div className="bg-gray-50 rounded-xl p-3 border border-gray-100">
-                            <p className="text-sm text-gray-800 whitespace-pre-line mb-2">{update.description}</p>
-                            {update.images?.length > 0 && (
-                            <div className="flex gap-2 overflow-x-auto pb-1">
-                                {update.images.map((img, imgIdx) => (
-                                    <img key={imgIdx} src={img} className="w-16 h-16 rounded-lg object-cover cursor-pointer hover:opacity-80" onClick={() => setLightboxImg(img)} />
-                                ))}
-                            </div>
-                            )}
-                        </div>
+          {/* Timeline Feed (Facebook Style - Input Bottom) */}
+           <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+              <h3 className="font-bold text-gray-800 mb-6 flex items-center gap-2 text-lg">
+                 <MessageCircle size={20} className="text-indigo-500"/> ความคืบหน้า (Timeline)
+              </h3>
+              
+              {/* Feed List */}
+              <div className="relative pl-4 border-l-2 border-indigo-100 ml-2 space-y-6 mb-6">
+                {updates.length > 0 ? updates.map((update, i) => (
+                    <div key={update.id} className="relative group">
+                       <div className="absolute -left-[23px] top-1 w-3 h-3 bg-white border-2 border-indigo-500 rounded-full shadow-sm z-10"></div>
+                       
+                       {editingUpdateId === update.id ? (
+                           <div className="bg-white p-4 rounded-xl border-2 border-indigo-500 shadow-lg">
+                               <textarea 
+                                  className="w-full border rounded-lg p-2 text-sm mb-2"
+                                  value={editData.description}
+                                  onChange={e => setEditData({...editData, description: e.target.value})}
+                               />
+                               <div className="flex justify-between items-center">
+                                  <input type="date" value={editData.date} onChange={e => setEditData({...editData, date: e.target.value})} className="text-xs border rounded px-2 py-1"/>
+                                  <div className="flex gap-2">
+                                      <button onClick={() => setEditingUpdateId(null)} className="text-xs text-gray-500 px-3 py-1 rounded hover:bg-gray-100">ยกเลิก</button>
+                                      <button onClick={() => saveEditUpdate(update.id)} className="text-xs bg-indigo-600 text-white px-3 py-1 rounded font-bold hover:bg-indigo-700">บันทึก</button>
+                                  </div>
+                               </div>
+                           </div>
+                       ) : (
+                           <div className="bg-gray-50 rounded-xl p-4 border border-gray-100 hover:border-indigo-200 transition-colors">
+                              <div className="flex justify-between items-start mb-2">
+                                 <div className="flex items-center gap-2 text-xs text-gray-500 font-medium">
+                                    <span className="text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md">{new Date(update.update_date).toLocaleDateString('th-TH')}</span>
+                                    <span className="text-gray-300">|</span>
+                                    <span>{new Date(update.created_at).toLocaleTimeString('th-TH', {hour: '2-digit', minute:'2-digit'})}</span>
+                                 </div>
+                                 <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <button onClick={() => startEditUpdate(update)} className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-white rounded-lg transition-colors"><Edit size={12}/></button>
+                                    <button onClick={() => handleDeleteUpdate(update.id)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-white rounded-lg transition-colors"><Trash2 size={12}/></button>
+                                 </div>
+                              </div>
+                              <p className="text-sm text-gray-800 whitespace-pre-line leading-relaxed">{update.description}</p>
+                              {update.images?.length > 0 && (
+                                <div className="flex gap-2 overflow-x-auto pb-1 mt-3">
+                                   {update.images.map((img, imgIdx) => (
+                                     <img key={imgIdx} src={img} className="w-20 h-20 rounded-lg object-cover cursor-pointer hover:opacity-90 border border-gray-200" onClick={() => setLightboxImg(img)} />
+                                   ))}
+                                </div>
+                              )}
+                           </div>
+                       )}
                     </div>
-                ))}
-                </div>
-            </div>
-          )}
+                )) : (
+                    <div className="text-center py-6 text-gray-400 text-sm italic">ยังไม่มีการอัปเดต</div>
+                )}
+              </div>
+
+              {/* Post Box */}
+              <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 mb-6">
+                 <div className="flex gap-3 mb-3">
+                    <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 font-bold shrink-0">
+                       <User size={20}/>
+                    </div>
+                    <div className="flex-1">
+                       <textarea 
+                          className="w-full bg-white border border-gray-300 rounded-xl p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none resize-none"
+                          placeholder="บันทึกความคืบหน้า..."
+                          rows="2"
+                          value={newUpdate.description}
+                          onChange={e => setNewUpdate({...newUpdate, description: e.target.value})}
+                       />
+                    </div>
+                 </div>
+                 <div className="flex justify-between items-center pl-12">
+                     <div className="flex gap-2">
+                         <input 
+                            type="date" 
+                            className="text-xs border rounded-lg px-2 py-1 bg-white"
+                            value={newUpdate.date}
+                            onChange={e => setNewUpdate({...newUpdate, date: e.target.value})}
+                         />
+                         <div className="relative">
+                            <label className="cursor-pointer text-gray-500 hover:text-indigo-600 flex items-center gap-1 text-xs px-2 py-1 hover:bg-gray-100 rounded-lg transition-colors">
+                                <Paperclip size={14}/> แนบรูป
+                                <input type="file" multiple accept="image/*" className="hidden" onChange={handleFileSelect} ref={fileInputRef} />
+                            </label>
+                         </div>
+                     </div>
+                     <button 
+                        onClick={handlePostUpdate} 
+                        disabled={isPosting || (!newUpdate.description.trim() && newUpdate.images.length === 0)}
+                        className="bg-indigo-600 text-white px-4 py-1.5 rounded-lg text-sm font-bold hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-2 transition-all"
+                     >
+                        {isPosting ? <Loader2 size={14} className="animate-spin"/> : <Send size={14}/>} โพสต์
+                     </button>
+                 </div>
+                 {/* Image Previews */}
+                 {newUpdate.images.length > 0 && (
+                    <div className="flex gap-2 mt-3 pl-12 overflow-x-auto">
+                        {newUpdate.images.map((img, i) => (
+                            <div key={i} className="relative w-16 h-16 shrink-0 group">
+                                <img src={img.url} className="w-full h-full object-cover rounded-lg border"/>
+                                <button onClick={() => removeNewImage(i)} className="absolute -top-1 -right-1 bg-black/50 text-white rounded-full p-0.5 hover:bg-red-500"><X size={10}/></button>
+                            </div>
+                        ))}
+                    </div>
+                 )}
+              </div>
+           </div>
         </div>
 
         <div className="space-y-6">
