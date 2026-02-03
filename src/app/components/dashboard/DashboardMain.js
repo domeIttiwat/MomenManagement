@@ -1,16 +1,24 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Calendar, RefreshCw, TrendingUp, Filter, Shield } from 'lucide-react';
+import { 
+  TrendingUp, TrendingDown, Filter, Shield, ShoppingBag, Wrench, PieChart, 
+  DollarSign, Activity, Users, Calendar, AlertCircle, CheckCircle2, Clock
+} from 'lucide-react';
+import { 
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
+  BarChart, Bar, Legend, PieChart as RePieChart, Pie, Cell 
+} from 'recharts';
 import { supabase } from '@/lib/supabase';
 import { 
   startOfMonth, endOfMonth, subMonths, 
   startOfYear, endOfYear, subYears, 
   startOfQuarter, endOfQuarter, setQuarter,
   eachDayOfInterval, eachMonthOfInterval, 
-  format, isSameMonth 
+  format, isSameMonth, isWithinInterval, isValid, parseISO 
 } from 'date-fns';
 import { th } from 'date-fns/locale';
 import { useAuth } from '../../context/AuthContext'; 
 
+// Components เดิม
 import StatCards from './StatCards';
 import SalesChart from './SalesChart';
 import MarketingChart from './MarketingChart';
@@ -21,40 +29,55 @@ const DashboardMain = () => {
   const auth = useAuth();
   const role = auth?.role; 
   
+  const [activeTab, setActiveTab] = useState('overview'); 
   const [loading, setLoading] = useState(true);
   const [dateFilter, setDateFilter] = useState('this_month');
   const [compareMode, setCompareMode] = useState('prev_period');
-  const [rawData, setRawData] = useState({ orders: [], marketing: [], products: [] });
+  
+  const [rawData, setRawData] = useState({ 
+    orders: [], 
+    services: [], 
+    marketing: [], 
+    products: [] 
+  });
+  
   const [mounted, setMounted] = useState(false);
 
-  // 1. Fetch All Data
   const fetchData = async () => {
     setLoading(true);
     try {
+      // 1. Fetch Orders
       const { data: orders } = await supabase
         .from('orders')
         .select('*, order_items(*)')
-        .neq('status', 'Cancelled')
-        .neq('status', 'Quotation') 
         .order('order_date', { ascending: true });
 
+      // 2. Fetch Services
+      const { data: services } = await supabase
+        .from('services')
+        .select('*, service_items(*), service_assignees(user:user_id(first_name, last_name))')
+        .order('received_date', { ascending: true });
+
+      // 3. Fetch Marketing
       const { data: marketing } = await supabase
         .from('marketing_expenses')
         .select('*')
         .order('expense_date', { ascending: true });
 
+      // 4. Fetch Products (เพื่อนำมา map หมวดหมู่)
       const { data: products } = await supabase
         .from('products')
-        .select('id, category_id, categories(name)');
+        .select('id, name, category_id, categories(name), product_categories(categories(name))');
 
       setRawData({ 
         orders: orders || [], 
+        services: services || [],
         marketing: marketing || [],
-        products: products || []
+        products: products || [] 
       });
 
     } catch (err) {
-      console.error(err);
+      console.error('Error fetching dashboard data:', err);
     } finally {
       setLoading(false);
     }
@@ -65,19 +88,13 @@ const DashboardMain = () => {
     fetchData(); 
   }, []);
 
-  // 2. Process Data
   const processedData = useMemo(() => {
     if (!mounted) return null;
 
-    const { orders, marketing, products } = rawData;
+    const { orders, services, marketing, products } = rawData;
     const now = new Date();
     
-    // สร้าง Map เพื่อเช็ค Category ของสินค้าแต่ละตัว
-    const productCategoryMap = {};
-    products.forEach(p => {
-      productCategoryMap[p.id] = p.categories?.name || 'Uncategorized';
-    });
-    
+    // --- 1. Date Filter Logic ---
     let start, end, prevStart, prevEnd;
     let groupBy = 'day';
 
@@ -110,45 +127,106 @@ const DashboardMain = () => {
       groupBy = 'month';
     }
 
-    const filterByDate = (data, field, s, e) => data.filter(item => {
-      const d = new Date(item[field]);
-      return d >= s && d <= e;
+    const safeDate = (dateStr) => {
+        if (!dateStr) return null;
+        const d = new Date(dateStr);
+        return isValid(d) ? d : null;
+    };
+
+    const filterByDate = (data, field) => data.filter(item => {
+      const d = safeDate(item[field]);
+      return d && isWithinInterval(d, { start, end });
     });
 
-    const currentOrders = filterByDate(orders, 'order_date', start, end);
-    const currentMarketing = filterByDate(marketing, 'expense_date', start, end);
-    const prevOrders = filterByDate(orders, 'order_date', prevStart, prevEnd);
-    
-    // --- Helper: Convert to Number safely ---
-    const toNum = (val) => Number(val || 0);
+    const currentOrders = filterByDate(orders, 'order_date');
+    const currentServices = filterByDate(services, 'received_date');
+    const currentMarketing = filterByDate(marketing, 'expense_date');
 
-    const calcStats = (ords, mkts) => {
-      const revenue = ords.reduce((sum, o) => sum + toNum(o.grand_total), 0);
-      const mktCost = mkts.reduce((sum, m) => sum + toNum(m.amount), 0);
-      let productCost = 0;
-      ords.forEach(o => {
-        productCost += o.order_items?.reduce((s, i) => s + (toNum(i.cost_price) * toNum(i.quantity)), 0) || 0;
-      });
-      const shipping = ords.reduce((sum, o) => sum + toNum(o.shipping_cost), 0);
-      const netProfit = revenue - productCost - shipping - mktCost;
-      return { revenue, netProfit, ordersCount: ords.length, mktCost };
+    const prevOrders = orders.filter(o => {
+        const d = safeDate(o.order_date);
+        return d && d >= prevStart && d <= prevEnd;
+    });
+    
+    // --- 2. Calculate Stats ---
+    const isValidItem = (status) => status !== 'Cancelled';
+
+    const calcOrderStats = (ords) => {
+        const validOrds = ords.filter(o => isValidItem(o.status));
+        const revenue = validOrds.reduce((sum, o) => sum + (Number(o.grand_total) || 0), 0);
+        
+        let productCost = 0;
+        validOrds.forEach(o => {
+            productCost += o.order_items?.reduce((s, i) => s + (Number(i.cost_price)*Number(i.quantity)), 0) || 0;
+        });
+        const shipping = validOrds.reduce((sum, o) => sum + (Number(o.shipping_cost) || 0), 0);
+        
+        const cost = productCost + shipping;
+        const profit = revenue - cost; // FIX: คำนวณกำไร
+
+        return { revenue, cost, profit, count: validOrds.length }; // FIX: ส่งค่า profit กลับไปด้วย
     };
 
-    const currStats = calcStats(currentOrders, currentMarketing);
-    const prevStats = calcStats(prevOrders, []); 
-    const getGrowth = (curr, prev) => prev === 0 ? (curr > 0 ? 100 : 0) : ((curr - prev) / prev) * 100;
-    
-    const stats = {
-      ...currStats,
-      revenueGrowth: getGrowth(currStats.revenue, prevStats.revenue),
-      profitGrowth: getGrowth(currStats.netProfit, prevStats.netProfit),
-      ordersGrowth: getGrowth(currStats.ordersCount, prevStats.ordersCount),
-      marketingPercent: currStats.revenue > 0 ? (currStats.mktCost / currStats.revenue * 100).toFixed(1) : 0,
-      roas: currStats.mktCost > 0 ? (currStats.revenue / currStats.mktCost).toFixed(2) : 0,
-      avgDailySales: currStats.revenue / (groupBy === 'day' ? Math.max(1, end.getDate()) : 30),
-      profitMargin: currStats.revenue > 0 ? (currStats.netProfit / currStats.revenue * 100).toFixed(1) : 0,
+    const calcServiceStats = (srvs) => {
+        const validSrvs = srvs.filter(s => isValidItem(s.status));
+        const revenue = validSrvs.reduce((sum, s) => sum + (Number(s.grand_total) || 0), 0);
+        
+        let partCost = 0;
+        let laborRevenue = 0;
+        let partsRevenue = 0;
+
+        validSrvs.forEach(s => {
+            s.service_items?.forEach(i => {
+                const total = Number(i.sell_price) * Number(i.quantity);
+                const cost = Number(i.cost_price) * Number(i.quantity);
+                if (i.type === 'Part') {
+                    partsRevenue += total;
+                    partCost += cost;
+                } else {
+                    laborRevenue += total;
+                }
+            });
+        });
+        
+        const profit = revenue - partCost;
+
+        return { revenue, cost: partCost, profit, count: validSrvs.length, laborRevenue, partsRevenue };
     };
 
+    const currOrderStats = calcOrderStats(currentOrders);
+    const currServiceStats = calcServiceStats(currentServices);
+    const mktCost = currentMarketing.reduce((sum, m) => sum + (Number(m.amount) || 0), 0);
+    const prevOrderStats = calcOrderStats(prevOrders);
+
+    const totalRevenue = currOrderStats.revenue + currServiceStats.revenue;
+    const totalCost = currOrderStats.cost + currServiceStats.cost + mktCost;
+    const netProfit = totalRevenue - totalCost;
+    const prevRevenueOrders = prevOrderStats.revenue; 
+    const getGrowth = (curr, prev) => prev === 0 ? 0 : ((curr - prev) / prev) * 100;
+
+    const overviewStats = {
+        totalRevenue,
+        netProfit,
+        totalOrders: currOrderStats.count,
+        totalServices: currServiceStats.count,
+        revenueGrowth: getGrowth(currOrderStats.revenue, prevRevenueOrders), 
+        marketingCost: mktCost,
+        // ข้อมูลส่วนนี้จะถูกต้องแล้วเพราะ currOrderStats.profit มีค่า
+        orderRevenue: currOrderStats.revenue,
+        orderProfit: currOrderStats.profit,
+        serviceRevenue: currServiceStats.revenue,
+        serviceProfit: currServiceStats.profit
+    };
+
+    const orderStats = {
+      revenue: currOrderStats.revenue,
+      netProfit: currOrderStats.profit - mktCost,
+      ordersCount: currOrderStats.count,
+      revenueGrowth: getGrowth(currOrderStats.revenue, prevOrderStats.revenue),
+      roas: mktCost > 0 ? (currOrderStats.revenue / mktCost).toFixed(2) : 0,
+      mktCost
+    };
+
+    // --- 3. Chart Data Preparation ---
     let intervals;
     if (groupBy === 'day') {
       intervals = eachDayOfInterval({ start, end });
@@ -156,110 +234,158 @@ const DashboardMain = () => {
       intervals = eachMonthOfInterval({ start, end });
     }
 
-    const chartData = intervals.map((datePoint, index) => {
-      let label, dayOrders, dayMarketing, prevSales = 0;
+    const chartData = intervals.map((datePoint) => {
+       const label = format(datePoint, groupBy === 'day' ? 'd MMM' : 'MMM', { locale: th });
+       
+       const isMatch = (dStr) => {
+           const d = safeDate(dStr);
+           if (!d) return false;
+           return groupBy === 'day' 
+             ? format(d, 'yyyy-MM-dd') === format(datePoint, 'yyyy-MM-dd')
+             : isSameMonth(d, datePoint);
+       };
 
-      if (groupBy === 'day') {
-        const dayStr = format(datePoint, 'yyyy-MM-dd');
-        label = format(datePoint, 'd MMM', { locale: th });
-        dayOrders = currentOrders.filter(o => o.order_date.startsWith(dayStr));
-        dayMarketing = currentMarketing.filter(m => m.expense_date === dayStr);
-        
-        if (compareMode === 'prev_period') {
-          const targetPrev = new Date(prevStart);
-          targetPrev.setDate(prevStart.getDate() + index);
-          if (targetPrev <= prevEnd) {
-             const prevStr = format(targetPrev, 'yyyy-MM-dd');
-             prevSales = prevOrders.filter(o => o.order_date.startsWith(prevStr)).reduce((s, o) => s + toNum(o.grand_total), 0);
-          }
+       const dayOrders = currentOrders.filter(o => isMatch(o.order_date) && isValidItem(o.status));
+       const dayServices = currentServices.filter(s => isMatch(s.received_date) && isValidItem(s.status));
+       const dayMarketing = currentMarketing.filter(m => isMatch(m.expense_date));
+       
+       const orderSales = dayOrders.reduce((s, o) => s + (Number(o.grand_total) || 0), 0);
+       const serviceSales = dayServices.reduce((s, srv) => s + (Number(srv.grand_total) || 0), 0);
+       const marketingCost = dayMarketing.reduce((s, m) => s + (Number(m.amount) || 0), 0);
+       
+       return {
+           date: label,
+           orderSales,
+           serviceSales,
+           marketingCost,
+           sales: orderSales, 
+           marketing: marketingCost,
+           cost: marketingCost,
+           totalSales: orderSales + serviceSales
+       };
+    });
+
+    // --- 4. Prepare Ranking & Category Data ---
+    const productCatMap = {};
+    products.forEach(p => {
+        let catName = 'อื่นๆ';
+        if (p.categories?.name) {
+            catName = p.categories.name;
+        } else if (p.product_categories && Array.isArray(p.product_categories) && p.product_categories.length > 0) {
+            const firstCat = p.product_categories.find(pc => pc.categories?.name);
+            if (firstCat) catName = firstCat.categories.name;
         }
-      } else {
-        label = format(datePoint, 'MMM', { locale: th });
-        dayOrders = currentOrders.filter(o => isSameMonth(new Date(o.order_date), datePoint));
-        dayMarketing = currentMarketing.filter(m => isSameMonth(new Date(m.expense_date), datePoint));
-        
-        if (compareMode === 'prev_period') {
-           const targetPrev = new Date(prevStart);
-           targetPrev.setMonth(prevStart.getMonth() + index);
-           if (targetPrev <= prevEnd) {
-              prevSales = prevOrders.filter(o => isSameMonth(new Date(o.order_date), targetPrev)).reduce((s, o) => s + toNum(o.grand_total), 0);
-           }
-        }
-      }
-
-      const sales = dayOrders.reduce((sum, o) => sum + toNum(o.grand_total), 0);
-      const mkt = dayMarketing.reduce((sum, m) => sum + toNum(m.amount), 0);
-      
-      let cost = 0;
-      dayOrders.forEach(o => {
-        cost += (o.order_items?.reduce((s, i) => s + (toNum(i.cost_price) * toNum(i.quantity)), 0) || 0) + toNum(o.shipping_cost);
-      });
-      const profit = sales - cost - mkt;
-
-      return { date: label, sales, profit, marketingCost: mkt, prevSales: compareMode === 'none' ? null : prevSales };
+        productCatMap[p.id] = catName;
     });
 
-    const categoryStats = {};
-    currentOrders.forEach(o => {
-      o.order_items?.forEach(i => {
-        const catName = productCategoryMap[i.product_id] || (i.is_custom ? 'อื่นๆ/Custom' : 'Uncategorized');
-        
-        if (!categoryStats[catName]) categoryStats[catName] = { name: catName, sales: 0, profit: 0 };
-        
-        const itemSales = toNum(i.sell_price) * toNum(i.quantity);
-        const itemCost = toNum(i.cost_price) * toNum(i.quantity);
-        const itemProfit = itemSales - itemCost;
-
-        categoryStats[catName].sales += itemSales;
-        categoryStats[catName].profit += itemProfit;
-      });
-    });
-    const categoryData = Object.values(categoryStats).sort((a,b) => b.sales - a.sales);
-
-    // --- Ranking Logic (Updated) ---
-    const scooterStats = {};
-    const accessoryStats = {};
-    
-    currentOrders.forEach(o => {
-      o.order_items?.forEach(i => {
-        const catName = productCategoryMap[i.product_id] || 'Uncategorized';
-        
-        // แยกประเภทสินค้า
-        const isScooter = catName.includes('Scooter') || catName.includes('Bike') || catName.includes('Vehicle');
-        const targetStats = isScooter ? scooterStats : accessoryStats;
-        
-        if (!targetStats[i.product_name]) targetStats[i.product_name] = { name: i.product_name, quantity: 0, total: 0 };
-        targetStats[i.product_name].quantity += toNum(i.quantity);
-        targetStats[i.product_name].total += (toNum(i.sell_price) * toNum(i.quantity));
-      });
-    });
-    
-    // Top 10 Scooters
-    const topScooters = Object.values(scooterStats).sort((a,b) => b.total - a.total).slice(0, 10);
-    // Top 10 Accessories
-    const topAccessories = Object.values(accessoryStats).sort((a,b) => b.total - a.total).slice(0, 10);
-
+    const productStats = {};
     const locationStats = {};
+    const categoryStats = {};
+    
     currentOrders.forEach(o => {
+      if (!isValidItem(o.status)) return;
+      
       const prov = o.customer_cache?.address_parsed?.prov || 'ไม่ระบุ';
       if (!locationStats[prov]) locationStats[prov] = { province: prov, count: 0, total: 0 };
       locationStats[prov].count += 1;
-      locationStats[prov].total += toNum(o.grand_total);
+      locationStats[prov].total += (Number(o.grand_total) || 0);
+
+      o.order_items?.forEach(i => {
+         const totalItemSales = (Number(i.sell_price) * Number(i.quantity));
+         
+         const pName = i.product_name || i.name || 'Unknown Product';
+         if (!productStats[pName]) productStats[pName] = { name: pName, quantity: 0, total: 0 };
+         productStats[pName].quantity += Number(i.quantity) || 0;
+         productStats[pName].total += totalItemSales;
+
+         const catName = productCatMap[i.product_id] || 'สินค้าทั่วไป';
+         if (!categoryStats[catName]) categoryStats[catName] = { name: catName, sales: 0 };
+         categoryStats[catName].sales += totalItemSales;
+      });
     });
+
+    const categoryData = Object.values(categoryStats).sort((a,b) => b.sales - a.sales);
+    const topProducts = Object.values(productStats).sort((a,b) => b.total - a.total).slice(0, 10); 
     const topLocations = Object.values(locationStats).sort((a,b) => b.total - a.total).slice(0, 5);
 
-    return { 
-      stats, 
-      chartData, 
-      categoryData, 
-      topScooters,     // ส่งข้อมูลสกู๊ตเตอร์ขายดี
-      topAccessories,  // ส่งข้อมูลชุดแต่งขายดี
-      topLocations 
+    // --- 5. Service Specific Analytics ---
+    const serviceStatusCounts = {};
+    currentServices.forEach(s => {
+        if (!isValidItem(s.status)) return;
+        const st = s.status === 'In Progress' ? 'กำลังซ่อม' : 
+                   s.status === 'Waiting' ? 'รอคิว/อะไหล่' :
+                   ['Completed', 'Delivered', 'Done'].includes(s.status) ? 'เสร็จสิ้น' : 
+                   s.status === 'Tested' ? 'รอเทส' : s.status;
+        serviceStatusCounts[st] = (serviceStatusCounts[st] || 0) + 1;
+    });
+    const serviceStatusData = Object.keys(serviceStatusCounts).map(k => ({ name: k, value: serviceStatusCounts[k] }));
+
+    const techStats = {};
+    currentServices.forEach(s => {
+        if (!isValidItem(s.status)) return;
+        if (s.service_assignees && s.service_assignees.length > 0) {
+            s.service_assignees.forEach(a => {
+                const name = a.user?.first_name || 'ไม่ระบุ';
+                if (!techStats[name]) techStats[name] = { name, jobs: 0, revenue: 0 };
+                techStats[name].jobs += 1;
+                techStats[name].revenue += (s.grand_total || 0);
+            });
+        } else {
+             if (!techStats['ไม่ระบุ']) techStats['ไม่ระบุ'] = { name: 'ไม่ระบุ', jobs: 0, revenue: 0 };
+             techStats['ไม่ระบุ'].jobs += 1;
+        }
+    });
+    const technicianData = Object.values(techStats).sort((a,b) => b.jobs - a.jobs).slice(0, 5);
+
+    const revenueCompositionData = [
+        { name: 'ค่าแรง/บริการ', value: currServiceStats.laborRevenue },
+        { name: 'ค่าอะไหล่', value: currServiceStats.partsRevenue }
+    ];
+
+    return {
+        overviewStats,
+        orderStats,
+        chartData,
+        categoryData,
+        topProducts, 
+        topLocations,
+        serviceStats: {
+            totalRevenue: currServiceStats.revenue,
+            totalCost: currServiceStats.cost,
+            totalProfit: currServiceStats.profit, 
+            totalJobs: currServiceStats.count,
+            avgTicket: currServiceStats.count > 0 ? currServiceStats.revenue / currServiceStats.count : 0,
+            statusData: serviceStatusData,
+            technicianData,
+            revenueCompositionData
+        }
     };
 
-  }, [rawData, dateFilter, compareMode, mounted]);
+  }, [rawData, dateFilter, mounted]);
 
-  if (!mounted) return <div className="p-10 text-center text-gray-400">Loading...</div>;
+  const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
+
+  if (!mounted) return <div className="p-10 text-center text-gray-400">Loading Dashboard...</div>;
+
+  const KpiCard = ({ title, value, growth, icon: Icon, color, subtext }) => (
+    <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm flex items-start justify-between">
+      <div>
+        <p className="text-gray-500 text-xs font-bold uppercase tracking-wider mb-1">{title}</p>
+        <h3 className="text-2xl font-black text-gray-800">{value}</h3>
+        {subtext && <p className="text-xs text-gray-400 mt-1">{subtext}</p>}
+        {!subtext && compareMode !== 'none' && growth !== undefined && (
+          <div className={`flex items-center gap-1 mt-2 text-xs font-bold ${growth >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+            {growth >= 0 ? <TrendingUp size={14}/> : <TrendingDown size={14}/>}
+            <span>{Math.abs(growth).toFixed(1)}%</span>
+            <span className="text-gray-400 font-normal">เทียบช่วงก่อน</span>
+          </div>
+        )}
+      </div>
+      <div className={`p-3 rounded-xl ${color}`}>
+        <Icon size={24} />
+      </div>
+    </div>
+  );
 
   return (
     <div className="max-w-[1600px] mx-auto space-y-6 animate-in fade-in duration-500 pb-20">
@@ -267,8 +393,8 @@ const DashboardMain = () => {
       {/* Header & Controls */}
       <div className="flex flex-col md:flex-row justify-between items-center bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
         <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-3">
-          <TrendingUp className="text-indigo-600"/> 
-          ภาพรวมธุรกิจ 
+          <Activity className="text-indigo-600"/> 
+          Dashboard ภาพรวม
           {role && (
             <span className="text-sm font-medium bg-indigo-50 text-indigo-700 px-3 py-1 rounded-full flex items-center gap-1 border border-indigo-100">
               <Shield size={14}/> {role.name}
@@ -277,12 +403,7 @@ const DashboardMain = () => {
         </h1>
         
         <div className="flex flex-wrap items-center gap-3">
-           <div className="flex items-center gap-2 bg-gray-50 p-1 rounded-xl border border-gray-200">
-             <span className="text-xs font-bold text-gray-500 px-2">เปรียบเทียบ:</span>
-             <button onClick={() => setCompareMode('none')} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${compareMode==='none' ? 'bg-white shadow text-gray-800' : 'text-gray-500'}`}>ปิด</button>
-             <button onClick={() => setCompareMode('prev_period')} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${compareMode==='prev_period' ? 'bg-white shadow text-indigo-600' : 'text-gray-500'}`}>ช่วงก่อนหน้า</button>
-           </div>
-
+           {/* Date Filter */}
            <div className="relative">
              <Filter size={16} className="absolute left-3 top-3 text-gray-400"/>
              <select 
@@ -290,44 +411,262 @@ const DashboardMain = () => {
               value={dateFilter}
               onChange={(e) => setDateFilter(e.target.value)}
             >
-              <option value="this_month">เดือนนี้ (รายวัน)</option>
-              <option value="last_month">เดือนที่แล้ว (รายวัน)</option>
-              <option value="Q1">ไตรมาส 1 (ม.ค.-มี.ค.)</option>
-              <option value="Q2">ไตรมาส 2 (เม.ย.-มิ.ย.)</option>
-              <option value="Q3">ไตรมาส 3 (ก.ค.-ก.ย.)</option>
-              <option value="Q4">ไตรมาส 4 (ต.ค.-ธ.ค.)</option>
-              <option value="this_year">ปีนี้ (รายเดือน)</option>
+              <option value="this_month">เดือนนี้</option>
+              <option value="last_month">เดือนที่แล้ว</option>
+              <option value="Q1">Q1 (ม.ค.-มี.ค.)</option>
+              <option value="Q2">Q2 (เม.ย.-มิ.ย.)</option>
+              <option value="Q3">Q3 (ก.ค.-ก.ย.)</option>
+              <option value="Q4">Q4 (ต.ค.-ธ.ค.)</option>
+              <option value="this_year">ปีนี้</option>
             </select>
            </div>
-
-           <button onClick={fetchData} className="p-2.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-600 transition-colors">
-            <RefreshCw size={18} className={loading ? "animate-spin" : ""} />
-          </button>
+           
+           <div className="relative">
+            <select 
+              className="bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 rounded-lg px-3 py-2.5 text-sm font-medium outline-none cursor-pointer"
+              value={compareMode}
+              onChange={(e) => setCompareMode(e.target.value)}
+            >
+              <option value="prev_period">เปรียบเทียบกับช่วงก่อน</option>
+              <option value="none">ไม่เปรียบเทียบ</option>
+            </select>
+           </div>
         </div>
       </div>
 
-      <StatCards stats={processedData?.stats} loading={loading} />
-
-      {/* Sales Chart (Full Width) */}
-      <div className="w-full h-[450px]">
-        <SalesChart data={processedData?.chartData} />
+      {/* Tabs Menu */}
+      <div className="flex p-1 bg-gray-100/80 rounded-xl w-fit">
+         <button onClick={() => setActiveTab('overview')} className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'overview' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>ภาพรวมทั้งหมด</button>
+         <button onClick={() => setActiveTab('orders')} className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'orders' ? 'bg-white text-emerald-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>ยอดขายออเดอร์</button>
+         <button onClick={() => setActiveTab('services')} className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'services' ? 'bg-white text-orange-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>งานซ่อม/บริการ</button>
       </div>
 
-      {/* Grid: Category & Marketing Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="flex-1 min-h-[350px]">
-           <CategoryChart data={processedData?.categoryData || []} />
-        </div>
-        <div className="flex-1 min-h-[350px]">
-           <MarketingChart data={processedData?.chartData} />
-        </div>
-      </div>
+      {/* ================= ZONE 1: OVERVIEW ================= */}
+      {activeTab === 'overview' && processedData && (
+         <div className="space-y-6 animate-in slide-in-from-bottom-4">
+            {/* KPI Cards (ปรับปรุงตามคำขอ) */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <KpiCard 
+                   title="รายรับรวมทั้งหมด" 
+                   value={`฿${(processedData.overviewStats.totalRevenue || 0).toLocaleString()}`} 
+                   growth={processedData.overviewStats.revenueGrowth}
+                   icon={DollarSign}
+                   color="bg-indigo-50 text-indigo-600"
+                 />
+                 <KpiCard 
+                   title="กำไรรวมทั้งหมด" 
+                   value={`฿${(processedData.overviewStats.netProfit || 0).toLocaleString()}`} 
+                   // growth={processedData.overviewStats.profitGrowth} 
+                   icon={TrendingUp}
+                   color="bg-emerald-50 text-emerald-600"
+                 />
+                 {/* Marketing Cost as info */}
+                 <KpiCard 
+                   title="งบการตลาดที่ใช้" 
+                   value={`฿${(processedData.overviewStats.marketingCost || 0).toLocaleString()}`} 
+                   icon={Activity}
+                   color="bg-rose-50 text-rose-600"
+                   subtext="(หักลบในกำไรสุทธิแล้ว)"
+                 />
+            </div>
+            
+            {/* Detailed Breakdown */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                 <KpiCard 
+                   title="ยอดขาย (ออเดอร์)" 
+                   value={`฿${(processedData.overviewStats.orderRevenue || 0).toLocaleString()}`} 
+                   icon={ShoppingBag}
+                   color="bg-emerald-50 text-emerald-600"
+                   growth={processedData.orderStats.revenueGrowth}
+                 />
+                 <KpiCard 
+                   title="ยอดขาย (งานซ่อม)" 
+                   value={`฿${(processedData.overviewStats.serviceRevenue || 0).toLocaleString()}`} 
+                   icon={Wrench}
+                   color="bg-orange-50 text-orange-600"
+                 />
+                 <KpiCard 
+                   title="กำไร (ออเดอร์)" 
+                   value={`฿${(processedData.overviewStats.orderProfit || 0).toLocaleString()}`} 
+                   icon={TrendingUp}
+                   color="bg-emerald-50 text-emerald-600"
+                 />
+                 <KpiCard 
+                   title="กำไร (งานซ่อม)" 
+                   value={`฿${(processedData.overviewStats.serviceProfit || 0).toLocaleString()}`} 
+                   icon={TrendingUp}
+                   color="bg-orange-50 text-orange-600"
+                 />
+            </div>
 
-      <TopRankings 
-        topScooters={processedData?.topScooters} 
-        topAccessories={processedData?.topAccessories}
-        topLocations={processedData?.topLocations} 
-      />
+            {/* Combined Chart (Improved to compare Order vs Service) */}
+            <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+               <h3 className="font-bold text-gray-800 mb-6">เปรียบเทียบยอดขาย (Orders vs Services)</h3>
+               <div className="h-[350px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={processedData.chartData}>
+                       <defs>
+                          <linearGradient id="colorOrder" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#10b981" stopOpacity={0.1}/>
+                            <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                          </linearGradient>
+                          <linearGradient id="colorService" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#f97316" stopOpacity={0.1}/>
+                            <stop offset="95%" stopColor="#f97316" stopOpacity={0}/>
+                          </linearGradient>
+                       </defs>
+                       <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                       <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{fontSize: 12}} />
+                       <YAxis axisLine={false} tickLine={false} tick={{fontSize: 12}} />
+                       <Tooltip contentStyle={{borderRadius:'12px'}} formatter={(val)=>[val.toLocaleString(), 'บาท']} />
+                       <Legend verticalAlign="top" height={36}/>
+                       <Area type="monotone" dataKey="orderSales" name="ยอดขายออเดอร์" stroke="#10b981" strokeWidth={3} fillOpacity={1} fill="url(#colorOrder)" />
+                       <Area type="monotone" dataKey="serviceSales" name="ยอดขายงานซ่อม" stroke="#f97316" strokeWidth={3} fillOpacity={1} fill="url(#colorService)" />
+                    </AreaChart>
+                 </ResponsiveContainer>
+               </div>
+            </div>
+         </div>
+      )}
+
+      {/* ================= ZONE 2: ORDERS ================= */}
+      {activeTab === 'orders' && processedData && (
+          <div className="space-y-6 animate-in slide-in-from-bottom-4">
+              <StatCards stats={processedData.orderStats} loading={loading} />
+              
+              <div className="w-full h-[450px]">
+                {/* ส่งข้อมูลเฉพาะ Order Sales ไปแสดง */}
+                <SalesChart data={processedData.chartData.map(d => ({ ...d, sales: d.orderSales }))} />
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="flex-1 min-h-[350px]">
+                   <CategoryChart data={processedData.categoryData || []} />
+                </div>
+                <div className="flex-1 min-h-[350px]">
+                   <MarketingChart data={processedData.chartData} />
+                </div>
+              </div>
+
+              <TopRankings 
+                topProducts={processedData.topProducts} 
+                topLocations={processedData.topLocations} 
+              />
+          </div>
+      )}
+
+      {/* ================= ZONE 3: SERVICES ================= */}
+      {activeTab === 'services' && processedData && (
+          <div className="space-y-6 animate-in slide-in-from-bottom-4">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                 <KpiCard 
+                   title="งานซ่อมทั้งหมด" 
+                   value={processedData.serviceStats.totalJobs} 
+                   growth={0}
+                   icon={Wrench}
+                   color="bg-indigo-50 text-indigo-600"
+                 />
+                 <KpiCard 
+                   title="รายได้งานซ่อม" 
+                   value={`฿${processedData.serviceStats.totalRevenue.toLocaleString()}`} 
+                   growth={0}
+                   icon={DollarSign}
+                   color="bg-emerald-50 text-emerald-600"
+                 />
+                 <KpiCard 
+                   title="กำไรขั้นต้น (Est.)" 
+                   value={`฿${processedData.serviceStats.totalProfit.toLocaleString()}`} 
+                   growth={0}
+                   icon={TrendingUp}
+                   color="bg-amber-50 text-amber-600"
+                 />
+                 <KpiCard 
+                   title="เฉลี่ยต่อคัน" 
+                   value={`฿${Math.round(processedData.serviceStats.avgTicket).toLocaleString()}`} 
+                   growth={0}
+                   icon={Users}
+                   color="bg-blue-50 text-blue-600"
+                 />
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                 {/* Service Revenue Trend */}
+                 <div className="lg:col-span-2 bg-white p-6 rounded-3xl border border-gray-100 shadow-sm h-[400px]">
+                    <h3 className="font-bold text-gray-800 mb-6">แนวโน้มรายได้งานซ่อม</h3>
+                    <ResponsiveContainer width="100%" height="85%">
+                        <AreaChart data={processedData.chartData}>
+                           <defs>
+                              <linearGradient id="colorSrv" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="5%" stopColor="#f97316" stopOpacity={0.1}/>
+                                <stop offset="95%" stopColor="#f97316" stopOpacity={0}/>
+                              </linearGradient>
+                           </defs>
+                           <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                           <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{fontSize: 12}} />
+                           <YAxis axisLine={false} tickLine={false} tick={{fontSize: 12}} />
+                           <Tooltip contentStyle={{borderRadius:'12px'}} formatter={(val)=>[val.toLocaleString(), 'บาท']} />
+                           <Area type="monotone" dataKey="serviceSales" stroke="#f97316" strokeWidth={3} fillOpacity={1} fill="url(#colorSrv)" />
+                        </AreaChart>
+                    </ResponsiveContainer>
+                 </div>
+
+                 {/* Status Pie Chart */}
+                 <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm h-[400px]">
+                    <h3 className="font-bold text-gray-800 mb-6">สถานะงานซ่อม</h3>
+                    <ResponsiveContainer width="100%" height="85%">
+                       <RePieChart>
+                          <Pie
+                             data={processedData.serviceStats.statusData}
+                             cx="50%" cy="50%" innerRadius={60} outerRadius={80}
+                             paddingAngle={5} dataKey="value"
+                          >
+                             {processedData.serviceStats.statusData.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                             ))}
+                          </Pie>
+                          <Tooltip />
+                          <Legend verticalAlign="bottom" height={36}/>
+                       </RePieChart>
+                    </ResponsiveContainer>
+                 </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                 {/* Technician Performance */}
+                 <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm">
+                    <h3 className="font-bold text-gray-800 mb-6">ประสิทธิภาพทีมช่าง (Top Active Technicians)</h3>
+                    <ResponsiveContainer width="100%" height={300}>
+                       <BarChart data={processedData.serviceStats.technicianData} layout="vertical" margin={{left: 20}}>
+                          <CartesianGrid strokeDasharray="3 3" horizontal={false}/>
+                          <XAxis type="number" hide/>
+                          <YAxis dataKey="name" type="category" width={100} tick={{fontSize: 12}}/>
+                          <Tooltip cursor={{fill: 'transparent'}}/>
+                          <Bar dataKey="jobs" fill="#6366f1" radius={[0, 4, 4, 0]} name="จำนวนงาน" barSize={20} />
+                       </BarChart>
+                    </ResponsiveContainer>
+                 </div>
+
+                 {/* Revenue Composition */}
+                 <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm">
+                    <h3 className="font-bold text-gray-800 mb-6">สัดส่วนรายได้ (ค่าแรง vs ค่าอะไหล่)</h3>
+                    <ResponsiveContainer width="100%" height={300}>
+                       <RePieChart>
+                          <Pie
+                             data={processedData.serviceStats.revenueCompositionData}
+                             cx="50%" cy="50%" outerRadius={100}
+                             dataKey="value" label={({name, percent}) => `${name} ${(percent * 100).toFixed(0)}%`}
+                          >
+                             <Cell fill="#3b82f6" /> {/* ค่าแรง */}
+                             <Cell fill="#f59e0b" /> {/* ค่าอะไหล่ */}
+                          </Pie>
+                          <Tooltip formatter={(val)=>[val.toLocaleString(), 'บาท']} />
+                       </RePieChart>
+                    </ResponsiveContainer>
+                 </div>
+              </div>
+          </div>
+      )}
+
     </div>
   );
 };
