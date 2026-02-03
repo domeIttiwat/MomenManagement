@@ -18,10 +18,10 @@ import {
 import { th } from 'date-fns/locale';
 import { useAuth } from '../../context/AuthContext'; 
 
-// Components เดิม
+// Components
 import StatCards from './StatCards';
 import SalesChart from './SalesChart';
-import MarketingChart from './MarketingChart';
+import MarketingChart from './MarketingChart'; // แก้ไขไฟล์นี้ด้วย (ด้านล่าง)
 import CategoryChart from './CategoryChart';
 import TopRankings from './TopRankings';
 
@@ -46,25 +46,21 @@ const DashboardMain = () => {
   const fetchData = async () => {
     setLoading(true);
     try {
-      // 1. Fetch Orders
       const { data: orders } = await supabase
         .from('orders')
         .select('*, order_items(*)')
         .order('order_date', { ascending: true });
 
-      // 2. Fetch Services
       const { data: services } = await supabase
         .from('services')
         .select('*, service_items(*), service_assignees(user:user_id(first_name, last_name))')
         .order('received_date', { ascending: true });
 
-      // 3. Fetch Marketing
       const { data: marketing } = await supabase
         .from('marketing_expenses')
         .select('*')
         .order('expense_date', { ascending: true });
 
-      // 4. Fetch Products (เพื่อนำมา map หมวดหมู่)
       const { data: products } = await supabase
         .from('products')
         .select('id, name, category_id, categories(name), product_categories(categories(name))');
@@ -161,9 +157,9 @@ const DashboardMain = () => {
         const shipping = validOrds.reduce((sum, o) => sum + (Number(o.shipping_cost) || 0), 0);
         
         const cost = productCost + shipping;
-        const profit = revenue - cost; // FIX: คำนวณกำไร
+        const profit = revenue - cost; 
 
-        return { revenue, cost, profit, count: validOrds.length }; // FIX: ส่งค่า profit กลับไปด้วย
+        return { revenue, cost, profit, count: validOrds.length }; 
     };
 
     const calcServiceStats = (srvs) => {
@@ -188,7 +184,6 @@ const DashboardMain = () => {
         });
         
         const profit = revenue - partCost;
-
         return { revenue, cost: partCost, profit, count: validSrvs.length, laborRevenue, partsRevenue };
     };
 
@@ -210,20 +205,24 @@ const DashboardMain = () => {
         totalServices: currServiceStats.count,
         revenueGrowth: getGrowth(currOrderStats.revenue, prevRevenueOrders), 
         marketingCost: mktCost,
-        // ข้อมูลส่วนนี้จะถูกต้องแล้วเพราะ currOrderStats.profit มีค่า
         orderRevenue: currOrderStats.revenue,
         orderProfit: currOrderStats.profit,
         serviceRevenue: currServiceStats.revenue,
         serviceProfit: currServiceStats.profit
     };
 
+    // FIX: คำนวณ marketingPercent และ roas ให้เป็น String ทศนิยม 1 ตำแหน่ง
+    const marketingPercentRaw = currOrderStats.revenue > 0 ? (mktCost / currOrderStats.revenue) * 100 : 0;
+    const roasRaw = mktCost > 0 ? (currOrderStats.revenue / mktCost) : 0;
+
     const orderStats = {
       revenue: currOrderStats.revenue,
       netProfit: currOrderStats.profit - mktCost,
       ordersCount: currOrderStats.count,
       revenueGrowth: getGrowth(currOrderStats.revenue, prevOrderStats.revenue),
-      roas: mktCost > 0 ? (currOrderStats.revenue / mktCost).toFixed(2) : 0,
-      mktCost
+      roas: roasRaw.toFixed(1), // ทศนิยม 1 ตำแหน่ง
+      mktCost: mktCost,
+      marketingPercent: marketingPercentRaw.toFixed(1) // ทศนิยม 1 ตำแหน่ง
     };
 
     // --- 3. Chart Data Preparation ---
@@ -250,18 +249,31 @@ const DashboardMain = () => {
        const dayMarketing = currentMarketing.filter(m => isMatch(m.expense_date));
        
        const orderSales = dayOrders.reduce((s, o) => s + (Number(o.grand_total) || 0), 0);
+       
+       // คำนวณต้นทุนออเดอร์รายวัน
+       const orderCosts = dayOrders.reduce((sum, o) => {
+            const itemsCost = o.order_items?.reduce((s, i) => s + (Number(i.cost_price)*Number(i.quantity)), 0) || 0;
+            return sum + itemsCost + (Number(o.shipping_cost) || 0);
+       }, 0);
+
        const serviceSales = dayServices.reduce((s, srv) => s + (Number(srv.grand_total) || 0), 0);
        const marketingCost = dayMarketing.reduce((s, m) => s + (Number(m.amount) || 0), 0);
        
+       // คำนวณกำไรสุทธิออเดอร์รายวัน
+       const orderProfit = orderSales - orderCosts - marketingCost;
+
        return {
            date: label,
            orderSales,
            serviceSales,
            marketingCost,
+           
+           // Field สำหรับกราฟ
            sales: orderSales, 
            marketing: marketingCost,
+           profit: orderProfit, // ส่งไปให้กราฟ ROI
            cost: marketingCost,
-           totalSales: orderSales + serviceSales
+           totalSales: orderSales + serviceSales,
        };
     });
 
@@ -444,7 +456,7 @@ const DashboardMain = () => {
       {/* ================= ZONE 1: OVERVIEW ================= */}
       {activeTab === 'overview' && processedData && (
          <div className="space-y-6 animate-in slide-in-from-bottom-4">
-            {/* KPI Cards (ปรับปรุงตามคำขอ) */}
+            {/* KPI Cards */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <KpiCard 
                    title="รายรับรวมทั้งหมด" 
@@ -456,7 +468,6 @@ const DashboardMain = () => {
                  <KpiCard 
                    title="กำไรรวมทั้งหมด" 
                    value={`฿${(processedData.overviewStats.netProfit || 0).toLocaleString()}`} 
-                   // growth={processedData.overviewStats.profitGrowth} 
                    icon={TrendingUp}
                    color="bg-emerald-50 text-emerald-600"
                  />
@@ -499,7 +510,7 @@ const DashboardMain = () => {
                  />
             </div>
 
-            {/* Combined Chart (Improved to compare Order vs Service) */}
+            {/* Combined Chart */}
             <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
                <h3 className="font-bold text-gray-800 mb-6">เปรียบเทียบยอดขาย (Orders vs Services)</h3>
                <div className="h-[350px]">
@@ -535,17 +546,22 @@ const DashboardMain = () => {
               <StatCards stats={processedData.orderStats} loading={loading} />
               
               <div className="w-full h-[450px]">
-                {/* ส่งข้อมูลเฉพาะ Order Sales ไปแสดง */}
-                <SalesChart data={processedData.chartData.map(d => ({ ...d, sales: d.orderSales }))} />
+                {/* FIX: ส่ง orderProfit และ marketing ไปให้กราฟ ROI */}
+                <MarketingChart 
+                    data={processedData.chartData.map(d => ({ 
+                        ...d, 
+                        sales: d.orderSales,
+                        profit: d.orderProfit 
+                    }))} 
+                    stats={processedData.orderStats} 
+                />
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div className="flex-1 min-h-[350px]">
                    <CategoryChart data={processedData.categoryData || []} />
                 </div>
-                <div className="flex-1 min-h-[350px]">
-                   <MarketingChart data={processedData.chartData} />
-                </div>
+                {/* <div className="flex-1 min-h-[350px]"><MarketingChart data={processedData.chartData} /></div> */}
               </div>
 
               <TopRankings 
