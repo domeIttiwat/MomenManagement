@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, Camera, Search, X, Settings } from 'lucide-react';
+import { Plus, Trash2, Camera, Search, X, Settings, StickyNote } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import ImageUploader from '../orders/ImageUploader';
 
@@ -20,7 +20,8 @@ const ProductFastenerSelector = ({ locations = [], onChange, variants = [] }) =>
     onChange([...locations, { 
       location_name: '', 
       location_image: null, 
-      bolts_usage: [] 
+      bolts_usage: [],
+      note: '' 
     }]);
   };
 
@@ -39,24 +40,17 @@ const ProductFastenerSelector = ({ locations = [], onChange, variants = [] }) =>
     const newLocs = [...locations];
     const currentBolts = newLocs[locIndex].bolts_usage || [];
     
-    // ปรับ Logic เช็คซ้ำ: ยอมให้เพิ่มได้ถ้ายังไม่มีรายการที่เป็น Common (null variant) สำหรับน็อตตัวนี้
-    // (เพราะค่าเริ่มต้นตอนเพิ่มจะเป็น Common เสมอ)
-    const hasCommonEntry = currentBolts.some(b => b.bolt_id === bolt.id && !b.parent_variant_id);
-
-    if (!hasCommonEntry) {
-      newLocs[locIndex].bolts_usage = [...currentBolts, { 
-        bolt_id: bolt.id, 
-        name: bolt.name, 
-        qty: 1, 
-        price: bolt.sell_price,
-        head_type: bolt.head_type,
-        material: bolt.material,
-        parent_variant_id: null // เริ่มต้นเป็นใช้ร่วมกันทุกรุ่น
-      }];
-      onChange(newLocs);
-    } else {
-        alert('มีรายการน็อตนี้ที่เป็นแบบใช้ร่วมกันทุกรุ่นอยู่แล้ว หากต้องการระบุเฉพาะรุ่น ให้เปลี่ยนรายการเดิมเป็นรุ่นย่อยก่อน');
-    }
+    newLocs[locIndex].bolts_usage = [...currentBolts, { 
+      bolt_id: bolt.id, 
+      name: bolt.name, 
+      qty: 1, 
+      price: bolt.sell_price,
+      head_type: bolt.head_type,
+      material: bolt.material,
+      parent_variant_id: null
+    }];
+    onChange(newLocs);
+    
     setIsAddingBolt({ locIndex: -1, isOpen: false });
   };
 
@@ -66,7 +60,6 @@ const ProductFastenerSelector = ({ locations = [], onChange, variants = [] }) =>
     onChange(newLocs);
   };
 
-  // ฟังก์ชันอัปเดตข้อมูลน็อต (รวมถึง Variant)
   const updateBoltUsage = (locIndex, boltIdx, field, val) => {
     const newLocs = [...locations];
     if (field === 'qty') val = parseInt(val) || 1;
@@ -75,6 +68,12 @@ const ProductFastenerSelector = ({ locations = [], onChange, variants = [] }) =>
   };
 
   const filteredBolts = bolts.filter(b => b.name.toLowerCase().includes(boltSearch.toLowerCase()));
+
+  // Helper: ดึง URL รูปภาพไม่ว่าจะเป็น String หรือ Object
+  const getImageUrl = (imgData) => {
+    if (!imgData) return null;
+    return typeof imgData === 'string' ? imgData : imgData.url;
+  };
 
   return (
     <div className="space-y-6">
@@ -87,22 +86,35 @@ const ProductFastenerSelector = ({ locations = [], onChange, variants = [] }) =>
                  <label className="text-xs font-bold text-gray-500 uppercase tracking-wide">จุดติดตั้ง</label>
                  <input 
                    className="w-full border rounded-xl px-3 py-2 text-sm bg-gray-50 focus:bg-white focus:ring-2 focus:ring-orange-500/20 outline-none"
-                   placeholder="เช่น บังโคลนหน้า, สวิงอาร์ม..."
+                   placeholder="เช่น บังโคลนหน้า..."
                    value={loc.location_name}
                    onChange={e => updateLocation(i, 'location_name', e.target.value)}
                  />
                  <div className="w-full aspect-video bg-gray-50 rounded-xl overflow-hidden border border-dashed border-gray-300 flex items-center justify-center relative">
-                    {loc.location_image ? (
+                    {getImageUrl(loc.location_image) ? (
                         <div className="relative w-full h-full group/img">
-                           <img src={loc.location_image} className="w-full h-full object-cover"/>
+                           <img src={getImageUrl(loc.location_image)} className="w-full h-full object-cover"/>
                            <button type="button" onClick={() => updateLocation(i, 'location_image', null)} className="absolute top-1 right-1 bg-black/50 text-white rounded-full p-1"><X size={14}/></button>
                         </div>
                     ) : (
                         <div className="p-2 w-full">
-                           <ImageUploader images={[]} onChange={(imgs) => updateLocation(i, 'location_image', imgs[0]?.url)} />
+                           {/* FIX: ส่งทั้ง Object กลับไป ไม่ใช่แค่ URL เพื่อให้ ProductForm เอาไป upload ต่อได้ */}
+                           <ImageUploader images={[]} onChange={(imgs) => updateLocation(i, 'location_image', imgs[0])} />
                            <div className="text-center text-xs text-gray-400 mt-2 pointer-events-none">รูปจุดติดตั้ง</div>
                         </div>
                     )}
+                 </div>
+                 
+                 {/* Note Field */}
+                 <div className="relative">
+                    <StickyNote size={14} className="absolute top-2.5 left-2.5 text-gray-400"/>
+                    <textarea 
+                        className="w-full pl-8 pr-3 py-2 border rounded-xl text-xs bg-gray-50 focus:bg-white focus:ring-2 focus:ring-orange-500/20 outline-none resize-none"
+                        placeholder="หมายเหตุ (เช่น รองแหวน, กันคลาย)..."
+                        rows="2"
+                        value={loc.note || ''}
+                        onChange={e => updateLocation(i, 'note', e.target.value)}
+                    />
                  </div>
               </div>
 
@@ -159,7 +171,7 @@ const ProductFastenerSelector = ({ locations = [], onChange, variants = [] }) =>
          <Camera size={20}/> เพิ่มจุดติดตั้งใหม่
       </button>
 
-      {/* Modal Select Bolt */}
+      {/* Modal Select Bolt (เหมือนเดิม) */}
       {isAddingBolt.isOpen && (
         <div className="fixed inset-0 z-[100] bg-black/60 flex items-center justify-center p-4 backdrop-blur-sm">
            <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[80vh] animate-in zoom-in-95">

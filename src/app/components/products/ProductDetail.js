@@ -1,19 +1,35 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowLeft, Edit, Trash2, Eye, EyeOff, Layers, Package, Wrench, Bike, Check, Tag, Box, TrendingUp, DollarSign, ShoppingBag, Puzzle, MapPin, ChevronDown, ChevronUp, Sparkles } from 'lucide-react';
+import { ArrowLeft, Edit, Trash2, Eye, EyeOff, Layers, Package, Wrench, Bike, Check, Tag, Box, TrendingUp, DollarSign, ShoppingBag, Puzzle, MapPin, ChevronDown, ChevronUp, Sparkles, Image as ImageIcon, Printer, X } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import FastenerBillPreview from './FastenerBillPreview';
 
 const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCost }) => {
   const [variants, setVariants] = useState([]);
   const [fasteners, setFasteners] = useState([]);
   const [bundles, setBundles] = useState([]);
-  const [accessories, setAccessories] = useState([]); // State สำหรับชุดแต่ง
+  const [accessories, setAccessories] = useState([]); 
   const [selectedImg, setSelectedImg] = useState(null);
+  const [lightboxImg, setLightboxImg] = useState(null);
   
   const [expandedVariants, setExpandedVariants] = useState({});
+  const [showLocationImages, setShowLocationImages] = useState(true);
+  const [showFastenerBill, setShowFastenerBill] = useState(false);
+
+  // Helper to safely get image URL
+  const getImageUrl = (img) => {
+    if (!img) return null;
+    return typeof img === 'string' ? img : img.url;
+  };
 
   useEffect(() => {
     if (product) {
-      setSelectedImg(product.images?.[0] || null);
+      // FIX: ตั้งค่ารูปเริ่มต้นอย่างปลอดภัย
+      const imgs = product.images || [];
+      if (imgs.length > 0) {
+        setSelectedImg(getImageUrl(imgs[0]));
+      } else {
+        setSelectedImg(null);
+      }
       
       const fetchData = async () => {
         // 1. Fetch Variants
@@ -37,7 +53,7 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
         const { data: bData } = await supabase.from('product_bundles').select('*, product:child_product_id(name, sku, cost_price)').eq('parent_product_id', product.id);
         if (bData) setBundles(bData);
 
-        // 4. Fetch Accessories (NEW)
+        // 4. Fetch Accessories
         const { data: accData } = await supabase.from('product_compatible_accessories').select('*, product:accessory_id(id, name, sku, sell_price, cost_price, images)').eq('product_id', product.id);
         if (accData) setAccessories(accData);
       };
@@ -73,6 +89,15 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
 
   return (
     <div className="space-y-8 pb-10">
+      
+      {/* Lightbox Modal */}
+      {lightboxImg && (
+        <div className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center p-4 cursor-zoom-out" onClick={() => setLightboxImg(null)}>
+          <img src={lightboxImg} className="max-w-full max-h-[90vh] rounded-lg shadow-2xl object-contain animate-in zoom-in-95 duration-200" />
+          <button className="absolute top-4 right-4 text-white hover:text-red-500 bg-white/10 hover:bg-white/20 rounded-full p-2 backdrop-blur-sm transition-all"><X size={24}/></button>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white/80 backdrop-blur-md p-4 rounded-2xl shadow-sm border border-gray-100 sticky top-2 z-10">
         <button onClick={onBack} className="flex items-center gap-2 text-gray-500 hover:text-gray-900 font-medium px-3 py-2 rounded-xl hover:bg-gray-100 transition-all">
@@ -108,19 +133,23 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
                  <div className="flex items-center justify-center h-full text-gray-300"><Package size={64}/></div>
                )}
             </div>
+            {/* Thumbnail List */}
             {product.images?.length > 1 && (
               <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
-                {product.images?.map((img, i) => (
-                  <button
-                    key={i}
-                    onClick={() => setSelectedImg(img)}
-                    className={`w-20 h-20 rounded-xl overflow-hidden border-2 transition-all shrink-0 ${
-                      selectedImg === img ? 'border-indigo-600 shadow-md scale-95 ring-2 ring-indigo-100' : 'border-transparent hover:border-gray-300'
-                    }`}
-                  >
-                    <img src={img} className="w-full h-full object-cover"/>
-                  </button>
-                ))}
+                {product.images?.map((img, i) => {
+                  const url = getImageUrl(img);
+                  return (
+                    <button
+                        key={i}
+                        onClick={() => setSelectedImg(url)}
+                        className={`w-20 h-20 rounded-xl overflow-hidden border-2 transition-all shrink-0 ${
+                        selectedImg === url ? 'border-indigo-600 shadow-md scale-95 ring-2 ring-indigo-100' : 'border-transparent hover:border-gray-300'
+                        }`}
+                    >
+                        <img src={url} className="w-full h-full object-cover"/>
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -131,49 +160,16 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
           
           {/* Stats Bar */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm">
-              <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">ขายไปแล้ว</p>
-              <div className="flex items-center gap-2 text-indigo-600">
-                <ShoppingBag size={20}/>
-                <span className="text-xl font-black">{soldCount}</span> <span className="text-xs text-gray-400 font-normal">ชิ้น</span>
-              </div>
-            </div>
-            <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm">
-              <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">จำนวนออเดอร์</p>
-              <div className="flex items-center gap-2 text-blue-600">
-                <Package size={20}/>
-                <span className="text-xl font-black">{timesOrdered}</span> <span className="text-xs text-gray-400 font-normal">ครั้ง</span>
-              </div>
-            </div>
-            <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm">
-              <p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">ยอดขายรวม</p>
-              <div className="flex items-center gap-2 text-gray-800">
-                <DollarSign size={20}/>
-                <span className="text-xl font-black">฿{totalSalesVal.toLocaleString()}</span>
-              </div>
-            </div>
-            {showCost && (
-              <div className="bg-emerald-50 p-4 rounded-2xl border border-emerald-100 shadow-sm">
-                <p className="text-xs text-emerald-600 font-bold uppercase tracking-wider mb-1">กำไรรวม</p>
-                <div className="flex items-center gap-2 text-emerald-700">
-                  <TrendingUp size={20}/>
-                  <span className="text-xl font-black">+฿{totalProfitVal.toLocaleString()}</span>
-                </div>
-              </div>
-            )}
+            <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm"><p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">ขายไปแล้ว</p><div className="flex items-center gap-2 text-indigo-600"><ShoppingBag size={20}/><span className="text-xl font-black">{soldCount}</span></div></div>
+            <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm"><p className="text-xs text-gray-400 font-bold uppercase tracking-wider mb-1">ยอดขายรวม</p><div className="flex items-center gap-2 text-gray-800"><DollarSign size={20}/><span className="text-xl font-black">฿{totalSalesVal.toLocaleString()}</span></div></div>
           </div>
 
-          {/* Header Info */}
           <div>
             <div className="flex flex-wrap items-center gap-2 mb-3">
               {displayCategories.map((cat, idx) => (
-                <span key={idx} className="text-xs font-bold tracking-wider text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full uppercase border border-indigo-100">
-                  {cat}
-                </span>
+                <span key={idx} className="text-xs font-bold tracking-wider text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full uppercase border border-indigo-100">{cat}</span>
               ))}
-              <span className="text-xs font-medium text-gray-500 bg-gray-100 px-2 py-1 rounded-md font-mono flex items-center gap-1">
-                <Tag size={12}/> {product.sku}
-              </span>
+              <span className="text-xs font-medium text-gray-500 bg-gray-100 px-2 py-1 rounded-md font-mono flex items-center gap-1"><Tag size={12}/> {product.sku}</span>
               
               {hasBundlesData && (
                 <span className="text-xs font-bold text-purple-600 bg-purple-50 border border-purple-100 px-2 py-1 rounded-md flex items-center gap-1">
@@ -189,33 +185,18 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
             <h1 className="text-3xl sm:text-4xl font-extrabold text-gray-900 tracking-tight leading-tight">{product.name}</h1>
           </div>
 
-          {/* Pricing Card */}
           <div className="p-6 rounded-3xl border border-gray-100 shadow-sm bg-gradient-to-br from-white to-gray-50/50">
             {!product.has_variants ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                 <div>
-                   <p className="text-sm text-gray-500 font-medium mb-1">ราคาขายต่อชิ้น</p>
-                   <p className="text-4xl font-black text-gray-900 tracking-tight">฿{sellPrice.toLocaleString()}</p>
-                 </div>
-                 {showCost && (
-                   <div className="sm:border-l sm:pl-6 border-gray-200 border-t sm:border-t-0 pt-4 sm:pt-0">
-                     <p className="text-sm text-amber-600 font-medium mb-1">ต้นทุนต่อชิ้น</p>
-                     <p className="text-2xl font-bold text-amber-700">฿{costPrice.toLocaleString()}</p>
-                     <div className="mt-2 inline-flex items-center gap-2 px-3 py-1 bg-emerald-50 text-emerald-700 rounded-lg text-sm font-bold border border-emerald-100">
-                       กำไร +฿{profit.toLocaleString()}
-                     </div>
-                   </div>
-                 )}
+                 <div><p className="text-sm text-gray-500 font-medium mb-1">ราคาขายต่อชิ้น</p><p className="text-4xl font-black text-gray-900 tracking-tight">฿{sellPrice.toLocaleString()}</p></div>
+                 {showCost && <div><p className="text-sm text-amber-600 font-medium mb-1">ต้นทุนต่อชิ้น</p><p className="text-2xl font-bold text-amber-700">฿{costPrice.toLocaleString()}</p></div>}
               </div>
             ) : (
-              <div className="flex items-center gap-3 text-gray-600">
-                <Layers size={24} className="text-indigo-500"/>
-                <span className="text-lg font-medium">สินค้านี้มี <span className="text-indigo-600 font-bold">{variants.length}</span> ตัวเลือก</span>
-              </div>
+              <div className="flex items-center gap-3 text-gray-600"><Layers size={24} className="text-indigo-500"/><span className="text-lg font-medium">สินค้านี้มี <span className="text-indigo-600 font-bold">{variants.length}</span> ตัวเลือก</span></div>
             )}
           </div>
 
-          {/* 1. Variants Table (First Priority) */}
+          {/* 1. Variants Table */}
           {product.has_variants && (
             <div className="border border-gray-200 rounded-2xl overflow-hidden shadow-sm bg-white">
                <div className="bg-gray-50/80 px-6 py-4 border-b border-gray-200 flex justify-between items-center">
@@ -259,36 +240,39 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
             </div>
           )}
 
-          {/* 2. Compatible Accessories (Redesigned & Reordered) */}
+          {/* 2. Accessories */}
           {accessories.length > 0 && (
             <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
                 <h3 className="text-sm font-bold text-gray-900 mb-4 flex items-center gap-2 uppercase tracking-wider">
                   <Sparkles size={16} className="text-indigo-500" /> ชุดแต่งที่แนะนำ (Accessories)
                 </h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                   {accessories.map((acc, i) => (
-                      <div key={i} className="flex items-center gap-3 bg-white p-3 rounded-xl border border-indigo-100 shadow-sm hover:border-indigo-300 transition-colors">
-                         <div className="w-12 h-12 bg-gray-50 rounded-lg overflow-hidden shrink-0 border border-gray-100">
-                             {acc.product?.images?.[0] ? <img src={acc.product.images[0]} className="w-full h-full object-cover"/> : <Package size={20} className="m-3 text-gray-300"/>}
-                         </div>
-                         <div className="flex-1 min-w-0">
-                            <p className="text-sm font-bold text-gray-800 truncate">{acc.product?.name}</p>
-                            <div className="flex items-center gap-2 mt-0.5">
-                                <span className="text-[10px] text-gray-500 font-mono bg-gray-100 px-1.5 rounded">{acc.product?.sku}</span>
-                                <span className="text-[10px] text-indigo-600 font-medium bg-indigo-50 px-1.5 rounded">ตรงรุ่น</span>
-                            </div>
-                         </div>
-                         <div className="text-right">
-                            <p className="text-sm font-bold text-indigo-600">฿{acc.product?.sell_price?.toLocaleString()}</p>
-                            {showCost && <p className="text-xs text-amber-600 font-medium">ทุน {acc.product?.cost_price?.toLocaleString()}</p>}
-                         </div>
-                      </div>
-                   ))}
+                   {accessories.map((acc, i) => {
+                      const accImg = getImageUrl(acc.product?.images?.[0]);
+                      return (
+                          <div key={i} className="flex items-center gap-3 bg-white p-3 rounded-xl border border-indigo-100 shadow-sm hover:border-indigo-300 transition-colors">
+                             <div className="w-12 h-12 bg-gray-100 rounded-lg overflow-hidden shrink-0 border border-gray-100">
+                                 {accImg ? <img src={accImg} className="w-full h-full object-cover"/> : <Package size={20} className="m-3 text-gray-300"/>}
+                             </div>
+                             <div className="flex-1 min-w-0">
+                                <p className="text-sm font-bold text-gray-800 truncate">{acc.product?.name}</p>
+                                <div className="flex items-center gap-2 mt-0.5">
+                                    <span className="text-[10px] text-gray-500 font-mono bg-gray-100 px-1.5 rounded">{acc.product?.sku}</span>
+                                    <span className="text-[10px] text-indigo-600 font-medium bg-indigo-50 px-1.5 rounded border border-indigo-100">ตรงรุ่น</span>
+                                </div>
+                             </div>
+                             <div className="text-right">
+                                <p className="text-sm font-bold text-indigo-600">฿{acc.product?.sell_price?.toLocaleString()}</p>
+                                {showCost && <p className="text-xs text-amber-600 font-medium">ทุน {acc.product?.cost_price?.toLocaleString()}</p>}
+                             </div>
+                          </div>
+                      );
+                   })}
                 </div>
             </div>
           )}
 
-          {/* 3. Description (Moved after Accessories) */}
+          {/* 3. Description */}
           <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
             <h3 className="font-bold text-gray-900 mb-4 text-lg border-b border-gray-100 pb-2">รายละเอียดสินค้า</h3>
             <div className="prose prose-sm sm:prose-base text-gray-600 max-w-none whitespace-pre-line leading-relaxed">
@@ -296,7 +280,7 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
             </div>
           </div>
 
-          {/* 4. Bundles Detail (Moved after Description) */}
+          {/* 4. Bundles Detail */}
           {hasBundlesData && (
             <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
                 <div className="flex justify-between items-center mb-4">
@@ -383,19 +367,49 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
             </div>
           )}
 
-          {/* 5. Fasteners Detail (Last) */}
+          {/* 5. Fasteners Detail */}
           {hasFastenersData && (
              <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
-                <h3 className="text-sm font-bold text-gray-900 mb-4 flex items-center gap-2 uppercase tracking-wider">
-                  <Wrench size={16} className="text-orange-500" /> สเปคน็อต (Fasteners)
-                </h3>
+                <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2 uppercase tracking-wider">
+                    <Wrench size={16} className="text-orange-500" /> สเปคน็อต (Fasteners)
+                    </h3>
+                    <div className="flex gap-2">
+                        {/* Toggle Images */}
+                        <button 
+                            onClick={() => setShowLocationImages(!showLocationImages)} 
+                            className={`p-1.5 rounded-lg border transition-all ${showLocationImages ? 'bg-orange-50 text-orange-600 border-orange-200' : 'bg-white text-gray-400 border-gray-200'}`}
+                            title={showLocationImages ? "ซ่อนรูป" : "แสดงรูป"}
+                        >
+                            <ImageIcon size={16}/>
+                        </button>
+                        {/* Print Button */}
+                        <button 
+                            onClick={() => setShowFastenerBill(true)}
+                            className="flex items-center gap-1 text-xs bg-gray-900 text-white px-3 py-1.5 rounded-lg hover:bg-black font-medium shadow-sm transition-all"
+                        >
+                            <Printer size={14}/> พิมพ์ใบสรุป
+                        </button>
+                    </div>
+                </div>
+                
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     {fasteners.map((loc, i) => (
                         <div key={i} className="bg-gray-50 rounded-xl p-3 border border-gray-100">
-                            <div className="flex items-center gap-2 mb-2 pb-2 border-b border-gray-200">
-                                <MapPin size={14} className="text-orange-400"/>
-                                <span className="text-sm font-bold text-gray-700">{loc.location_name}</span>
+                            <div className="flex items-center gap-3 mb-2 pb-2 border-b border-gray-200">
+                                {showLocationImages && loc.location_image ? (
+                                    <div className="w-12 h-8 bg-white rounded-md overflow-hidden border border-gray-200 shrink-0 cursor-zoom-in" onClick={() => setLightboxImg(loc.location_image)}>
+                                        <img src={loc.location_image} className="w-full h-full object-cover"/>
+                                    </div>
+                                ) : (
+                                    <MapPin size={16} className="text-orange-400 shrink-0"/>
+                                )}
+                                <div className="min-w-0">
+                                    <p className="text-sm font-bold text-gray-700 truncate">{loc.location_name}</p>
+                                    {loc.note && <p className="text-[10px] text-gray-400 italic truncate">{loc.note}</p>}
+                                </div>
                             </div>
+                            
                             <div className="space-y-1">
                                 {loc.bolts_usage?.map((bolt, idx) => (
                                     <div key={idx} className="flex justify-between text-xs text-gray-600">
@@ -417,31 +431,12 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
              </div>
           )}
 
-          {/* Compatibility Section */}
-          <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
-            <h3 className="text-sm font-bold text-gray-900 mb-4 flex items-center gap-2 uppercase tracking-wider">
-              <Bike size={16} className="text-indigo-500" /> รุ่นที่รองรับ (Compatibility)
-            </h3>
-
-            {product.compatibility_mode === 'universal' ? (
-              <div className="flex items-center gap-3 text-emerald-700 bg-emerald-50/50 px-4 py-3 rounded-xl border border-emerald-100">
-                <div className="bg-emerald-100 p-2 rounded-full"><Check size={16} /></div>
-                <span className="font-semibold">Universal Part - ติดตั้งได้กับรถทุกรุ่น</span>
-              </div>
-            ) : product.compatible_models && product.compatible_models.length > 0 ? (
-              <div className="flex flex-wrap gap-2">
-                {product.compatible_models.map((model, idx) => (
-                  <span key={idx} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-gray-200 text-gray-700 text-sm font-medium shadow-sm hover:border-indigo-300 hover:text-indigo-600 transition-colors cursor-default">
-                    <Bike size={14} className="text-gray-400" /> {model}
-                  </span>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-gray-400 italic">ไม่ได้ระบุรุ่นที่รองรับ</p>
-            )}
-          </div>
         </div>
       </div>
+
+      {showFastenerBill && (
+          <FastenerBillPreview product={product} fasteners={fasteners} onClose={() => setShowFastenerBill(false)} />
+      )}
     </div>
   );
 };

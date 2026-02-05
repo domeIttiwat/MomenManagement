@@ -6,7 +6,7 @@ import CategoryManager from './CategoryManager';
 import VariantManager from './VariantManager';
 import ProductFastenerSelector from './ProductFastenerSelector';
 import ProductBundleSelector from './ProductBundleSelector';
-import ProductAccessorySelector from './ProductAccessorySelector'; // Import ใหม่
+import ProductAccessorySelector from './ProductAccessorySelector';
 import NumericInput from './NumericInput';
 
 const ProductForm = ({ onCancel, onSuccess, initialData }) => {
@@ -37,15 +37,15 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
   const [variants, setVariants] = useState([]);
   const [fasteners, setFasteners] = useState([]);
   const [bundles, setBundles] = useState([]);
-  const [accessories, setAccessories] = useState([]); // State สำหรับ Accessories
+  const [accessories, setAccessories] = useState([]);
 
-  // Fetch Full Data
+  // Fetch Full Data ... (เหมือนเดิม)
   useEffect(() => {
     const fetchFullProductData = async () => {
       if (!initialData?.id) return; 
 
       try {
-        const { data: prod, error } = await supabase
+        const { data: prod } = await supabase
           .from('products')
           .select(`*, product_categories (category_id)`)
           .eq('id', initialData.id)
@@ -62,13 +62,13 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
           if (data) setVariants(data);
         }
         
+        // Fetch Fasteners (ตรงนี้จะได้ URL มา)
         const { data: fData } = await supabase.from('product_fasteners').select('*').eq('product_id', initialData.id);
         if (fData) setFasteners(fData);
 
         const { data: bData } = await supabase.from('product_bundles').select('*, product:child_product_id(*)').eq('parent_product_id', initialData.id);
         if (bData) setBundles(bData);
 
-        // Fetch Accessories
         const { data: accData } = await supabase.from('product_compatible_accessories').select('*, product:accessory_id(*)').eq('product_id', initialData.id);
         if (accData) setAccessories(accData);
 
@@ -79,7 +79,7 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
     fetchFullProductData();
   }, [initialData?.id]); 
 
-  // Check Category for Tab Display
+  // Check Category ... (เหมือนเดิม)
   useEffect(() => {
     const fetchCatNames = async () => {
       if (formData.category_ids && formData.category_ids.length > 0) {
@@ -95,9 +95,6 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
   const isSparePart = currentCategoryNames.some(name => name.toLowerCase().includes('spare') || name.includes('อะไหล่'));
   const isVehicle = currentCategoryNames.some(name => name.toLowerCase().includes('scooter') || name.toLowerCase().includes('bike'));
 
-  // Logic: ถ้าเป็นรถ -> มี Bundle และ Accessories
-  // ถ้าเป็นอะไหล่ -> ไม่มี Bundle, ไม่มี Accessories (หรืออาจจะมีก็ได้ถ้าอยากใส่)
-
   const handleSubmit = async (e) => {
     e.stopPropagation();
     e.preventDefault();
@@ -105,6 +102,7 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
 
     setLoading(true);
     try {
+      // 1. Upload Main Images
       const uploadedImageUrls = await Promise.all(formData.images.map(async (imgObj) => {
         if (imgObj.file) {
           const fileName = `${Date.now()}-${Math.random()}`;
@@ -173,18 +171,35 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
         }
       }
 
-      // Fasteners
+      // Fasteners (FIX: Upload & Save Images)
       if (initialData?.id) await supabase.from('product_fasteners').delete().eq('product_id', productId);
       if (fasteners.length > 0) {
-        await supabase.from('product_fasteners').insert(fasteners.map(f => ({
-            product_id: productId,
-            location_name: f.location_name,
-            location_image: f.location_image,
-            bolts_usage: f.bolts_usage
-        })));
+        const processedFasteners = await Promise.all(fasteners.map(async (f) => {
+            let finalUrl = null;
+            // เช็คว่าเป็นไฟล์ที่ต้องอัปโหลดหรือไม่
+            if (f.location_image && typeof f.location_image === 'object' && f.location_image.file) {
+                 const fileName = `fastener-${Date.now()}-${Math.random()}`;
+                 // ใช้ Bucket 'products' เหมือนกับรูปสินค้า
+                 await supabase.storage.from('products').upload(fileName, f.location_image.file);
+                 const { data } = supabase.storage.from('products').getPublicUrl(fileName);
+                 finalUrl = data.publicUrl;
+            } else if (f.location_image) {
+                // ถ้าเป็น URL อยู่แล้ว (หรือ Object ที่มี url แต่ไม่มี file)
+                finalUrl = typeof f.location_image === 'string' ? f.location_image : f.location_image.url;
+            }
+
+            return {
+                product_id: productId,
+                location_name: f.location_name,
+                location_image: finalUrl, // บันทึก URL ที่เป็น String
+                bolts_usage: f.bolts_usage,
+                note: f.note
+            };
+        }));
+        await supabase.from('product_fasteners').insert(processedFasteners);
       }
 
-      // Accessories (NEW)
+      // Accessories
       if (initialData?.id) await supabase.from('product_compatible_accessories').delete().eq('product_id', productId);
       if (accessories.length > 0) {
           await supabase.from('product_compatible_accessories').insert(accessories.map(acc => ({
@@ -230,7 +245,6 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
                     </button>
                  )}
 
-                 {/* Show Accessories tab only for Vehicles */}
                  {isVehicle && (
                      <button type="button" onClick={() => setActiveTab('accessories')} className={`w-full text-left px-4 py-3 rounded-xl font-bold text-sm flex items-center gap-3 transition-all ${activeTab === 'accessories' ? 'bg-pink-50 text-pink-600' : 'text-gray-500 hover:bg-gray-50'}`}>
                         <Sparkles size={18}/> ชุดแต่งที่รองรับ

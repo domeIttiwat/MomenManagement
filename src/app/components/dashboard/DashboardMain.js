@@ -18,10 +18,10 @@ import {
 import { th } from 'date-fns/locale';
 import { useAuth } from '../../context/AuthContext'; 
 
-// Components
+// Components เดิม
 import StatCards from './StatCards';
 import SalesChart from './SalesChart';
-import MarketingChart from './MarketingChart'; // แก้ไขไฟล์นี้ด้วย (ด้านล่าง)
+import MarketingChart from './MarketingChart';
 import CategoryChart from './CategoryChart';
 import TopRankings from './TopRankings';
 
@@ -46,21 +46,25 @@ const DashboardMain = () => {
   const fetchData = async () => {
     setLoading(true);
     try {
+      // 1. Fetch Orders
       const { data: orders } = await supabase
         .from('orders')
-        .select('*, order_items(*)')
+        .select('*, order_items(*), order_payments(*)')
         .order('order_date', { ascending: true });
 
+      // 2. Fetch Services
       const { data: services } = await supabase
         .from('services')
-        .select('*, service_items(*), service_assignees(user:user_id(first_name, last_name))')
+        .select('*, service_items(*), service_assignees(user:user_id(first_name, last_name)), service_payments(*)')
         .order('received_date', { ascending: true });
 
+      // 3. Fetch Marketing
       const { data: marketing } = await supabase
         .from('marketing_expenses')
         .select('*')
         .order('expense_date', { ascending: true });
 
+      // 4. Fetch Products (เพื่อนำมา map หมวดหมู่)
       const { data: products } = await supabase
         .from('products')
         .select('id, name, category_id, categories(name), product_categories(categories(name))');
@@ -144,11 +148,21 @@ const DashboardMain = () => {
     });
     
     // --- 2. Calculate Stats ---
-    const isValidItem = (status) => status !== 'Cancelled';
+    const isValidItem = (status) => status !== 'Cancelled' && status !== 'Quotation';
 
     const calcOrderStats = (ords) => {
         const validOrds = ords.filter(o => isValidItem(o.status));
-        const revenue = validOrds.reduce((sum, o) => sum + (Number(o.grand_total) || 0), 0);
+        
+        // ยอดขายรวมตามใบสั่งซื้อ
+        const totalSalesValue = validOrds.reduce((sum, o) => sum + (Number(o.grand_total) || 0), 0);
+        
+        // ยอดรับจริง (Cash In) จาก payments
+        const actualReceived = validOrds.reduce((sum, o) => {
+             const payments = o.order_payments || [];
+             return sum + payments.reduce((pSum, p) => pSum + (Number(p.amount) || 0), 0);
+        }, 0);
+
+        const outstanding = totalSalesValue - actualReceived;
         
         let productCost = 0;
         validOrds.forEach(o => {
@@ -157,14 +171,23 @@ const DashboardMain = () => {
         const shipping = validOrds.reduce((sum, o) => sum + (Number(o.shipping_cost) || 0), 0);
         
         const cost = productCost + shipping;
-        const profit = revenue - cost; 
+        // กำไร (Profit) คิดจากยอดขาย - ต้นทุน (Accrual Basis)
+        const profit = totalSalesValue - cost; 
 
-        return { revenue, cost, profit, count: validOrds.length }; 
+        return { revenue: actualReceived, salesValue: totalSalesValue, outstanding, cost, profit, count: validOrds.length }; 
     };
 
     const calcServiceStats = (srvs) => {
         const validSrvs = srvs.filter(s => isValidItem(s.status));
-        const revenue = validSrvs.reduce((sum, s) => sum + (Number(s.grand_total) || 0), 0);
+        
+        const totalSalesValue = validSrvs.reduce((sum, s) => sum + (Number(s.grand_total) || 0), 0);
+
+        const actualReceived = validSrvs.reduce((sum, s) => {
+             const payments = s.service_payments || [];
+             return sum + payments.reduce((pSum, p) => pSum + (Number(p.amount) || 0), 0);
+        }, 0);
+
+        const outstanding = totalSalesValue - actualReceived;
         
         let partCost = 0;
         let laborRevenue = 0;
@@ -183,8 +206,18 @@ const DashboardMain = () => {
             });
         });
         
-        const profit = revenue - partCost;
-        return { revenue, cost: partCost, profit, count: validSrvs.length, laborRevenue, partsRevenue };
+        const profit = totalSalesValue - partCost; // Service Profit (Gross)
+
+        return { 
+            revenue: actualReceived, 
+            salesValue: totalSalesValue,
+            outstanding,
+            cost: partCost, 
+            profit, 
+            count: validSrvs.length, 
+            laborRevenue, 
+            partsRevenue 
+        };
     };
 
     const currOrderStats = calcOrderStats(currentOrders);
@@ -192,37 +225,51 @@ const DashboardMain = () => {
     const mktCost = currentMarketing.reduce((sum, m) => sum + (Number(m.amount) || 0), 0);
     const prevOrderStats = calcOrderStats(prevOrders);
 
-    const totalRevenue = currOrderStats.revenue + currServiceStats.revenue;
+    // รวมยอดทั้งหมด (Overview)
+    // ใช้ยอดรับจริง (Actual Revenue) เป็นรายรับรวม
+    const totalActualRevenue = currOrderStats.revenue + currServiceStats.revenue;
+    // ใช้ยอดขายรวม (Sales Value) เพื่อคำนวณกำไรและเปรียบเทียบ
+    const totalSalesValue = currOrderStats.salesValue + currServiceStats.salesValue;
+    const totalOutstanding = currOrderStats.outstanding + currServiceStats.outstanding;
+
     const totalCost = currOrderStats.cost + currServiceStats.cost + mktCost;
-    const netProfit = totalRevenue - totalCost;
+    const netProfit = totalSalesValue - totalCost; // Net Profit based on Sales
+
     const prevRevenueOrders = prevOrderStats.revenue; 
     const getGrowth = (curr, prev) => prev === 0 ? 0 : ((curr - prev) / prev) * 100;
 
     const overviewStats = {
-        totalRevenue,
+        totalRevenue: totalActualRevenue, // โชว์ยอดเงินสดที่รับมาจริง
+        totalSalesValue,
+        totalOutstanding,
         netProfit,
         totalOrders: currOrderStats.count,
         totalServices: currServiceStats.count,
-        revenueGrowth: getGrowth(currOrderStats.revenue, prevRevenueOrders), 
+        revenueGrowth: getGrowth(totalActualRevenue, prevRevenueOrders), 
         marketingCost: mktCost,
-        orderRevenue: currOrderStats.revenue,
+        
+        orderRevenue: currOrderStats.revenue, // รับจริง
+        orderOutstanding: currOrderStats.outstanding,
         orderProfit: currOrderStats.profit,
-        serviceRevenue: currServiceStats.revenue,
+        
+        serviceRevenue: currServiceStats.revenue, // รับจริง
+        serviceOutstanding: currServiceStats.outstanding,
         serviceProfit: currServiceStats.profit
     };
 
-    // FIX: คำนวณ marketingPercent และ roas ให้เป็น String ทศนิยม 1 ตำแหน่ง
-    const marketingPercentRaw = currOrderStats.revenue > 0 ? (mktCost / currOrderStats.revenue) * 100 : 0;
-    const roasRaw = mktCost > 0 ? (currOrderStats.revenue / mktCost) : 0;
+    const marketingPercentRaw = totalSalesValue > 0 ? (mktCost / totalSalesValue) * 100 : 0;
+    const roasRaw = mktCost > 0 ? (totalSalesValue / mktCost) : 0;
 
     const orderStats = {
       revenue: currOrderStats.revenue,
+      salesValue: currOrderStats.salesValue,
+      outstanding: currOrderStats.outstanding,
       netProfit: currOrderStats.profit - mktCost,
       ordersCount: currOrderStats.count,
       revenueGrowth: getGrowth(currOrderStats.revenue, prevOrderStats.revenue),
-      roas: roasRaw.toFixed(1), // ทศนิยม 1 ตำแหน่ง
+      roas: roasRaw.toFixed(1),
       mktCost: mktCost,
-      marketingPercent: marketingPercentRaw.toFixed(1) // ทศนิยม 1 ตำแหน่ง
+      marketingPercent: marketingPercentRaw.toFixed(1)
     };
 
     // --- 3. Chart Data Preparation ---
@@ -248,32 +295,46 @@ const DashboardMain = () => {
        const dayServices = currentServices.filter(s => isMatch(s.received_date) && isValidItem(s.status));
        const dayMarketing = currentMarketing.filter(m => isMatch(m.expense_date));
        
-       const orderSales = dayOrders.reduce((s, o) => s + (Number(o.grand_total) || 0), 0);
+       // ยอดขาย (Sales Value)
+       const orderSalesValue = dayOrders.reduce((s, o) => s + (Number(o.grand_total) || 0), 0);
        
-       // คำนวณต้นทุนออเดอร์รายวัน
+       // ยอดรับจริง (Actual Revenue)
+       const orderReceived = dayOrders.reduce((sum, o) => {
+          const payments = o.order_payments || [];
+          return sum + payments.reduce((pSum, p) => pSum + (Number(p.amount) || 0), 0);
+       }, 0);
+
+       const serviceSalesValue = dayServices.reduce((s, srv) => s + (Number(srv.grand_total) || 0), 0);
+       
+       const serviceReceived = dayServices.reduce((sum, s) => {
+          const payments = s.service_payments || [];
+          return sum + payments.reduce((pSum, p) => pSum + (Number(p.amount) || 0), 0);
+       }, 0);
+
+       const marketingCost = dayMarketing.reduce((s, m) => s + (Number(m.amount) || 0), 0);
+       
+       // Profit Calculation for Chart
        const orderCosts = dayOrders.reduce((sum, o) => {
             const itemsCost = o.order_items?.reduce((s, i) => s + (Number(i.cost_price)*Number(i.quantity)), 0) || 0;
             return sum + itemsCost + (Number(o.shipping_cost) || 0);
        }, 0);
-
-       const serviceSales = dayServices.reduce((s, srv) => s + (Number(srv.grand_total) || 0), 0);
-       const marketingCost = dayMarketing.reduce((s, m) => s + (Number(m.amount) || 0), 0);
        
-       // คำนวณกำไรสุทธิออเดอร์รายวัน
-       const orderProfit = orderSales - orderCosts - marketingCost;
+       // กำไรวันนั้น = ยอดขาย - ต้นทุน - การตลาด
+       const orderProfit = orderSalesValue - orderCosts - marketingCost;
 
        return {
            date: label,
-           orderSales,
-           serviceSales,
+           orderSales: orderReceived, // กราฟแสดงยอดรับจริง (Cash Flow)
+           serviceSales: serviceReceived,
            marketingCost,
            
            // Field สำหรับกราฟ
-           sales: orderSales, 
+           sales: orderReceived, 
            marketing: marketingCost,
-           profit: orderProfit, // ส่งไปให้กราฟ ROI
+           profit: orderProfit, 
            cost: marketingCost,
-           totalSales: orderSales + serviceSales,
+           totalSales: orderReceived + serviceReceived,
+           orderProfit: orderProfit
        };
     });
 
@@ -379,13 +440,14 @@ const DashboardMain = () => {
 
   if (!mounted) return <div className="p-10 text-center text-gray-400">Loading Dashboard...</div>;
 
-  const KpiCard = ({ title, value, growth, icon: Icon, color, subtext }) => (
+  const KpiCard = ({ title, value, growth, icon: Icon, color, subtext, subtext2 }) => (
     <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm flex items-start justify-between">
       <div>
         <p className="text-gray-500 text-xs font-bold uppercase tracking-wider mb-1">{title}</p>
         <h3 className="text-2xl font-black text-gray-800">{value}</h3>
         {subtext && <p className="text-xs text-gray-400 mt-1">{subtext}</p>}
-        {!subtext && compareMode !== 'none' && growth !== undefined && (
+        {subtext2 && <p className="text-xs text-red-500 mt-0.5">{subtext2}</p>}
+        {!subtext && !subtext2 && compareMode !== 'none' && growth !== undefined && (
           <div className={`flex items-center gap-1 mt-2 text-xs font-bold ${growth >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
             {growth >= 0 ? <TrendingUp size={14}/> : <TrendingDown size={14}/>}
             <span>{Math.abs(growth).toFixed(1)}%</span>
@@ -456,28 +518,27 @@ const DashboardMain = () => {
       {/* ================= ZONE 1: OVERVIEW ================= */}
       {activeTab === 'overview' && processedData && (
          <div className="space-y-6 animate-in slide-in-from-bottom-4">
-            {/* KPI Cards */}
+            {/* KPI Cards (ปรับปรุง: แสดงยอดรับจริง และ ยอดค้างชำระ) */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <KpiCard 
-                   title="รายรับรวมทั้งหมด" 
+                   title="รายรับรวมทั้งหมด (รับจริง)" 
                    value={`฿${(processedData.overviewStats.totalRevenue || 0).toLocaleString()}`} 
                    growth={processedData.overviewStats.revenueGrowth}
                    icon={DollarSign}
                    color="bg-indigo-50 text-indigo-600"
+                   subtext2={processedData.overviewStats.totalOutstanding > 0 ? `ค้างชำระ: ฿${processedData.overviewStats.totalOutstanding.toLocaleString()}` : null}
                  />
                  <KpiCard 
-                   title="กำไรรวมทั้งหมด" 
+                   title="กำไรรวมสุทธิ (Net Profit)" 
                    value={`฿${(processedData.overviewStats.netProfit || 0).toLocaleString()}`} 
                    icon={TrendingUp}
                    color="bg-emerald-50 text-emerald-600"
                  />
-                 {/* Marketing Cost as info */}
                  <KpiCard 
                    title="งบการตลาดที่ใช้" 
                    value={`฿${(processedData.overviewStats.marketingCost || 0).toLocaleString()}`} 
                    icon={Activity}
                    color="bg-rose-50 text-rose-600"
-                   subtext="(หักลบในกำไรสุทธิแล้ว)"
                  />
             </div>
             
@@ -488,13 +549,14 @@ const DashboardMain = () => {
                    value={`฿${(processedData.overviewStats.orderRevenue || 0).toLocaleString()}`} 
                    icon={ShoppingBag}
                    color="bg-emerald-50 text-emerald-600"
-                   growth={processedData.orderStats.revenueGrowth}
+                   subtext2={processedData.overviewStats.orderOutstanding > 0 ? `ค้าง: ฿${processedData.overviewStats.orderOutstanding.toLocaleString()}` : null}
                  />
                  <KpiCard 
                    title="ยอดขาย (งานซ่อม)" 
                    value={`฿${(processedData.overviewStats.serviceRevenue || 0).toLocaleString()}`} 
                    icon={Wrench}
                    color="bg-orange-50 text-orange-600"
+                   subtext2={processedData.overviewStats.serviceOutstanding > 0 ? `ค้าง: ฿${processedData.overviewStats.serviceOutstanding.toLocaleString()}` : null}
                  />
                  <KpiCard 
                    title="กำไร (ออเดอร์)" 
@@ -512,7 +574,7 @@ const DashboardMain = () => {
 
             {/* Combined Chart */}
             <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
-               <h3 className="font-bold text-gray-800 mb-6">เปรียบเทียบยอดขาย (Orders vs Services)</h3>
+               <h3 className="font-bold text-gray-800 mb-6">แนวโน้มรายรับจริง (Cash Flow)</h3>
                <div className="h-[350px]">
                   <ResponsiveContainer width="100%" height="100%">
                     <AreaChart data={processedData.chartData}>
@@ -531,8 +593,8 @@ const DashboardMain = () => {
                        <YAxis axisLine={false} tickLine={false} tick={{fontSize: 12}} />
                        <Tooltip contentStyle={{borderRadius:'12px'}} formatter={(val)=>[val.toLocaleString(), 'บาท']} />
                        <Legend verticalAlign="top" height={36}/>
-                       <Area type="monotone" dataKey="orderSales" name="ยอดขายออเดอร์" stroke="#10b981" strokeWidth={3} fillOpacity={1} fill="url(#colorOrder)" />
-                       <Area type="monotone" dataKey="serviceSales" name="ยอดขายงานซ่อม" stroke="#f97316" strokeWidth={3} fillOpacity={1} fill="url(#colorService)" />
+                       <Area type="monotone" dataKey="orderSales" name="รับจริง (ออเดอร์)" stroke="#10b981" strokeWidth={3} fillOpacity={1} fill="url(#colorOrder)" />
+                       <Area type="monotone" dataKey="serviceSales" name="รับจริง (งานซ่อม)" stroke="#f97316" strokeWidth={3} fillOpacity={1} fill="url(#colorService)" />
                     </AreaChart>
                  </ResponsiveContainer>
                </div>
@@ -546,7 +608,7 @@ const DashboardMain = () => {
               <StatCards stats={processedData.orderStats} loading={loading} />
               
               <div className="w-full h-[450px]">
-                {/* FIX: ส่ง orderProfit และ marketing ไปให้กราฟ ROI */}
+                {/* ส่งข้อมูลเฉพาะ Order Sales ไปแสดง พร้อม stats เพื่อแสดง % Marketing และ Profit */}
                 <MarketingChart 
                     data={processedData.chartData.map(d => ({ 
                         ...d, 
@@ -561,7 +623,9 @@ const DashboardMain = () => {
                 <div className="flex-1 min-h-[350px]">
                    <CategoryChart data={processedData.categoryData || []} />
                 </div>
-                {/* <div className="flex-1 min-h-[350px]"><MarketingChart data={processedData.chartData} /></div> */}
+                <div className="flex-1 min-h-[350px]">
+                   <MarketingChart data={processedData.chartData} stats={processedData.orderStats} />
+                </div>
               </div>
 
               <TopRankings 
@@ -583,11 +647,12 @@ const DashboardMain = () => {
                    color="bg-indigo-50 text-indigo-600"
                  />
                  <KpiCard 
-                   title="รายได้งานซ่อม" 
+                   title="รายได้งานซ่อม (รับจริง)" 
                    value={`฿${processedData.serviceStats.totalRevenue.toLocaleString()}`} 
                    growth={0}
                    icon={DollarSign}
                    color="bg-emerald-50 text-emerald-600"
+                   subtext2={processedData.serviceStats.outstanding > 0 ? `ค้าง: ฿${processedData.serviceStats.outstanding.toLocaleString()}` : null}
                  />
                  <KpiCard 
                    title="กำไรขั้นต้น (Est.)" 

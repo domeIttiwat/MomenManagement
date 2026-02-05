@@ -1,9 +1,9 @@
 "use client";
 
 import React, { useState } from 'react';
-import { LayoutDashboard, Menu } from 'lucide-react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 
+// Import Components
 import Sidebar from './components/sidebar'; 
 import ProductMain from './components/products/ProductMain';
 import CustomerMain from './components/customers/CustomerMain';
@@ -12,16 +12,22 @@ import MarketingMain from './components/marketing/MarketingMain';
 import DashboardMain from './components/dashboard/DashboardMain';
 import UserMain from './components/users/UserMain';
 import Login from './login/page';
-import ServiceMain from './components/services/ServiceMain'; // Import Service
+import ServiceMain from './components/services/ServiceMain'; 
 
+// สร้าง Wrapper Component
 const AppContent = () => {
   const { user, loading, profile } = useAuth();
-  const [activeTab, setActiveTab] = useState('services'); // ลองเปลี่ยน Default มาเทสหน้า Services
+  // FIX: ตั้งค่าเริ่มต้นเป็น 'dashboard'
+  const [activeTab, setActiveTab] = useState<any>('dashboard'); 
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [navData, setNavData] = useState(null);
+  const [navData, setNavData] = useState<any>(null);
 
-  if (loading) return <div className="h-screen flex items-center justify-center bg-gray-50">Loading...</div>;
+  if (loading) return <div className="h-screen flex items-center justify-center bg-gray-50 text-gray-500">กำลังโหลดข้อมูล...</div>;
+  
+  // ถ้ายังไม่ล็อกอิน
   if (!user) return <Login />;
+
+  // ถ้าสถานะเป็น Pending
   if (profile?.status === 'pending') {
     return (
       <div className="h-screen flex items-center justify-center bg-gray-50 flex-col p-8 text-center">
@@ -31,15 +37,16 @@ const AppContent = () => {
     );
   }
 
-  const handleNavigateToCustomer = (customerId) => {
+  // Navigation Handlers
+  const handleNavigateToCustomer = (customerId: any) => {
     setActiveTab('customers');
     setNavData({ target: 'customer', id: customerId, timestamp: Date.now() });
   };
-  const handleNavigateToOrder = (order) => {
+  const handleNavigateToOrder = (order: any) => {
     setActiveTab('orders');
     setNavData({ target: 'order', data: order, timestamp: Date.now() });
   };
-  const handleTabChange = (tab) => {
+  const handleTabChange = (tab: any) => {
     setActiveTab(tab);
     setNavData(null); 
   };
@@ -54,9 +61,10 @@ const AppContent = () => {
       />
 
       <main className="flex-1 md:ml-72 p-4 md:p-8 overflow-y-auto h-screen w-full transition-all">
+        {/* Mobile Header */}
         <div className="md:hidden mb-6 flex items-center justify-between bg-white p-3 rounded-xl shadow-sm border border-slate-200">
-          <button onClick={() => setIsMobileMenuOpen(true)} className="p-2 -ml-2 rounded-lg text-slate-600 hover:bg-slate-100 hover:text-blue-600 transition-colors">
-            <Menu size={24} />
+          <button onClick={() => setIsMobileMenuOpen(true)} className="p-2 -ml-2 rounded-lg text-slate-600 hover:bg-slate-100">
+             ☰
           </button>
           <span className="font-bold text-slate-800 text-lg">ShopManager</span>
           <div className="w-8" />
@@ -79,8 +87,6 @@ const AppContent = () => {
           )}
           {activeTab === 'marketing' && <MarketingMain />}
           {activeTab === 'users' && <UserMain />}
-          
-          {/* Service System */}
           {activeTab === 'services' && <ServiceMain />}
         </div>
       </main>
