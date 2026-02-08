@@ -128,12 +128,14 @@ export const useDashboardData = (initialDateFilter = 'this_month') => {
 
     // --- Calculate Stats ---
     const isValidItem = (status) => status !== 'Cancelled' && status !== 'Quotation';
+    
+    // Define validOrders here so it's accessible for ranking logic below
+    const validOrders = currentOrders.filter(o => isValidItem(o.status));
 
     // 2.1 Quotation Stats (เสนอราคา แต่ยังไม่ซื้อ)
     const quotationOrders = currentOrders.filter(o => o.status === 'Quotation');
     const cancelledOrders = currentOrders.filter(o => o.status === 'Cancelled');
-    const validOrders = currentOrders.filter(o => o.status !== 'Quotation' && o.status !== 'Cancelled');
-
+    
     const quoteStats = {
         count: quotationOrders.length,
         totalValue: quotationOrders.reduce((sum, o) => sum + (Number(o.grand_total) || 0), 0),
@@ -145,56 +147,68 @@ export const useDashboardData = (initialDateFilter = 'this_month') => {
         }, 0)
     };
 
-    // Calculate Marketing Cost
+    // 2.2 Actual Sales Stats (ขายจริง)
+    const salesValue = validOrders.reduce((sum, o) => sum + (Number(o.grand_total) || 0), 0);
+    const costOfGoods = validOrders.reduce((sum, o) => {
+        const itemsCost = o.order_items?.reduce((s, i) => s + (Number(i.cost_price)*Number(i.quantity)), 0) || 0;
+        return sum + itemsCost + (Number(o.shipping_cost) || 0); // รวมค่าส่งในต้นทุน
+    }, 0);
+    
     const marketingCost = currentMarketing.reduce((sum, m) => sum + (Number(m.amount) || 0), 0);
+    
+    // 2.3 Profit Breakdown
+    const grossProfit = salesValue - costOfGoods; // กำไรขั้นต้น (ยังไม่หักการตลาด)
+    const netProfit = grossProfit - marketingCost; // กำไรสุทธิ (หลังหักการตลาด)
+
+    // Percentages
+    const marketingPercent = salesValue > 0 ? (marketingCost / salesValue) * 100 : 0;
+    const grossMargin = salesValue > 0 ? (grossProfit / salesValue) * 100 : 0;
+    const netMargin = salesValue > 0 ? (netProfit / salesValue) * 100 : 0;
+
+    // ยอดรับจริง (Cash In)
+    const actualReceived = validOrders.reduce((sum, o) => {
+        const payments = o.order_payments || [];
+        return sum + payments.reduce((pSum, p) => pSum + (Number(p.amount) || 0), 0);
+    }, 0);
+    const outstanding = salesValue - actualReceived;
+
+    const orderStats = {
+        totalOrders: currentOrders.length,
+        completedCount: validOrders.length,
+        salesValue,
+        cost: costOfGoods, // for legacy support
+        costOfGoods,
+        grossProfit,
+        marketingCost,
+        netProfit,
+        actualReceived,
+        outstanding,
+        
+        grossMargin: grossMargin.toFixed(1),
+        marketingPercent: marketingPercent.toFixed(1),
+        netMargin: netMargin.toFixed(1),
+        
+        quotation: quoteStats,
+        conversionRate: (currentOrders.length - cancelledOrders.length) > 0 
+            ? (validOrders.length / (currentOrders.length - cancelledOrders.length) * 100).toFixed(1) 
+            : 0
+    };
 
     const calcOrderStats = (ords) => {
-        const validOrds = ords.filter(o => isValidItem(o.status));
-        const revenue = validOrds.reduce((sum, o) => sum + (Number(o.grand_total) || 0), 0);
+        const vOrds = ords.filter(o => isValidItem(o.status));
+        const rev = vOrds.reduce((sum, o) => sum + (Number(o.grand_total) || 0), 0);
         // ยอดรับจริงจาก payments
-        const actualReceived = validOrds.reduce((sum, o) => sum + (o.order_payments || []).reduce((pSum, p) => pSum + (Number(p.amount) || 0), 0), 0);
-        const outstanding = revenue - actualReceived;
+        const actRec = vOrds.reduce((sum, o) => sum + (o.order_payments || []).reduce((pSum, p) => pSum + (Number(p.amount) || 0), 0), 0);
+        const outst = rev - actRec;
         
-        let productCost = 0;
-        validOrds.forEach(o => {
-            productCost += o.order_items?.reduce((s, i) => s + (Number(i.cost_price)*Number(i.quantity)), 0) || 0;
+        let pCost = 0;
+        vOrds.forEach(o => {
+            pCost += o.order_items?.reduce((s, i) => s + (Number(i.cost_price)*Number(i.quantity)), 0) || 0;
         });
-        const shipping = validOrds.reduce((sum, o) => sum + (Number(o.shipping_cost) || 0), 0);
-        const cost = productCost + shipping;
-        const profit = revenue - cost; 
-        
-        // Calculate Breakdown
-        const grossProfit = revenue - cost;
-        const netProfit = grossProfit - marketingCost; // Net Profit after marketing (This is an approximation per period)
-
-        const grossMargin = revenue > 0 ? (grossProfit / revenue) * 100 : 0;
-        const netMargin = revenue > 0 ? (netProfit / revenue) * 100 : 0;
-        const marketingPercent = revenue > 0 ? (marketingCost / revenue) * 100 : 0;
-        
-        // Calculate Conversion Rate
-        const totalLeads = ords.length - ords.filter(o => o.status === 'Cancelled').length;
-        const conversionRate = totalLeads > 0 ? (validOrds.length / totalLeads * 100) : 0;
-
-        return { 
-            revenue: actualReceived, 
-            salesValue: revenue, 
-            outstanding, 
-            cost, 
-            profit, 
-            count: validOrds.length,
-            
-            // New Fields for Breakdown
-            costOfGoods: cost,
-            grossProfit,
-            marketingCost,
-            netProfit,
-            grossMargin: grossMargin.toFixed(1),
-            netMargin: netMargin.toFixed(1),
-            marketingPercent: marketingPercent.toFixed(1),
-            quotation: quoteStats,
-            conversionRate: conversionRate.toFixed(1),
-            totalOrders: ords.length
-        }; 
+        const ship = vOrds.reduce((sum, o) => sum + (Number(o.shipping_cost) || 0), 0);
+        const cst = pCost + ship;
+        const prft = rev - cst; 
+        return { revenue: actRec, salesValue: rev, outstanding: outst, cost: cst, profit: prft, count: vOrds.length }; 
     };
 
     const calcServiceStats = (srvs) => {
@@ -226,14 +240,14 @@ export const useDashboardData = (initialDateFilter = 'this_month') => {
     const totalSalesValue = currOrderStats.salesValue + currServiceStats.salesValue;
     const totalOutstanding = currOrderStats.outstanding + currServiceStats.outstanding;
     const totalCost = currOrderStats.cost + currServiceStats.cost + mktCost;
-    const netProfit = totalSalesValue - totalCost;
+    const totalNetProfit = totalSalesValue - totalCost;
 
     const prevTotalRevenue = prevOrderStats.revenue + prevServiceStats.revenue; 
     const getGrowth = (curr, prev) => prev === 0 ? 0 : ((curr - prev) / prev) * 100;
 
     const overviewStats = {
         totalRevenue: totalActualRevenue,
-        netProfit,
+        netProfit: totalNetProfit,
         totalOrders: currOrderStats.count,
         totalServices: currServiceStats.count,
         revenueGrowth: getGrowth(totalActualRevenue, prevTotalRevenue), 
@@ -251,12 +265,6 @@ export const useDashboardData = (initialDateFilter = 'this_month') => {
     const marketingPercentRaw = totalSalesValue > 0 ? (mktCost / totalSalesValue) * 100 : 0;
     const roasRaw = mktCost > 0 ? (totalSalesValue / mktCost) : 0;
 
-    const orderStats = {
-      ...currOrderStats, // Spread all calculated stats including quotation, margins, etc.
-      revenueGrowth: getGrowth(currOrderStats.revenue, prevOrderStats.revenue),
-      roas: roasRaw.toFixed(1),
-    };
-
     // --- Chart Data ---
     let intervals = groupBy === 'day' ? eachDayOfInterval({ start, end }) : eachMonthOfInterval({ start, end });
 
@@ -267,7 +275,7 @@ export const useDashboardData = (initialDateFilter = 'this_month') => {
            return d && (groupBy === 'day' ? format(d, 'yyyy-MM-dd') === format(datePoint, 'yyyy-MM-dd') : isSameMonth(d, datePoint));
        };
 
-       const dayOrders = currentOrders.filter(o => isMatch(o.order_date) && isValidItem(o.status));
+       const dayOrders = validOrders.filter(o => isMatch(o.order_date));
        const dayServices = currentServices.filter(s => isMatch(s.received_date) && isValidItem(s.status));
        const dayMarketing = currentMarketing.filter(m => isMatch(m.expense_date));
        
@@ -281,7 +289,6 @@ export const useDashboardData = (initialDateFilter = 'this_month') => {
 
        // Calc prev sales for chart
        let prevTotalSales = 0;
-       let prevServiceSales = 0;
        let prevDatePoint;
        if (dateFilter === 'this_month' || dateFilter === 'last_month') {
           prevDatePoint = subMonths(datePoint, 1);
@@ -301,7 +308,6 @@ export const useDashboardData = (initialDateFilter = 'this_month') => {
            const pOrdRev = pOrd.reduce((s,o)=> s + (o.order_payments || []).reduce((ps,p)=>ps+(Number(p.amount)||0),0), 0);
            const pSrvRev = pSrv.reduce((s,srv)=> s + (srv.service_payments || []).reduce((ps,p)=>ps+(Number(p.amount)||0),0), 0);
            prevTotalSales = pOrdRev + pSrvRev;
-           prevServiceSales = pSrvRev;
        }
 
        return {
@@ -315,24 +321,21 @@ export const useDashboardData = (initialDateFilter = 'this_month') => {
            cost: marketingCost,
            totalSales: orderReceived + serviceReceived,
            orderProfit: orderProfit,
-           prevTotalSales,
-           prevServiceSales // Send this to chart
+           prevTotalSales 
        };
     });
 
-    // --- Ranking & Category Data (Loop & Accumulate) ---
+    // --- 3. Category & Product Ranking (Loop & Accumulate) ---
     const categoryStats = {};
     const productStats = {};
     const locationStats = {};
     
-    // Using filtered valid orders for ranking
-    const validOrdersForRanking = currentOrders.filter(o => isValidItem(o.status));
-    
-    validOrdersForRanking.forEach(o => {
+    validOrders.forEach(o => {
       // Location
       const prov = o.customer_cache?.address_parsed?.prov || 'ไม่ระบุ';
       if (!locationStats[prov]) locationStats[prov] = { province: prov, count: 0, total: 0 };
-      locationStats[prov].count += 1; locationStats[prov].total += (Number(o.grand_total) || 0);
+      locationStats[prov].count += 1; 
+      locationStats[prov].total += (Number(o.grand_total) || 0);
 
       // Items
       if (o.order_items && Array.isArray(o.order_items)) {
@@ -370,7 +373,7 @@ export const useDashboardData = (initialDateFilter = 'this_month') => {
         .sort((a,b) => b.total - a.total)
         .slice(0, 5);
 
-    // --- Service Specific Analytics ---
+    // --- 5. Service Stats (Simplified for Overview) ---
     const serviceStatusCounts = {};
     currentServices.forEach(s => {
         if (!isValidItem(s.status)) return;

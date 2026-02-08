@@ -47,8 +47,7 @@ const OverviewTab = ({ data, compareMode }) => {
               icon={ShoppingBag}
               color="bg-emerald-50 text-emerald-600"
               growth={data.orderStats?.revenueGrowth}
-              // แสดงสัดส่วนรายได้ %
-              subtext={`${data.overviewStats?.orderRevenuePercent?.toFixed(1)}% ของรายรับรวม`}
+              subtext2={data.overviewStats?.orderOutstanding > 0 ? `ค้าง: ฿${data.overviewStats.orderOutstanding.toLocaleString()}` : null}
               compareMode={compareMode}
             />
             <KpiCard 
@@ -57,8 +56,7 @@ const OverviewTab = ({ data, compareMode }) => {
               icon={Wrench}
               color="bg-orange-50 text-orange-600"
               growth={data.serviceStats?.revenueGrowth}
-              // แสดงสัดส่วนรายได้ %
-              subtext={`${data.overviewStats?.serviceRevenuePercent?.toFixed(1)}% ของรายรับรวม`}
+              subtext2={data.overviewStats?.serviceOutstanding > 0 ? `ค้าง: ฿${data.overviewStats.serviceOutstanding.toLocaleString()}` : null}
               compareMode={compareMode}
             />
             <KpiCard 
@@ -67,8 +65,6 @@ const OverviewTab = ({ data, compareMode }) => {
               icon={TrendingUp}
               color="bg-emerald-50 text-emerald-600"
               growth={data.overviewStats?.orderProfitGrowth}
-              // แสดง % Margin
-              subtext={`${data.overviewStats?.orderProfitMargin?.toFixed(1)}% Margin`}
               compareMode={compareMode}
             />
             <KpiCard 
@@ -77,8 +73,6 @@ const OverviewTab = ({ data, compareMode }) => {
               icon={TrendingUp}
               color="bg-orange-50 text-orange-600"
               growth={data.overviewStats?.serviceProfitGrowth}
-              // แสดง % Margin
-              subtext={`${data.overviewStats?.serviceProfitMargin?.toFixed(1)}% Margin`}
               compareMode={compareMode}
             />
       </div>
