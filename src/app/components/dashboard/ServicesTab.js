@@ -6,6 +6,9 @@ import KpiCard from './KpiCard';
 const ServicesTab = ({ data, compareMode }) => {
   const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
 
+  // ป้องกันกรณี data หรือ serviceStats เป็น undefined
+  if (!data?.serviceStats) return null;
+
   return (
     <div className="space-y-6 animate-in slide-in-from-bottom-4">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -37,7 +40,7 @@ const ServicesTab = ({ data, compareMode }) => {
             <KpiCard 
               title="เฉลี่ยต่อคัน" 
               value={`฿${Math.round(data.serviceStats.avgTicket).toLocaleString()}`} 
-              growth={0} // ยังไม่ได้ทำ logic เทียบ avg
+              growth={0} 
               icon={Users}
               color="bg-blue-50 text-blue-600"
               compareMode={compareMode}

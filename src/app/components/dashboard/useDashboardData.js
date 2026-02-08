@@ -129,6 +129,25 @@ export const useDashboardData = (initialDateFilter = 'this_month') => {
     // --- Calculate Stats ---
     const isValidItem = (status) => status !== 'Cancelled' && status !== 'Quotation';
 
+    // 2.1 Quotation Stats (เสนอราคา แต่ยังไม่ซื้อ)
+    const quotationOrders = currentOrders.filter(o => o.status === 'Quotation');
+    const cancelledOrders = currentOrders.filter(o => o.status === 'Cancelled');
+    const validOrders = currentOrders.filter(o => o.status !== 'Quotation' && o.status !== 'Cancelled');
+
+    const quoteStats = {
+        count: quotationOrders.length,
+        totalValue: quotationOrders.reduce((sum, o) => sum + (Number(o.grand_total) || 0), 0),
+        potentialProfit: quotationOrders.reduce((sum, o) => {
+            const cost = o.order_items?.reduce((s, i) => s + (Number(i.cost_price)*Number(i.quantity)), 0) || 0;
+            const revenue = Number(o.grand_total) || 0;
+            // Profit = Revenue - Cost - Shipping (Estimate)
+            return sum + (revenue - cost - (Number(o.shipping_cost) || 0));
+        }, 0)
+    };
+
+    // Calculate Marketing Cost
+    const marketingCost = currentMarketing.reduce((sum, m) => sum + (Number(m.amount) || 0), 0);
+
     const calcOrderStats = (ords) => {
         const validOrds = ords.filter(o => isValidItem(o.status));
         const revenue = validOrds.reduce((sum, o) => sum + (Number(o.grand_total) || 0), 0);
@@ -143,7 +162,39 @@ export const useDashboardData = (initialDateFilter = 'this_month') => {
         const shipping = validOrds.reduce((sum, o) => sum + (Number(o.shipping_cost) || 0), 0);
         const cost = productCost + shipping;
         const profit = revenue - cost; 
-        return { revenue: actualReceived, salesValue: revenue, outstanding, cost, profit, count: validOrds.length }; 
+        
+        // Calculate Breakdown
+        const grossProfit = revenue - cost;
+        const netProfit = grossProfit - marketingCost; // Net Profit after marketing (This is an approximation per period)
+
+        const grossMargin = revenue > 0 ? (grossProfit / revenue) * 100 : 0;
+        const netMargin = revenue > 0 ? (netProfit / revenue) * 100 : 0;
+        const marketingPercent = revenue > 0 ? (marketingCost / revenue) * 100 : 0;
+        
+        // Calculate Conversion Rate
+        const totalLeads = ords.length - ords.filter(o => o.status === 'Cancelled').length;
+        const conversionRate = totalLeads > 0 ? (validOrds.length / totalLeads * 100) : 0;
+
+        return { 
+            revenue: actualReceived, 
+            salesValue: revenue, 
+            outstanding, 
+            cost, 
+            profit, 
+            count: validOrds.length,
+            
+            // New Fields for Breakdown
+            costOfGoods: cost,
+            grossProfit,
+            marketingCost,
+            netProfit,
+            grossMargin: grossMargin.toFixed(1),
+            netMargin: netMargin.toFixed(1),
+            marketingPercent: marketingPercent.toFixed(1),
+            quotation: quoteStats,
+            conversionRate: conversionRate.toFixed(1),
+            totalOrders: ords.length
+        }; 
     };
 
     const calcServiceStats = (srvs) => {
@@ -201,15 +252,9 @@ export const useDashboardData = (initialDateFilter = 'this_month') => {
     const roasRaw = mktCost > 0 ? (totalSalesValue / mktCost) : 0;
 
     const orderStats = {
-      revenue: currOrderStats.revenue,
-      salesValue: currOrderStats.salesValue,
-      outstanding: currOrderStats.outstanding,
-      netProfit: currOrderStats.profit - mktCost,
-      ordersCount: currOrderStats.count,
+      ...currOrderStats, // Spread all calculated stats including quotation, margins, etc.
       revenueGrowth: getGrowth(currOrderStats.revenue, prevOrderStats.revenue),
       roas: roasRaw.toFixed(1),
-      mktCost: mktCost,
-      marketingPercent: marketingPercentRaw.toFixed(1)
     };
 
     // --- Chart Data ---
@@ -256,7 +301,7 @@ export const useDashboardData = (initialDateFilter = 'this_month') => {
            const pOrdRev = pOrd.reduce((s,o)=> s + (o.order_payments || []).reduce((ps,p)=>ps+(Number(p.amount)||0),0), 0);
            const pSrvRev = pSrv.reduce((s,srv)=> s + (srv.service_payments || []).reduce((ps,p)=>ps+(Number(p.amount)||0),0), 0);
            prevTotalSales = pOrdRev + pSrvRev;
-           prevServiceSales = pSrvRev; // Add this for Service Dashboard comparison
+           prevServiceSales = pSrvRev;
        }
 
        return {
@@ -280,32 +325,35 @@ export const useDashboardData = (initialDateFilter = 'this_month') => {
     const productStats = {};
     const locationStats = {};
     
-    currentOrders.forEach(o => {
-      if (!isValidItem(o.status)) return;
-      
+    // Using filtered valid orders for ranking
+    const validOrdersForRanking = currentOrders.filter(o => isValidItem(o.status));
+    
+    validOrdersForRanking.forEach(o => {
+      // Location
       const prov = o.customer_cache?.address_parsed?.prov || 'ไม่ระบุ';
       if (!locationStats[prov]) locationStats[prov] = { province: prov, count: 0, total: 0 };
       locationStats[prov].count += 1; locationStats[prov].total += (Number(o.grand_total) || 0);
 
-      // Loop รายการสินค้าเพื่อจัดอันดับและแยกหมวดหมู่
+      // Items
       if (o.order_items && Array.isArray(o.order_items)) {
           o.order_items.forEach(i => {
              const qty = Number(i.quantity) || 0;
              const totalItemSales = (Number(i.sell_price) * qty);
              const totalItemCost = (Number(i.cost_price) * qty);
+             const itemProfit = totalItemSales - totalItemCost;
              
-             // 1. Top Products
+             // Product Ranking
              const pName = i.product_name || i.name || 'Unknown Product';
-             if (!productStats[pName]) productStats[pName] = { name: pName, quantity: 0, total: 0 };
+             if (!productStats[pName]) productStats[pName] = { name: pName, quantity: 0, total: 0, profit: 0 };
              productStats[pName].quantity += qty;
              productStats[pName].total += totalItemSales;
+             productStats[pName].profit += itemProfit;
 
-             // 2. Category Share (ใช้ Map ที่เตรียมไว้)
-             // FIX: ใช้ String(i.product_id) เพื่อให้ match กับ key ใน Map
+             // Category Stats
              const catName = productCatMap[String(i.product_id)] || 'สินค้าทั่วไป';
              if (!categoryStats[catName]) categoryStats[catName] = { name: catName, sales: 0, profit: 0 };
              categoryStats[catName].sales += totalItemSales;
-             categoryStats[catName].profit += (totalItemSales - totalItemCost); // เพิ่มกำไร
+             categoryStats[catName].profit += itemProfit;
           });
       }
     });
@@ -326,10 +374,7 @@ export const useDashboardData = (initialDateFilter = 'this_month') => {
     const serviceStatusCounts = {};
     currentServices.forEach(s => {
         if (!isValidItem(s.status)) return;
-        const st = s.status === 'In Progress' ? 'กำลังซ่อม' : 
-                   s.status === 'Waiting' ? 'รอคิว/อะไหล่' :
-                   ['Completed', 'Delivered', 'Done'].includes(s.status) ? 'เสร็จสิ้น' : 
-                   s.status === 'Tested' ? 'รอเทส' : s.status;
+        const st = s.status || 'Unknown';
         serviceStatusCounts[st] = (serviceStatusCounts[st] || 0) + 1;
     });
     const serviceStatusData = Object.keys(serviceStatusCounts).map(k => ({ name: k, value: serviceStatusCounts[k] }));
@@ -352,7 +397,12 @@ export const useDashboardData = (initialDateFilter = 'this_month') => {
     ];
 
     return {
-        overviewStats, orderStats, chartData, categoryData, topProducts, topLocations,
+        overviewStats,
+        orderStats,
+        chartData,
+        categoryData,
+        topProducts, 
+        topLocations,
         serviceStats: {
             totalRevenue: currServiceStats.revenue,
             totalCost: currServiceStats.cost,

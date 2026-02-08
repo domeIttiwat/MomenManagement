@@ -5,29 +5,33 @@ import KpiCard from './KpiCard';
 import SalesChart from './SalesChart';
 
 const OverviewTab = ({ data, compareMode }) => {
+  if (!data) return null;
+
+  const chartData = data.chartData || [];
+
   return (
     <div className="space-y-6 animate-in slide-in-from-bottom-4">
       {/* KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <KpiCard 
               title="รายรับรวมทั้งหมด (รับจริง)" 
-              value={`฿${(data.overviewStats.totalRevenue || 0).toLocaleString()}`} 
-              growth={data.overviewStats.revenueGrowth}
+              value={`฿${(data.overviewStats?.totalRevenue || 0).toLocaleString()}`} 
+              growth={data.overviewStats?.revenueGrowth}
               icon={DollarSign}
               color="bg-indigo-50 text-indigo-600"
-              subtext2={data.overviewStats.totalOutstanding > 0 ? `ค้างชำระรวม: ฿${data.overviewStats.totalOutstanding.toLocaleString()}` : null}
+              subtext2={data.overviewStats?.totalOutstanding > 0 ? `ค้างชำระรวม: ฿${data.overviewStats.totalOutstanding.toLocaleString()}` : null}
               compareMode={compareMode}
             />
             <KpiCard 
               title="กำไรรวมสุทธิ (Net Profit)" 
-              value={`฿${(data.overviewStats.netProfit || 0).toLocaleString()}`} 
+              value={`฿${(data.overviewStats?.netProfit || 0).toLocaleString()}`} 
               icon={TrendingUp}
               color="bg-emerald-50 text-emerald-600"
               compareMode={compareMode}
             />
             <KpiCard 
               title="งบการตลาดที่ใช้" 
-              value={`฿${(data.overviewStats.marketingCost || 0).toLocaleString()}`} 
+              value={`฿${(data.overviewStats?.marketingCost || 0).toLocaleString()}`} 
               icon={Activity}
               color="bg-rose-50 text-rose-600"
               subtext="(หักลบในกำไรสุทธิแล้ว)"
@@ -39,36 +43,42 @@ const OverviewTab = ({ data, compareMode }) => {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             <KpiCard 
               title="ยอดขาย (ออเดอร์)" 
-              value={`฿${(data.overviewStats.orderRevenue || 0).toLocaleString()}`} 
+              value={`฿${(data.overviewStats?.orderRevenue || 0).toLocaleString()}`} 
               icon={ShoppingBag}
               color="bg-emerald-50 text-emerald-600"
-              growth={data.orderStats.revenueGrowth}
-              subtext2={data.overviewStats.orderOutstanding > 0 ? `ค้าง: ฿${data.overviewStats.orderOutstanding.toLocaleString()}` : null}
+              growth={data.orderStats?.revenueGrowth}
+              // แสดงสัดส่วนรายได้ %
+              subtext={`${data.overviewStats?.orderRevenuePercent?.toFixed(1)}% ของรายรับรวม`}
               compareMode={compareMode}
             />
             <KpiCard 
               title="ยอดขาย (งานซ่อม)" 
-              value={`฿${(data.overviewStats.serviceRevenue || 0).toLocaleString()}`} 
+              value={`฿${(data.overviewStats?.serviceRevenue || 0).toLocaleString()}`} 
               icon={Wrench}
               color="bg-orange-50 text-orange-600"
-              growth={data.serviceStats.revenueGrowth}
-              subtext2={data.overviewStats.serviceOutstanding > 0 ? `ค้าง: ฿${data.overviewStats.serviceOutstanding.toLocaleString()}` : null}
+              growth={data.serviceStats?.revenueGrowth}
+              // แสดงสัดส่วนรายได้ %
+              subtext={`${data.overviewStats?.serviceRevenuePercent?.toFixed(1)}% ของรายรับรวม`}
               compareMode={compareMode}
             />
             <KpiCard 
               title="กำไร (ออเดอร์)" 
-              value={`฿${(data.overviewStats.orderProfit || 0).toLocaleString()}`} 
+              value={`฿${(data.overviewStats?.orderProfit || 0).toLocaleString()}`} 
               icon={TrendingUp}
               color="bg-emerald-50 text-emerald-600"
-              growth={data.overviewStats.orderProfitGrowth}
+              growth={data.overviewStats?.orderProfitGrowth}
+              // แสดง % Margin
+              subtext={`${data.overviewStats?.orderProfitMargin?.toFixed(1)}% Margin`}
               compareMode={compareMode}
             />
             <KpiCard 
               title="กำไร (งานซ่อม)" 
-              value={`฿${(data.overviewStats.serviceProfit || 0).toLocaleString()}`} 
+              value={`฿${(data.overviewStats?.serviceProfit || 0).toLocaleString()}`} 
               icon={TrendingUp}
               color="bg-orange-50 text-orange-600"
-              growth={data.overviewStats.serviceProfitGrowth}
+              growth={data.overviewStats?.serviceProfitGrowth}
+              // แสดง % Margin
+              subtext={`${data.overviewStats?.serviceProfitMargin?.toFixed(1)}% Margin`}
               compareMode={compareMode}
             />
       </div>
@@ -78,7 +88,7 @@ const OverviewTab = ({ data, compareMode }) => {
           <h3 className="font-bold text-gray-800 mb-6">แนวโน้มรายรับจริง (Cash Flow)</h3>
           <div className="h-[350px]">
             <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={data.chartData}>
+              <ComposedChart data={chartData}>
                   <defs>
                     <linearGradient id="colorOrder" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="#10b981" stopOpacity={0.1}/>
