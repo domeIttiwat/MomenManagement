@@ -7,7 +7,8 @@ const Sidebar = ({ activeTab, setActiveTab, isOpen, onClose = () => {} }) => {
     { id: 'products', label: 'สินค้า', icon: Package },
     { id: 'customers', label: 'ลูกค้า', icon: Users },
     { id: 'orders', label: 'คำสั่งซื้อ', icon: ShoppingBag },
-    { id: 'services', label: 'งานบริการ/ซ่อม', icon: Wrench }, // เพิ่มเมนูนี้
+    { id: 'services', label: 'งานบริการ/ซ่อม', icon: Wrench },
+    { id: 'assembly', label: 'งานประกอบ', icon: Wrench },
     { id: 'marketing', label: 'การตลาด', icon: Megaphone },
     { id: 'users', label: 'จัดการทีมงาน', icon: ShieldCheck }, 
   ];

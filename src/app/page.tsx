@@ -13,6 +13,7 @@ import DashboardMain from './components/dashboard/DashboardMain';
 import UserMain from './components/users/UserMain';
 import Login from './login/page';
 import ServiceMain from './components/services/ServiceMain'; 
+import AssemblyMain from './components/assembly/AssemblyMain';
 
 // สร้าง Wrapper Component
 const AppContent = () => {
@@ -88,6 +89,7 @@ const AppContent = () => {
           {activeTab === 'marketing' && <MarketingMain />}
           {activeTab === 'users' && <UserMain />}
           {activeTab === 'services' && <ServiceMain />}
+          {activeTab === 'assembly' && <AssemblyMain />}
         </div>
       </main>
     </div>
