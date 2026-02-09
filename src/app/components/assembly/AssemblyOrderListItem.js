@@ -1,16 +1,33 @@
 'use client';
 
-import { Calendar, Users, Hash, ChevronRight, Package } from 'lucide-react';
+import { Calendar, Users, Hash, ChevronRight, Package, PackageSearch, Wrench, Clock, CheckCircle } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { th } from 'date-fns/locale';
 
-// This is the fully restored version of the list item component.
-// It is designed to work with the rich fake data structure.
 export default function AssemblyOrderListItem({ order, onSelect }) {
 
   const formattedDueDate = order.dueDate 
     ? format(parseISO(order.dueDate), 'd MMM yyyy', { locale: th })
     : 'ไม่มีกำหนด';
+
+  const getOrderStatus = (items) => {
+    if (!items || items.length === 0) return { label: 'ไม่มีสินค้า', icon: Package, color: 'bg-gray-100 text-gray-500' };
+
+    const statuses = items.map(i => i.status);
+    
+    if (statuses.every(s => s === 'Done')) {
+        return { label: 'เสร็จสิ้น', icon: CheckCircle, color: 'bg-green-100 text-green-700' };
+    }
+    if (statuses.some(s => s === 'Testing')) {
+        return { label: 'กำลังทดสอบ', icon: Clock, color: 'bg-purple-100 text-purple-700' };
+    }
+    if (statuses.some(s => s === 'Assembling')) {
+        return { label: 'กำลังประกอบ', icon: Wrench, color: 'bg-amber-100 text-amber-700' };
+    }
+    return { label: 'รอหยิบของ', icon: PackageSearch, color: 'bg-sky-100 text-sky-700' };
+  };
+
+  const currentStatus = getOrderStatus(order.items);
 
   return (
     <button 
@@ -32,29 +49,42 @@ export default function AssemblyOrderListItem({ order, onSelect }) {
         </div>
 
         <div className="flex items-center gap-4">
-          {/* Due Date */}
-          <div className="flex items-center gap-2 text-sm text-slate-500">
-            <Calendar size={14} />
-            <span>{formattedDueDate}</span>
+           {/* Status Badge */}
+           <div className={`hidden sm:inline-flex items-center gap-2 px-2.5 py-1 rounded-full text-xs font-semibold ${currentStatus.color}`}>
+              <currentStatus.icon size={12} />
+              {currentStatus.label}
           </div>
           <ChevronRight size={20} className="text-slate-400" />
         </div>
       </div>
 
-      <div className="border-t border-slate-100 my-3"></div>
+        <div className="mt-4 pt-4 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-y-3">
+            <div className="flex items-center gap-x-6 gap-y-2 flex-wrap">
+                {/* Customer */}
+                <div className="flex items-center text-sm text-slate-500">
+                    <Users size={14} className="mr-1.5" />
+                    <span>{order.customerName}</span>
+                </div>
 
-      <div className="flex items-center justify-between text-sm">
-        {/* Customer Name */}
-        <div className="flex items-center gap-2 text-slate-500">
-          <Users size={14} />
-          <span>{order.customerName}</span>
+                {/* Item Count */}
+                <div className="flex items-center text-sm text-slate-500">
+                    <Package size={14} className="mr-1.5" />
+                    <span>{order.itemCount} ชิ้น</span>
+                </div>
+                
+                {/* Due Date */}
+                <div className="flex items-center text-sm text-slate-500">
+                    <Calendar size={14} className="mr-1.5" />
+                    <span>กำหนดส่ง: {formattedDueDate}</span>
+                </div>
+            </div>
+
+            {/* Status Badge for mobile */}
+            <div className={`sm:hidden inline-flex items-center gap-2 px-2.5 py-1 rounded-full text-xs font-semibold ${currentStatus.color} self-start`}>
+                <currentStatus.icon size={12} />
+                {currentStatus.label}
+            </div>
         </div>
-        {/* Item Count */}
-        <div className="font-medium text-slate-600 bg-slate-100 rounded-full px-3 py-1 flex items-center gap-1.5">
-            <Package size={14} />
-            <span>{order.itemCount} ชิ้น</span>
-        </div>
-      </div>
     </button>
   );
 }
