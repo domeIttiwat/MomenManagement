@@ -1,65 +1,78 @@
 
 "use client";
-import React, { useState, useMemo } from 'react';
-import { Plus, Search, ArrowUpDown } from 'lucide-react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { Plus, Search, ArrowUpDown, AlertTriangle } from 'lucide-react';
 import AssemblyList from './AssemblyList';
 import AssemblyDetail from './AssemblyDetail';
-
-// Mock data for assembly tasks
-const mockAssemblyData = [
-  {
-    id: 'ASM-001',
-    orderId: 'ORD-2024-001',
-    customerName: 'บริษัทรุ่งเรืองเทรดดิ้ง',
-    taskName: 'ประกอบคอมพิวเตอร์เซ็ต i7',
-    assignedTo: 'ทีมช่าง A',
-    status: 'Pending', // Pending, In Progress, QA, Completed
-    dueDate: '2024-08-15',
-    createdAt: '2024-08-01',
-  },
-  {
-    id: 'ASM-002',
-    orderId: 'ORD-2024-003',
-    customerName: 'คุณสมชาย ใจดี',
-    taskName: 'ประกอบชุดโต๊ะทำงาน',
-    assignedTo: 'ทีมช่าง B',
-    status: 'In Progress',
-    dueDate: '2024-08-10',
-    createdAt: '2024-08-02',
-  },
-    {
-    id: 'ASM-003',
-    orderId: 'ORD-2024-002',
-    customerName: 'ร้านเกมเมอร์โซน',
-    taskName: 'ประกอบ Rig ขุดเหรียญ',
-    assignedTo: 'ทีมช่าง A',
-    status: 'QA',
-    dueDate: '2024-08-05',
-    createdAt: '2024-08-03',
-  },
-  {
-    id: 'ASM-004',
-    orderId: 'ORD-2024-004',
-    customerName: 'ออฟฟิศสดใส',
-    taskName: 'ประกอบเฟอร์นิเจอร์สำนักงาน',
-    assignedTo: 'ทีมช่าง C',
-    status: 'Completed',
-    dueDate: '2024-07-30',
-    createdAt: '2024-07-25',
-  },
-];
+import { supabase } from '../../../lib/supabase';
 
 const AssemblyMain = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [sortOrder, setSortOrder] = useState('newest');
-  const [assemblies, setAssemblies] = useState(mockAssemblyData);
+  const [assemblies, setAssemblies] = useState([]);
   const [selectedAssembly, setSelectedAssembly] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    const fetchAssemblyTasks = async () => {
+      setLoading(true);
+      setError(null);
+
+      // Step 1: Verify the user session first.
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+
+      if (sessionError) {
+        console.error('Error getting session:', sessionError);
+        setError('เกิดข้อผิดพลาดในการตรวจสอบสิทธิ์ผู้ใช้');
+        setLoading(false);
+        return;
+      }
+
+      if (!session) {
+        console.log('No active session found before fetching data.');
+        setError('ไม่พบข้อมูลผู้ใช้, กรุณาเข้าสู่ระบบก่อนลองอีกครั้ง');
+        setLoading(false);
+        return;
+      }
+
+      // Step 2: If a session exists, proceed to fetch data.
+      console.log('Active session found. Fetching data for user:', session.user.id);
+      const { data: orders, error: dbError } = await supabase
+        .from('orders')
+        .select('id, created_at, due_date, customer_id, status')
+        .eq('status', 'ส่งประกอบ');
+
+      if (dbError) {
+        console.error('Error fetching assembly tasks (with active session):', dbError);
+        // Displaying the actual error message from the DB now
+        setError(`เกิดข้อผิดพลาดจากฐานข้อมูล: ${dbError.message}`)
+        setAssemblies([]);
+      } else if (orders) {
+        const assemblyTasks = orders.map(order => ({
+          id: order.id,
+          orderId: order.id,
+          customerName: `ลูกค้า ID: ${order.customer_id}`,
+          taskName: `งานประกอบสำหรับออเดอร์ #${order.id}`,
+          assignedTo: 'ยังไม่ระบุทีม',
+          status: 'Pending',
+          dueDate: order.due_date,
+          createdAt: order.created_at,
+        }));
+        setAssemblies(assemblyTasks);
+      }
+      setLoading(false);
+    };
+
+    fetchAssemblyTasks();
+  }, []);
 
   const filteredAndSortedAssemblies = useMemo(() => {
+     if (!assemblies) return [];
     let filtered = assemblies.filter(assembly =>
-      assembly.taskName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      assembly.orderId.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      assembly.customerName.toLowerCase().includes(searchTerm.toLowerCase())
+      (assembly.taskName && assembly.taskName.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (assembly.orderId && assembly.orderId.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (assembly.customerName && assembly.customerName.toLowerCase().includes(searchTerm.toLowerCase()))
     );
 
     switch (sortOrder) {
@@ -135,7 +148,21 @@ const AssemblyMain = () => {
                   </div>
                 </div>
 
-                <AssemblyList assemblies={filteredAndSortedAssemblies} onSelectAssembly={handleSelectAssembly} />
+                {loading && <div className="text-center py-16"><span className="loading loading-spinner text-teal-600"></span></div>}
+                
+                {error && 
+                  <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded-lg" role="alert">
+                    <div className="flex">
+                      <div className="py-1"><AlertTriangle className="h-6 w-6 text-red-500 mr-4"/></div>
+                      <div>
+                        <p className="font-bold">เกิดข้อผิดพลาด</p>
+                        <p className="text-sm">{error}</p>
+                      </div>
+                    </div>
+                  </div>
+                }
+
+                {!loading && !error && <AssemblyList assemblies={filteredAndSortedAssemblies} onSelectAssembly={handleSelectAssembly} />}
               </>
             )}
           </div>
