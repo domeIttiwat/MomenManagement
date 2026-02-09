@@ -326,7 +326,7 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
                     <option value="Quotation">เสนอราคา</option>
                     <option value="Deposit">มัดจำ</option>
                     <option value="Paid">ชำระแล้ว</option>
-                    <option value="Assembling">ประกอบ</option>
+                    <option value="Assembling">ส่งประกอบ</option>
                     <option value="Shipping">เตรียมส่ง</option>
                     <option value="Completed">เสร็จสิ้น/เรียบร้อย</option>
                     <option value="Cancelled">ยกเลิก</option>
