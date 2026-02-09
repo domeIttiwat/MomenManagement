@@ -67,27 +67,20 @@ export const useDashboardData = (initialDateFilter = 'this_month') => {
     const { orders, services, marketing, products } = rawData;
     const now = new Date();
     
-    // --- 0. Prepare Product Category Map (หัวใจสำคัญ) ---
+    // --- 0. Prepare Product Category Map ---
     const productCatMap = {};
     products.forEach(p => {
         let catName = 'สินค้าทั่วไป';
-        
-        // 1. ลองหาจากระบบใหม่ (Multi)
         if (p.product_categories && p.product_categories.length > 0) {
-            // เอาหมวดหมู่แรกที่เจอ
             const firstValid = p.product_categories.find(pc => pc.categories?.name);
             if (firstValid) catName = firstValid.categories.name;
-        } 
-        // 2. ถ้าไม่มี ลองหาระบบเก่า (Single)
-        else if (p.categories?.name) {
+        } else if (p.categories?.name) {
             catName = p.categories.name;
         }
-        
-        // Map ID (String) -> Category Name
         productCatMap[String(p.id)] = catName;
     });
 
-    // --- Date Filter Logic ---
+    // --- 1. Date Filter Logic ---
     let start, end, prevStart, prevEnd;
     let groupBy = 'day';
 
@@ -120,19 +113,23 @@ export const useDashboardData = (initialDateFilter = 'this_month') => {
     });
 
     const currentOrders = filterByDate(orders, 'order_date');
-    const currentServices = filterByDate(services, 'received_date');
+    const currentServicesFiltered = filterByDate(services, 'received_date');
     const currentMarketing = filterByDate(marketing, 'expense_date');
 
-    const prevOrders = orders.filter(o => { const d = safeDate(o.order_date); return d && d >= prevStart && d <= prevEnd; });
-    const prevServices = services.filter(s => { const d = safeDate(s.received_date); return d && d >= prevStart && d <= prevEnd; });
+    const prevOrders = orders.filter(o => {
+        const d = safeDate(o.order_date);
+        return d && d >= prevStart && d <= prevEnd;
+    });
+    const prevServices = services.filter(s => {
+        const d = safeDate(s.received_date);
+        return d && d >= prevStart && d <= prevEnd;
+    });
 
     // --- Calculate Stats ---
     const isValidItem = (status) => status !== 'Cancelled' && status !== 'Quotation';
-    
-    // Define validOrders here so it's accessible for ranking logic below
     const validOrders = currentOrders.filter(o => isValidItem(o.status));
-
-    // 2.1 Quotation Stats (เสนอราคา แต่ยังไม่ซื้อ)
+    
+    // 2.1 Quotation Stats
     const quotationOrders = currentOrders.filter(o => o.status === 'Quotation');
     const cancelledOrders = currentOrders.filter(o => o.status === 'Cancelled');
     
@@ -142,197 +139,199 @@ export const useDashboardData = (initialDateFilter = 'this_month') => {
         potentialProfit: quotationOrders.reduce((sum, o) => {
             const cost = o.order_items?.reduce((s, i) => s + (Number(i.cost_price)*Number(i.quantity)), 0) || 0;
             const revenue = Number(o.grand_total) || 0;
-            // Profit = Revenue - Cost - Shipping (Estimate)
             return sum + (revenue - cost - (Number(o.shipping_cost) || 0));
         }, 0)
     };
 
-    // 2.2 Actual Sales Stats (ขายจริง)
+    // 2.2 Actual Sales Stats
     const salesValue = validOrders.reduce((sum, o) => sum + (Number(o.grand_total) || 0), 0);
     const costOfGoods = validOrders.reduce((sum, o) => {
         const itemsCost = o.order_items?.reduce((s, i) => s + (Number(i.cost_price)*Number(i.quantity)), 0) || 0;
-        return sum + itemsCost + (Number(o.shipping_cost) || 0); // รวมค่าส่งในต้นทุน
+        return sum + itemsCost + (Number(o.shipping_cost) || 0);
     }, 0);
     
     const marketingCost = currentMarketing.reduce((sum, m) => sum + (Number(m.amount) || 0), 0);
     
-    // 2.3 Profit Breakdown
-    const grossProfit = salesValue - costOfGoods; // กำไรขั้นต้น (ยังไม่หักการตลาด)
-    const netProfit = grossProfit - marketingCost; // กำไรสุทธิ (หลังหักการตลาด)
+    const grossProfit = salesValue - costOfGoods; 
+    const netProfit = grossProfit - marketingCost; 
 
-    // Percentages
     const marketingPercent = salesValue > 0 ? (marketingCost / salesValue) * 100 : 0;
     const grossMargin = salesValue > 0 ? (grossProfit / salesValue) * 100 : 0;
     const netMargin = salesValue > 0 ? (netProfit / salesValue) * 100 : 0;
 
-    // ยอดรับจริง (Cash In)
     const actualReceived = validOrders.reduce((sum, o) => {
         const payments = o.order_payments || [];
         return sum + payments.reduce((pSum, p) => pSum + (Number(p.amount) || 0), 0);
     }, 0);
     const outstanding = salesValue - actualReceived;
 
+    // Prev Order Sales (Booking Value for comparison)
+    const prevValidOrders = prevOrders.filter(o => isValidItem(o.status));
+    const prevSalesValue = prevValidOrders.reduce((sum, o) => sum + (Number(o.grand_total) || 0), 0);
+
+    const getGrowth = (curr, prev) => prev === 0 ? (curr > 0 ? 100 : 0) : ((curr - prev) / prev) * 100;
+
     const orderStats = {
         totalOrders: currentOrders.length,
         completedCount: validOrders.length,
         salesValue,
-        cost: costOfGoods, // for legacy support
+        cost: costOfGoods, // for legacy
         costOfGoods,
         grossProfit,
         marketingCost,
         netProfit,
         actualReceived,
         outstanding,
-        
         grossMargin: grossMargin.toFixed(1),
         marketingPercent: marketingPercent.toFixed(1),
         netMargin: netMargin.toFixed(1),
-        
         quotation: quoteStats,
         conversionRate: (currentOrders.length - cancelledOrders.length) > 0 
             ? (validOrders.length / (currentOrders.length - cancelledOrders.length) * 100).toFixed(1) 
-            : 0
+            : 0,
+        revenueGrowth: getGrowth(salesValue, prevSalesValue),
+        roas: marketingCost > 0 ? (salesValue / marketingCost).toFixed(1) : 0
     };
 
-    const calcOrderStats = (ords) => {
-        const vOrds = ords.filter(o => isValidItem(o.status));
-        const rev = vOrds.reduce((sum, o) => sum + (Number(o.grand_total) || 0), 0);
-        // ยอดรับจริงจาก payments
-        const actRec = vOrds.reduce((sum, o) => sum + (o.order_payments || []).reduce((pSum, p) => pSum + (Number(p.amount) || 0), 0), 0);
-        const outst = rev - actRec;
+    // 2.3 Service Stats
+    const validServices = currentServicesFiltered.filter(s => isValidItem(s.status));
+    const prevValidServices = prevServices.filter(s => isValidItem(s.status));
+    
+    const serviceRevenue = validServices.reduce((sum, s) => sum + (Number(s.grand_total) || 0), 0);
+    const prevServiceRevenue = prevValidServices.reduce((sum, s) => sum + (Number(s.grand_total) || 0), 0);
+    
+    const serviceCost = validServices.reduce((sum, s) => {
+         let pCost = 0;
+         if(s.service_items) {
+             s.service_items.forEach(i => {
+                if(i.type === 'Part') pCost += (Number(i.cost_price)*Number(i.quantity));
+             });
+         }
+         return sum + pCost;
+    }, 0);
+    const serviceProfit = serviceRevenue - serviceCost; // Gross Profit of Service
+
+    // --- Overview Stats Calculation ---
+    const totalActualRevenue = orderStats.actualReceived + 
+        validServices.reduce((sum, s) => sum + (s.service_payments || []).reduce((p, i) => p + (Number(i.amount)||0), 0), 0);
         
-        let pCost = 0;
-        vOrds.forEach(o => {
-            pCost += o.order_items?.reduce((s, i) => s + (Number(i.cost_price)*Number(i.quantity)), 0) || 0;
-        });
-        const ship = vOrds.reduce((sum, o) => sum + (Number(o.shipping_cost) || 0), 0);
-        const cst = pCost + ship;
-        const prft = rev - cst; 
-        return { revenue: actRec, salesValue: rev, outstanding: outst, cost: cst, profit: prft, count: vOrds.length }; 
-    };
-
-    const calcServiceStats = (srvs) => {
-        const validSrvs = srvs.filter(s => isValidItem(s.status));
-        const revenue = validSrvs.reduce((sum, s) => sum + (Number(s.grand_total) || 0), 0);
-        const actualReceived = validSrvs.reduce((sum, s) => sum + (s.service_payments || []).reduce((pSum, p) => pSum + (Number(p.amount) || 0), 0), 0);
-        const outstanding = revenue - actualReceived;
-        
-        let partCost = 0; let laborRevenue = 0; let partsRevenue = 0;
-        validSrvs.forEach(s => {
-            s.service_items?.forEach(i => {
-                const total = Number(i.sell_price) * Number(i.quantity);
-                const cost = Number(i.cost_price) * Number(i.quantity);
-                if (i.type === 'Part') { partsRevenue += total; partCost += cost; } 
-                else { laborRevenue += total; }
-            });
-        });
-        const profit = revenue - partCost;
-        return { revenue: actualReceived, salesValue: revenue, outstanding, cost: partCost, profit, count: validSrvs.length, laborRevenue, partsRevenue };
-    };
-
-    const currOrderStats = calcOrderStats(currentOrders);
-    const currServiceStats = calcServiceStats(currentServices);
-    const mktCost = currentMarketing.reduce((sum, m) => sum + (Number(m.amount) || 0), 0);
-    const prevOrderStats = calcOrderStats(prevOrders);
-    const prevServiceStats = calcServiceStats(prevServices);
-
-    const totalActualRevenue = currOrderStats.revenue + currServiceStats.revenue;
-    const totalSalesValue = currOrderStats.salesValue + currServiceStats.salesValue;
-    const totalOutstanding = currOrderStats.outstanding + currServiceStats.outstanding;
-    const totalCost = currOrderStats.cost + currServiceStats.cost + mktCost;
-    const totalNetProfit = totalSalesValue - totalCost;
-
-    const prevTotalRevenue = prevOrderStats.revenue + prevServiceStats.revenue; 
-    const getGrowth = (curr, prev) => prev === 0 ? 0 : ((curr - prev) / prev) * 100;
+    const totalBookingRevenue = orderStats.salesValue + serviceRevenue; 
+    const totalNetProfit = orderStats.netProfit + serviceProfit;
+    const prevTotalRevenue = prevSalesValue + prevServiceRevenue;
 
     const overviewStats = {
-        totalRevenue: totalActualRevenue,
-        netProfit: totalNetProfit,
-        totalOrders: currOrderStats.count,
-        totalServices: currServiceStats.count,
-        revenueGrowth: getGrowth(totalActualRevenue, prevTotalRevenue), 
-        marketingCost: mktCost,
-        orderRevenue: currOrderStats.revenue,
-        orderOutstanding: currOrderStats.outstanding,
-        orderProfit: currOrderStats.profit,
-        orderProfitGrowth: getGrowth(currOrderStats.profit, prevOrderStats.profit), 
-        serviceRevenue: currServiceStats.revenue,
-        serviceOutstanding: currServiceStats.outstanding,
-        serviceProfit: currServiceStats.profit,
-        serviceProfitGrowth: getGrowth(currServiceStats.profit, prevServiceStats.profit)
-    };
+        totalRevenue: totalActualRevenue, 
+        netProfit: totalNetProfit, 
+        totalOrders: currentOrders.length,
+        marketingCost: marketingCost,
+        
+        revenueGrowth: getGrowth(totalBookingRevenue, prevTotalRevenue), // Use Booking for growth trend
+        
+        orderRevenue: orderStats.salesValue,
+        orderProfit: orderStats.netProfit,
+        serviceRevenue: serviceRevenue,
+        serviceProfit: serviceProfit,
 
-    const marketingPercentRaw = totalSalesValue > 0 ? (mktCost / totalSalesValue) * 100 : 0;
-    const roasRaw = mktCost > 0 ? (totalSalesValue / mktCost) : 0;
+        orderRevenueShare: totalBookingRevenue > 0 ? (orderStats.salesValue / totalBookingRevenue * 100).toFixed(1) : 0,
+        serviceRevenueShare: totalBookingRevenue > 0 ? (serviceRevenue / totalBookingRevenue * 100).toFixed(1) : 0,
+        
+        orderProfitShare: totalNetProfit > 0 ? (orderStats.netProfit / totalNetProfit * 100).toFixed(1) : 0,
+        serviceProfitShare: totalNetProfit > 0 ? (serviceProfit / totalNetProfit * 100).toFixed(1) : 0,
+
+        orderOutstanding: orderStats.outstanding,
+        serviceOutstanding: serviceRevenue - validServices.reduce((sum, s) => sum + (s.service_payments || []).reduce((pSum, p) => pSum + (Number(p.amount) || 0), 0), 0),
+    };
 
     // --- Chart Data ---
     let intervals = groupBy === 'day' ? eachDayOfInterval({ start, end }) : eachMonthOfInterval({ start, end });
 
     const chartData = intervals.map((datePoint) => {
-       const label = format(datePoint, groupBy === 'day' ? 'd MMM' : 'MMM', { locale: th });
-       const isMatch = (dStr) => {
-           const d = safeDate(dStr);
-           return d && (groupBy === 'day' ? format(d, 'yyyy-MM-dd') === format(datePoint, 'yyyy-MM-dd') : isSameMonth(d, datePoint));
-       };
+        const label = format(datePoint, groupBy === 'day' ? 'd MMM' : 'MMM', { locale: th });
+        const isMatch = (dStr) => {
+            const d = safeDate(dStr);
+            return d && (groupBy === 'day' ? format(d, 'yyyy-MM-dd') === format(datePoint, 'yyyy-MM-dd') : isSameMonth(d, datePoint));
+        };
 
-       const dayOrders = validOrders.filter(o => isMatch(o.order_date));
-       const dayServices = currentServices.filter(s => isMatch(s.received_date) && isValidItem(s.status));
-       const dayMarketing = currentMarketing.filter(m => isMatch(m.expense_date));
-       
-       const orderSalesValue = dayOrders.reduce((s, o) => s + (Number(o.grand_total) || 0), 0);
-       const orderReceived = dayOrders.reduce((sum, o) => sum + (o.order_payments || []).reduce((pSum, p) => pSum + (Number(p.amount) || 0), 0), 0);
-       const serviceReceived = dayServices.reduce((sum, s) => sum + (s.service_payments || []).reduce((pSum, p) => pSum + (Number(p.amount) || 0), 0), 0);
-       const marketingCost = dayMarketing.reduce((s, m) => s + (Number(m.amount) || 0), 0);
-       const orderCosts = dayOrders.reduce((sum, o) => sum + (o.order_items?.reduce((s, i) => s + (Number(i.cost_price)*Number(i.quantity)), 0) || 0) + (Number(o.shipping_cost) || 0), 0);
-       
-       const orderProfit = orderSalesValue - orderCosts - marketingCost;
+        const dayOrders = validOrders.filter(o => isMatch(o.order_date));
+        const dayServices = validServices.filter(s => isMatch(s.received_date));
+        const dayMarketing = currentMarketing.filter(m => isMatch(m.expense_date));
 
-       // Calc prev sales for chart
-       let prevTotalSales = 0;
-       let prevDatePoint;
-       if (dateFilter === 'this_month' || dateFilter === 'last_month') {
-          prevDatePoint = subMonths(datePoint, 1);
-       } else if (dateFilter === 'this_year') {
-          prevDatePoint = subYears(datePoint, 1);
-       } else {
-          prevDatePoint = subMonths(datePoint, 3);
-       }
+        const orderSalesValue = dayOrders.reduce((s, o) => s + (Number(o.grand_total) || 0), 0);
+        const orderReceived = dayOrders.reduce((sum, o) => sum + (o.order_payments || []).reduce((pSum, p) => pSum + (Number(p.amount) || 0), 0), 0);
+        const serviceReceived = dayServices.reduce((sum, s) => sum + (s.service_payments || []).reduce((pSum, p) => pSum + (Number(p.amount) || 0), 0), 0);
+        const serviceSalesValue = dayServices.reduce((s, srv) => s + (Number(srv.grand_total) || 0), 0);
+        
+        const marketingCost = dayMarketing.reduce((s, m) => s + (Number(m.amount) || 0), 0);
+        
+        const orderCosts = dayOrders.reduce((sum, o) => {
+            const iCost = o.order_items?.reduce((s, i) => s + (Number(i.cost_price)*Number(i.quantity)), 0) || 0;
+            return sum + iCost + (Number(o.shipping_cost) || 0);
+        }, 0);
+        
+        const orderProfit = orderSalesValue - orderCosts - marketingCost;
 
-       if (prevDatePoint) {
-           const isPrevMatch = (dStr) => {
-               const d = safeDate(dStr);
-               return d && (groupBy === 'day' ? format(d, 'yyyy-MM-dd') === format(prevDatePoint, 'yyyy-MM-dd') : isSameMonth(d, prevDatePoint));
-           };
-           const pOrd = prevOrders.filter(o => isPrevMatch(o.order_date) && isValidItem(o.status));
-           const pSrv = prevServices.filter(s => isPrevMatch(s.received_date) && isValidItem(s.status));
-           const pOrdRev = pOrd.reduce((s,o)=> s + (o.order_payments || []).reduce((ps,p)=>ps+(Number(p.amount)||0),0), 0);
-           const pSrvRev = pSrv.reduce((s,srv)=> s + (srv.service_payments || []).reduce((ps,p)=>ps+(Number(p.amount)||0),0), 0);
-           prevTotalSales = pOrdRev + pSrvRev;
-       }
+        // Calc Prev Sales for Chart
+        let prevTotalSales = 0;
+        let prevOrderSales = 0;
+        let prevDatePoint;
+        if (dateFilter === 'this_month' || dateFilter === 'last_month') {
+            prevDatePoint = subMonths(datePoint, 1);
+        } else if (dateFilter === 'this_year') {
+            prevDatePoint = subYears(datePoint, 1);
+        } else {
+            prevDatePoint = subMonths(datePoint, 3);
+        }
 
-       return {
-           date: label,
-           orderSales: orderReceived, 
-           serviceSales: serviceReceived,
-           marketingCost,
-           sales: orderReceived, 
-           marketing: marketingCost,
-           profit: orderProfit, 
-           cost: marketingCost,
-           totalSales: orderReceived + serviceReceived,
-           orderProfit: orderProfit,
-           prevTotalSales 
-       };
+        if (prevDatePoint) {
+            const isPrevMatch = (dStr) => {
+                const d = safeDate(dStr);
+                return d && (groupBy === 'day' ? format(d, 'yyyy-MM-dd') === format(prevDatePoint, 'yyyy-MM-dd') : isSameMonth(d, prevDatePoint));
+            };
+            const pOrd = prevOrders.filter(o => isPrevMatch(o.order_date) && isValidItem(o.status));
+            const pSrv = prevServices.filter(s => isPrevMatch(s.received_date) && isValidItem(s.status));
+            
+            // ใช้ยอดขายรวม (Booking) ในการเปรียบเทียบ
+            const pOrdSales = pOrd.reduce((s,o)=> s + (Number(o.grand_total)||0), 0);
+            const pSrvSales = pSrv.reduce((s,srv)=> s + (Number(srv.grand_total)||0), 0);
+            
+            prevOrderSales = pOrdSales;
+            prevTotalSales = pOrdSales + pSrvSales;
+        }
+
+        return {
+            date: label,
+            orderSales: orderReceived, 
+            serviceSales: serviceReceived,
+            marketing: marketingCost, 
+            marketingCost: marketingCost,
+            
+            // FIX: ใช้ยอดขายรวม (Booking) สำหรับกราฟ Sales/ROI เพื่อให้สัมพันธ์กับค่าการตลาด
+            sales: orderSalesValue, 
+            
+            profit: orderProfit, 
+            cost: marketingCost,
+            totalSales: orderReceived + serviceReceived,
+            orderProfit: orderProfit,
+            prevTotalSales,
+            prevOrderSales 
+        };
     });
 
-    // --- 3. Category & Product Ranking (Loop & Accumulate) ---
+    // --- Ranking Data ---
     const categoryStats = {};
     const productStats = {};
     const locationStats = {};
     
     validOrders.forEach(o => {
       // Location
-      const prov = o.customer_cache?.address_parsed?.prov || 'ไม่ระบุ';
+      let prov = o.customer_cache?.address_parsed?.prov;
+      if (!prov) {
+          const raw = o.customer_cache?.address_raw || '';
+          const match = raw.match(/(?:จังหวัด|จ\.)\s*([^\s,]+)/) || raw.match(/(กรุงเทพมหานคร|กรุงเทพฯ|กทม)/);
+          prov = match ? match[1] : 'ไม่ระบุ';
+      }
+      prov = prov.replace(/^(จังหวัด|จ\.|แขวง|เขต)/, '').trim();
+
       if (!locationStats[prov]) locationStats[prov] = { province: prov, count: 0, total: 0 };
       locationStats[prov].count += 1; 
       locationStats[prov].total += (Number(o.grand_total) || 0);
@@ -345,14 +344,14 @@ export const useDashboardData = (initialDateFilter = 'this_month') => {
              const totalItemCost = (Number(i.cost_price) * qty);
              const itemProfit = totalItemSales - totalItemCost;
              
-             // Product Ranking
+             // Product
              const pName = i.product_name || i.name || 'Unknown Product';
              if (!productStats[pName]) productStats[pName] = { name: pName, quantity: 0, total: 0, profit: 0 };
              productStats[pName].quantity += qty;
              productStats[pName].total += totalItemSales;
              productStats[pName].profit += itemProfit;
 
-             // Category Stats
+             // Category
              const catName = productCatMap[String(i.product_id)] || 'สินค้าทั่วไป';
              if (!categoryStats[catName]) categoryStats[catName] = { name: catName, sales: 0, profit: 0 };
              categoryStats[catName].sales += totalItemSales;
@@ -362,20 +361,24 @@ export const useDashboardData = (initialDateFilter = 'this_month') => {
     });
 
     const categoryData = Object.values(categoryStats).sort((a,b) => b.sales - a.sales);
-    
-    const topProducts = Object.values(productStats)
-        .filter(p => p.total > 0)
-        .sort((a,b) => b.total - a.total)
-        .slice(0, 10);
-        
-    const topLocations = Object.values(locationStats)
-        .filter(l => l.total > 0 && l.province !== 'ไม่ระบุ')
-        .sort((a,b) => b.total - a.total)
-        .slice(0, 5);
+    const topProducts = Object.values(productStats).filter(p=>p.total > 0).sort((a,b) => b.total - a.total).slice(0, 10);
+    const topLocations = Object.values(locationStats).filter(l=>l.total > 0 && l.province !== 'ไม่ระบุ').sort((a,b) => b.total - a.total).slice(0, 5);
 
-    // --- 5. Service Stats (Simplified for Overview) ---
+    // Service Helper
+    const calcServiceStatsForTab = (srvs) => {
+        let pCost = 0; let lRev = 0; let pRev = 0;
+        srvs.forEach(s => {
+            s.service_items?.forEach(i => {
+                const total = Number(i.sell_price) * Number(i.quantity);
+                const cost = Number(i.cost_price) * Number(i.quantity);
+                if (i.type === 'Part') { pRev += total; pCost += cost; } else { lRev += total; }
+            });
+        });
+        return { laborRevenue: lRev, partsRevenue: pRev };
+    };
+
     const serviceStatusCounts = {};
-    currentServices.forEach(s => {
+    currentServicesFiltered.forEach(s => {
         if (!isValidItem(s.status)) return;
         const st = s.status || 'Unknown';
         serviceStatusCounts[st] = (serviceStatusCounts[st] || 0) + 1;
@@ -383,8 +386,7 @@ export const useDashboardData = (initialDateFilter = 'this_month') => {
     const serviceStatusData = Object.keys(serviceStatusCounts).map(k => ({ name: k, value: serviceStatusCounts[k] }));
 
     const techStats = {};
-    currentServices.forEach(s => {
-        if (!isValidItem(s.status)) return;
+    validServices.forEach(s => {
         s.service_assignees?.forEach(a => {
             const name = a.user?.first_name || 'ไม่ระบุ';
             if (!techStats[name]) techStats[name] = { name, jobs: 0, revenue: 0 };
@@ -395,8 +397,8 @@ export const useDashboardData = (initialDateFilter = 'this_month') => {
     const technicianData = Object.values(techStats).sort((a,b) => b.jobs - a.jobs).slice(0, 5);
 
     const revenueCompositionData = [
-        { name: 'ค่าแรง/บริการ', value: currServiceStats.laborRevenue },
-        { name: 'ค่าอะไหล่', value: currServiceStats.partsRevenue }
+        { name: 'ค่าแรง/บริการ', value: calcServiceStatsForTab(validServices).laborRevenue },
+        { name: 'ค่าอะไหล่', value: calcServiceStatsForTab(validServices).partsRevenue }
     ];
 
     return {
@@ -407,18 +409,18 @@ export const useDashboardData = (initialDateFilter = 'this_month') => {
         topProducts, 
         topLocations,
         serviceStats: {
-            totalRevenue: currServiceStats.revenue,
-            totalCost: currServiceStats.cost,
-            totalProfit: currServiceStats.profit, 
-            totalJobs: currServiceStats.count,
-            avgTicket: currServiceStats.count > 0 ? currServiceStats.revenue / currServiceStats.count : 0,
+            totalRevenue: serviceRevenue,
+            totalCost: serviceCost,
+            totalProfit: serviceProfit, 
+            totalJobs: currentServicesFiltered.length,
+            avgTicket: validServices.length > 0 ? serviceRevenue / validServices.length : 0,
             statusData: serviceStatusData,
             technicianData,
             revenueCompositionData,
-            jobsGrowth: getGrowth(currServiceStats.count, prevServiceStats.count),
-            revenueGrowth: getGrowth(currServiceStats.revenue, prevServiceStats.revenue),
-            profitGrowth: getGrowth(currServiceStats.profit, prevServiceStats.profit),
-            outstanding: currServiceStats.outstanding
+            jobsGrowth: getGrowth(validServices.length, prevServices.filter(s => isValidItem(s.status)).length),
+            revenueGrowth: getGrowth(serviceRevenue, prevServiceRevenue),
+            profitGrowth: 0, // Placeholder
+            outstanding: overviewStats.serviceOutstanding
         }
     };
   }, [rawData, dateFilter]);
