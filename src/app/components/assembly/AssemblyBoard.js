@@ -1,12 +1,13 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState } from 'react';
 import { supabase } from '@/lib/supabase'; 
 import { v4 as uuidv4 } from 'uuid';
-import { ArrowLeft, GripVertical, CheckCircle, Clock, Wrench, PackageSearch, AlertTriangle, PlusCircle, RotateCcw, Check, Info } from 'lucide-react';
+import { ArrowLeft, GripVertical, CheckCircle, Clock, Wrench, PackageSearch, AlertTriangle, PlusCircle, RotateCcw, Check, Info, MessageSquare, MoreVertical } from 'lucide-react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
+import { Menu } from '@headlessui/react';
 import ComponentList from './ComponentList';
-
+import { ConfirmationModal, ActivityModal } from './Modals';
 
 // Helper to create a log entry
 const createLog = async (itemId, eventType, metadata = {}) => {
@@ -19,10 +20,8 @@ const createLog = async (itemId, eventType, metadata = {}) => {
     if (error) throw error;
   } catch (err) {
     console.error(`Failed to create log for event ${eventType}:`, err);
-    // Non-critical, so we don't block the UI for this.
   }
 };
-
 
 const AddComponentForm = ({ itemId, onAddComponent }) => {
     const [name, setName] = useState('');
@@ -60,7 +59,7 @@ const AddComponentForm = ({ itemId, onAddComponent }) => {
     )
 }
 
-const ItemCard = ({ item, index, onComponentCheck, pickedComponents, onAddComponent, onRemoveManualComponent, onConfirmEmpty, onRevert }) => {
+const ItemCard = ({ item, index, onComponentCheck, pickedComponents, onAddComponent, onRemoveManualComponent, onConfirmEmpty, onRevert, onOpenActivityModal }) => {
     const [showComponents, setShowComponents] = useState(false);
     
     const statusConfig = {
@@ -95,25 +94,44 @@ const ItemCard = ({ item, index, onComponentCheck, pickedComponents, onAddCompon
                                 <p className="text-sm text-slate-500">SKU: {item.sku}</p>
                                 <p className="text-sm text-slate-500">จำนวน: {item.quantity}</p>
                             </div>
-                            <div {...provided.dragHandleProps} className="p-2 text-slate-400 hover:text-slate-600 cursor-grab active:cursor-grabbing">
-                                <GripVertical size={20} />
+                             <div className="flex items-center">
+                                <div {...provided.dragHandleProps} className="p-1 text-slate-400 hover:text-slate-600 cursor-grab active:cursor-grabbing">
+                                    <GripVertical size={20} />
+                                </div>
+                                 <Menu as="div" className="relative">
+                                    <Menu.Button className="p-1 ml-1 rounded-full hover:bg-slate-100 text-slate-500">
+                                        <MoreVertical size={20} />
+                                    </Menu.Button>
+                                    <Menu.Items className="absolute right-0 w-48 mt-2 origin-top-right bg-white divide-y divide-gray-100 rounded-md shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none z-10">
+                                        <div className="px-1 py-1 ">
+                                        <Menu.Item>
+                                            {({ active }) => (
+                                            <button onClick={() => onRevert(item.id, item.status)} disabled={item.status === 'Picking'} className={`${active ? 'bg-red-100 text-red-900' : 'text-gray-900'} group flex rounded-md items-center w-full px-2 py-2 text-sm disabled:text-gray-400 disabled:bg-transparent`}>
+                                                <RotateCcw className="w-5 h-5 mr-2 text-red-500" />
+                                                ตีกลับ
+                                            </button>
+                                            )}
+                                        </Menu.Item>
+                                        </div>
+                                    </Menu.Items>
+                                </Menu>
                             </div>
                         </div>
-                        {item.status === 'Assembling' && (
-                            <button onClick={() => onRevert(item.id, item.status)} className="mt-2 text-xs text-red-500 hover:text-red-700 font-semibold flex items-center gap-1.5">
-                                <RotateCcw size={12}/> ตีกลับไปขั้นตอนหยิบของ
-                            </button>
-                        )}
-                         <div className="mt-3">
+                        
+                         <div className="mt-3 flex justify-between items-center">
                             {!hasNoComponents ? (
                                 <button onClick={() => setShowComponents(!showComponents)} className="text-sm text-blue-600 hover:underline">
                                     {showComponents ? 'ซ่อน' : 'แสดง'} Checklist ({pickedForThisItem.size}/{allComponents.length} ชิ้น)
                                 </button>
-                            ) : item.status === 'Picking' && (
+                            ) : item.status === 'Picking' ? (
                                 <button onClick={() => onConfirmEmpty(item.id)} className="flex items-center gap-2 w-full justify-center p-2.5 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors font-semibold text-sm">
-                                    <Check size={18}/> ยืนยันการหยิบ (ไม่มีส่วนประกอบ)
+                                    <Check size={18}/> ยืนยัน (ไม่มีส่วนประกอบ)
                                 </button>
-                            )}
+                            ) : <div/>}
+                            <button onClick={() => onOpenActivityModal(item)} className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-blue-600">
+                                <MessageSquare size={14}/>
+                                <span>{item.assembly_comments?.length || 0}</span>
+                            </button>
                         </div>
                     </div>
                     {showComponents && (
@@ -161,11 +179,29 @@ export default function AssemblyBoard({ order, onBack }) {
 
     const [error, setError] = useState(null);
     const [info, setInfo] = useState(null);
+    const [modal, setModal] = useState({ type: null, data: null });
 
     const showInfo = (message) => {
         setInfo(message);
         setTimeout(() => setInfo(null), 3000);
     }
+
+    const updateItemInState = (itemId, updates) => {
+        const newColumns = { ...columns };
+        let found = false;
+        for (const colId in newColumns) {
+            const itemIndex = newColumns[colId].items.findIndex(i => i.id === itemId);
+            if (itemIndex > -1) {
+                const oldItem = newColumns[colId].items[itemIndex];
+                newColumns[colId].items[itemIndex] = { ...oldItem, ...updates };
+                found = true;
+                break;
+            }
+        }
+        if (found) {
+            setColumns(newColumns);
+        }
+    };
 
     const moveItem = async (itemId, source, destination, isRevert = false) => {
         const sourceColId = source.droppableId;
@@ -175,7 +211,7 @@ export default function AssemblyBoard({ order, onBack }) {
         const itemToMove = allItems.find(i => i.id == itemId);
         if (!itemToMove) return;
 
-        // --- Optimistic UI Update ---
+        // Optimistic UI Update
         const newColumnsState = { ...columns };
         const sourceColItems = [...newColumnsState[sourceColId].items];
         const [movedItem] = sourceColItems.splice(source.index, 1);
@@ -192,25 +228,18 @@ export default function AssemblyBoard({ order, onBack }) {
         setColumns(newColumnsState);
         setError(null);
 
-        // --- Database Update ---
         try {
-            const { error: updateError } = await supabase
-                .from('order_items')
-                .update({ status: destColId })
-                .eq('id', itemId);
+            const { error: updateError } = await supabase.from('order_items').update({ status: destColId }).eq('id', itemId);
             if (updateError) throw updateError;
 
-            // --- Logging ---
             if (isRevert) {
                 await createLog(itemId, 'REVERTED_TO_PICKING', { from: sourceColId, to: destColId });
                 showInfo(`"${movedItem.name}" ถูกส่งกลับไปขั้นตอนหยิบของ`);
             } else if (sourceColId === 'Picking' && destColId === 'Assembling'){
                 await createLog(itemId, 'PICKING_COMPLETED');
             }
-            
         } catch (err) {
             setError(`บันทึกไม่สำเร็จ: ${err.message}.`);
-            // Revert state change is complex, just show error for now.
         }
     };
 
@@ -221,26 +250,17 @@ export default function AssemblyBoard({ order, onBack }) {
     };
 
     const handleComponentCheck = async (itemId, componentId, isChecked) => {
-        const allItems = Object.values(columns).flatMap(c => c.items);
-        const currentItem = allItems.find(i => i.id === itemId);
+        const currentItem = Object.values(columns).flatMap(c => c.items).find(i => i.id === itemId);
         if (!currentItem) return;
 
         const updatedPicks = new Set(pickedComponents[itemId] || []);
-        if (isChecked) {
-            updatedPicks.add(componentId);
-        } else {
-            updatedPicks.delete(componentId);
-        }
+        isChecked ? updatedPicks.add(componentId) : updatedPicks.delete(componentId);
         setPickedComponents({ ...pickedComponents, [itemId]: updatedPicks });
         setError(null);
 
-        const updatedIdsArray = Array.from(updatedPicks);
         try {
-             const { error: updateError } = await supabase
-                .from('order_items')
-                .update({ picked_component_ids: updatedIdsArray })
-                .eq('id', itemId);
-            if (updateError) throw updateError;
+             const { error } = await supabase.from('order_items').update({ picked_component_ids: Array.from(updatedPicks) }).eq('id', itemId);
+            if (error) throw error;
         } catch (err) {
             setError(`บันทึก Checklist ไม่สำเร็จ: ${err.message}`);
             return;
@@ -248,38 +268,22 @@ export default function AssemblyBoard({ order, onBack }) {
 
         const allItemComponents = [...(currentItem.components || []), ...(currentItem.manual_components || [])];
         if (currentItem.status === 'Picking' && allItemComponents.length > 0 && updatedPicks.size === allItemComponents.length) {
-             const source = { droppableId: 'Picking', index: columns.Picking.items.indexOf(currentItem) };
-             const destination = { droppableId: 'Assembling', index: 0 };
-             await moveItem(itemId, source, destination);
+             moveItem(itemId, { droppableId: 'Picking', index: columns.Picking.items.indexOf(currentItem) }, { droppableId: 'Assembling', index: 0 });
         }
     };
 
     const handleAddComponent = async (itemId, name, quantity) => {
         const newComponent = { id: uuidv4(), name, quantity, manual: true };
-
-        const allItems = Object.values(columns).flatMap(c => c.items);
-        const currentItem = allItems.find(i => i.id === itemId);
+        const currentItem = Object.values(columns).flatMap(c => c.items).find(i => i.id === itemId);
         if (!currentItem) return;
 
         const updatedManualComponents = [...(currentItem.manual_components || []), newComponent];
-
-        // Optimistic UI update
-        const newColumns = { ...columns };
-        Object.keys(newColumns).forEach(colId => {
-            newColumns[colId].items = newColumns[colId].items.map(item => 
-                item.id === itemId ? { ...item, manual_components: updatedManualComponents } : item
-            );
-        });
-        setColumns(newColumns);
+        updateItemInState(itemId, { manual_components: updatedManualComponents });
         setError(null);
 
-        // DB Update
         try {
-            const { error: updateError } = await supabase
-                .from('order_items')
-                .update({ manual_components: updatedManualComponents })
-                .eq('id', itemId);
-            if (updateError) throw updateError;
+            const { error } = await supabase.from('order_items').update({ manual_components: updatedManualComponents }).eq('id', itemId);
+            if (error) throw error;
             await createLog(itemId, 'MANUAL_COMPONENT_ADDED', { name, quantity });
         } catch (err) {
              setError(`เพิ่มส่วนประกอบไม่สำเร็จ: ${err.message}`);
@@ -287,32 +291,20 @@ export default function AssemblyBoard({ order, onBack }) {
     };
 
     const handleRemoveManualComponent = async (itemId, componentId) => {
-        const allItems = Object.values(columns).flatMap(c => c.items);
-        const currentItem = allItems.find(i => i.id === itemId);
+        const currentItem = Object.values(columns).flatMap(c => c.items).find(i => i.id === itemId);
         if (!currentItem) return;
 
         const componentToRemove = currentItem.manual_components.find(c => c.id === componentId);
         const updatedManualComponents = currentItem.manual_components.filter(c => c.id !== componentId);
-
-        const newColumns = { ...columns };
-        Object.keys(newColumns).forEach(colId => {
-            newColumns[colId].items = newColumns[colId].items.map(item => 
-                item.id === itemId ? { ...item, manual_components: updatedManualComponents } : item
-            );
-        });
-        setColumns(newColumns);
-
-        // Also update picked set
         const updatedPicks = new Set(pickedComponents[itemId] || []);
         updatedPicks.delete(componentId);
+
+        updateItemInState(itemId, { manual_components: updatedManualComponents, picked_component_ids: Array.from(updatedPicks) });
         setPickedComponents({...pickedComponents, [itemId]: updatedPicks});
 
          try {
-            const { error: updateError } = await supabase
-                .from('order_items')
-                .update({ manual_components: updatedManualComponents, picked_component_ids: Array.from(updatedPicks) })
-                .eq('id', itemId);
-            if (updateError) throw updateError;
+            const { error } = await supabase.from('order_items').update({ manual_components: updatedManualComponents, picked_component_ids: Array.from(updatedPicks) }).eq('id', itemId);
+            if (error) throw error;
             await createLog(itemId, 'MANUAL_COMPONENT_REMOVED', { name: componentToRemove.name });
         } catch (err) {
              setError(`ลบส่วนประกอบไม่สำเร็จ: ${err.message}`);
@@ -322,23 +314,61 @@ export default function AssemblyBoard({ order, onBack }) {
     const handleConfirmEmpty = async (itemId) => {
         const item = columns.Picking.items.find(i => i.id === itemId);
         if (!item) return;
-
-        const source = { droppableId: 'Picking', index: columns.Picking.items.indexOf(item) };
-        const destination = { droppableId: 'Assembling', index: 0 };
-        await moveItem(itemId, source, destination);
+        moveItem(itemId, { droppableId: 'Picking', index: columns.Picking.items.indexOf(item) }, { droppableId: 'Assembling', index: 0 });
     };
 
-    const handleRevert = async (itemId, currentStatus) => {
+    const handleRevert = (itemId, currentStatus) => {
         const item = columns[currentStatus].items.find(i => i.id === itemId);
         if (!item) return;
+        setModal({ type: 'revert', data: { itemId, currentStatus, itemName: item.name } });
+    };
 
-        const source = { droppableId: currentStatus, index: columns[currentStatus].items.indexOf(item) };
-        const destination = { droppableId: 'Picking', index: 0 };
-        await moveItem(itemId, source, destination, true);
+    const confirmRevert = () => {
+        const { itemId, currentStatus } = modal.data;
+        const item = columns[currentStatus].items.find(i => i.id === itemId);
+        if (!item) return;
+        moveItem(itemId, { droppableId: currentStatus, index: columns[currentStatus].items.indexOf(item) }, { droppableId: 'Picking', index: 0 }, true);
+        setModal({ type: null, data: null });
+    };
+
+    const handleNewComment = (newComment) => {
+        const itemId = newComment.order_item_id;
+        const currentItem = Object.values(columns).flatMap(c => c.items).find(i => i.id === itemId);
+        if (!currentItem) return;
+
+        const updatedComments = [newComment, ...(currentItem.assembly_comments || [])];
+        updateItemInState(itemId, { assembly_comments: updatedComments });
+    };
+
+    const renderModals = () => {
+        if (!modal.type) return null;
+
+        if (modal.type === 'revert') {
+            return (
+                <ConfirmationModal 
+                    title="ยืนยันการตีกลับ" 
+                    message={`คุณต้องการตีกลับ "${modal.data.itemName}" กลับไปที่ขั้นตอน 'รอหยิบของ' จริงๆ หรือ?`}
+                    onConfirm={confirmRevert}
+                    onCancel={() => setModal({ type: null, data: null })}
+                    confirmText="ใช่, ตีกลับ"
+                />
+            );
+        }
+
+        if (modal.type === 'activity') {
+            return (
+                <ActivityModal 
+                    item={modal.data}
+                    onClose={() => setModal({ type: null, data: null })}
+                    onCommentAdded={handleNewComment}
+                />
+            )
+        }
     };
 
     return (
         <div className="bg-gray-50 min-h-screen p-4 sm:p-6">
+            {renderModals()}
             <div className="max-w-7xl mx-auto">
                  <div className="flex items-center mb-6">
                     <button onClick={onBack} className="p-2 rounded-full hover:bg-slate-200 transition-colors">
@@ -374,7 +404,7 @@ export default function AssemblyBoard({ order, onBack }) {
                                         className={`p-4 rounded-xl bg-slate-100 transition-colors ${snapshot.isDraggingOver ? 'bg-blue-100' : ''}`}
                                     >
                                         <h2 className="text-lg font-semibold text-slate-700 mb-4 px-2">{column.name}</h2>
-                                        <div className="min-h-[200px]">
+                                        <div className="min-h-[200px] space-y-4">
                                             {column.items.map((item, index) => (
                                                 <ItemCard 
                                                     item={item} 
@@ -386,6 +416,7 @@ export default function AssemblyBoard({ order, onBack }) {
                                                     onRemoveManualComponent={handleRemoveManualComponent}
                                                     onConfirmEmpty={handleConfirmEmpty}
                                                     onRevert={handleRevert}
+                                                    onOpenActivityModal={(item) => setModal({ type: 'activity', data: item })}
                                                 />
                                             ))}
                                             {provided.placeholder}

@@ -19,6 +19,7 @@ export default function AssemblyMain() {
       setLoading(true);
       setError(null);
       
+      // Updated select query to fetch logs and comments
       const { data: orderData, error: ordersError } = await supabase
         .from('orders')
         .select(`
@@ -26,7 +27,11 @@ export default function AssemblyMain() {
           completed_at, 
           status,
           customers(first_name, last_name),
-          order_items(*, products(id, name, sku))
+          order_items(*, 
+            products(id, name, sku),
+            assembly_logs(*),
+            assembly_comments(*)
+          )
         `)
         .in('status', ['Picking', 'Assembling', 'Testing']);
 
@@ -94,6 +99,10 @@ export default function AssemblyMain() {
 
           const processedItems = order.order_items.map(item => {
             if (!item?.products) return null;
+            // Sort logs and comments by creation date
+            const sortedLogs = (item.assembly_logs || []).sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
+            const sortedComments = (item.assembly_comments || []).sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
+
             return {
               id: item.id,
               name: item.products.name || '[ไม่มีชื่อสินค้า]',
@@ -101,8 +110,10 @@ export default function AssemblyMain() {
               quantity: item.quantity,
               status: item.status,
               picked_component_ids: item.picked_component_ids || [],
-              manual_components: item.manual_components || [], // <-- เพิ่มบรรทัดนี้
-              components: componentsMap.get(item.products.id) || []
+              manual_components: item.manual_components || [],
+              components: componentsMap.get(item.products.id) || [],
+              assembly_logs: sortedLogs, // Add sorted logs
+              assembly_comments: sortedComments // Add sorted comments
             }
           }).filter(Boolean);
 
