@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ArrowLeft, Save, Loader2, Trash2, Receipt, Truck, Printer, PackagePlus, DollarSign, Calculator, History, Sparkles } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import CustomerSelector from './CustomerSelector';
@@ -28,6 +28,7 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
 
   const round2 = (num) => Math.round((num + Number.EPSILON) * 100) / 100;
 
+  // Initial State Setup
   const [formData, setFormData] = useState(() => {
     if (initialData) {
       return {
@@ -76,6 +77,64 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
       notes: ''
     };
   });
+
+  // --- FIX: Auto-Refresh Data on Mount (แก้ปัญหาข้อมูลเก่า) ---
+  useEffect(() => {
+    // ทำงานเฉพาะตอนแก้ไข (มี ID) เพื่อดึงข้อมูลล่าสุดจาก DB เสมอ
+    if (initialData?.id) {
+      const fetchFreshData = async () => {
+        const { data, error } = await supabase
+          .from('orders')
+          .select(`
+            *,
+            order_items(*),
+            order_payments(*),
+            order_updates(*),
+            order_assignees(user_id, job_role, user:user_id(first_name, last_name, avatar_url))
+          `)
+          .eq('id', initialData.id)
+          .single();
+
+        if (data && !error) {
+          setFormData(prev => ({
+            ...prev,
+            // อัปเดตข้อมูลสถานะและลูกค้าล่าสุด
+            status: data.status,
+            customer: data.customer_cache,
+            
+            // อัปเดตรายการต่างๆ ให้เป็นปัจจุบัน
+            items: data.order_items || [],
+            assignees: data.order_assignees || [],
+            payments: (data.order_payments || []).map(p => ({
+              ...p,
+              date: p.payment_date ? p.payment_date.split('T')[0] : p.date,
+              method: p.payment_method || 'Transfer',
+              fee_percent: p.fee_percent || 0,
+              fee_amount: p.fee_amount || 0
+            })),
+            
+            // หัวใจสำคัญ: อัปเดต Timeline ให้เป็นของล่าสุด เพื่อไม่ให้ข้อมูลหายเวลาบันทึก
+            updates: (data.order_updates || []).map(u => ({
+              ...u,
+              images: (u.images || []).map(url => ({ url, file: null }))
+            })),
+            
+            // อัปเดตข้อมูลการเงินล่าสุด
+            shipping_cost: data.shipping_cost || 0,
+            discount: data.discount || 0,
+            vat_type: data.vat_type || 'no_vat',
+            show_tax_id: data.show_tax_id || false,
+            invoice_number: data.invoice_number || '',
+            notes: data.notes || '',
+            order_date: data.order_date ? data.order_date.split('T')[0] : prev.order_date,
+            completed_at: data.completed_at ? data.completed_at.split('T')[0] : prev.completed_at
+          }));
+        }
+      };
+      fetchFreshData();
+    }
+  }, [initialData?.id]);
+  // -----------------------------------------------------------
 
   const subtotal = formData.items.reduce((sum, item) => sum + (item.sell_price * item.quantity), 0);
   const discountVal = parseFloat(formData.discount) || 0;
@@ -225,6 +284,10 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
 
       if (orderId) {
         await supabase.from('orders').update(orderPayload).eq('id', orderId);
+        
+        // ลบข้อมูลเก่าทั้งหมด (Strategy: Delete & Re-insert)
+        // ข้อดี: ง่ายและจัดการลำดับได้ดี
+        // ข้อเสีย: ถ้าข้อมูลใน formData ไม่อัปเดต ข้อมูลจริงจะหาย (เราแก้ด้วย useEffect fetchFreshData ข้างบนแล้ว)
         await supabase.from('order_items').delete().eq('order_id', orderId);
         await supabase.from('order_payments').delete().eq('order_id', orderId);
         await supabase.from('order_updates').delete().eq('order_id', orderId);
