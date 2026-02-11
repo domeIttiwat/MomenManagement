@@ -101,8 +101,8 @@ const ServiceMain = () => {
                  <option value="All">ทุกสถานะ</option>
                  <option value="Waiting">รอทำ</option>
                  <option value="In Progress">ส่งทำ</option>
-                 <option value="Done">ทำเสร็จแล้ว</option>
                  <option value="Tested">ทดสอบแล้ว</option>
+                 <option value="Delivered">รอส่ง</option>
                  <option value="Completed">เรียบร้อย</option>
                  <option value="Cancelled">ยกเลิก</option>
                </select>
