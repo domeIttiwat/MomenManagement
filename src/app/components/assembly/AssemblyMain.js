@@ -1,244 +1,202 @@
-'use client';
-
-import { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
+import { DragDropContext } from '@hello-pangea/dnd';
 import { supabase } from '@/lib/supabase';
-import { Search, ArrowUpDown, Factory, LoaderCircle, AlertTriangle } from 'lucide-react';
-import AssemblyOrderListItem from './AssemblyOrderListItem';
+import { RefreshCw, ArrowLeft, KanbanSquare, Zap } from 'lucide-react';
+import IncomingJobs from './IncomingJobs';
 import AssemblyBoard from './AssemblyBoard';
+// ❌ AssemblyJobDetail ถูกเอาออกแล้ว
+import AssemblyAddPartModal from './AssemblyAddPartModal';
 
-export default function AssemblyMain() {
-  const [orders, setOrders] = useState([]);
+const AssemblyMain = () => {
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [sortOrder, setSortOrder] = useState('dueDate_asc');
-  const [activeBoardOrder, setActiveBoardOrder] = useState(null);
+  const [viewMode, setViewMode] = useState('list');
   
-  const fetchAssemblyOrders = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      
-      // Updated select query to fetch logs and comments
-      const { data: orderData, error: ordersError } = await supabase
-        .from('orders')
-        .select(`
-          id, 
-          completed_at, 
-          status,
-          customers(first_name, last_name),
-          order_items(*, 
-            products(id, name, sku),
-            assembly_logs(*),
-            assembly_comments(*)
-          )
-        `)
-        .in('status', ['Picking', 'Assembling', 'Testing']);
-
-      if (ordersError) throw ordersError;
-
-      if (!orderData || orderData.length === 0) {
-        setOrders([]);
-        setLoading(false);
-        return;
-      }
-
-      const productIds = [...new Set(
-        orderData
-          .flatMap(order => order.order_items || [])
-          .map(item => item.products?.id)
-          .filter(Boolean)
-      )];
-
-      let componentsMap = new Map();
-
-        if (productIds.length > 0) {
-            const { data: bomData, error: bomError } = await supabase
-                .from('product_bundles')
-                .select(`parent_product_id, quantity, components:products!child_product_id(id, name, sku)`)
-                .in('parent_product_id', productIds);
-
-            if (bomError) throw new Error(`Failed to fetch BOM: ${bomError.message}`);
-
-            const aggregatedComponents = new Map();
-
-            if (bomData) {
-                bomData.forEach(bomItem => {
-                    if (!bomItem?.components) return;
-                    
-                    const parentId = bomItem.parent_product_id;
-                    const component = bomItem.components;
-                    const quantity = bomItem.quantity;
-
-                    if (!aggregatedComponents.has(parentId)) {
-                        aggregatedComponents.set(parentId, new Map());
-                    }
-
-                    const parentComponentMap = aggregatedComponents.get(parentId);
-
-                    if (parentComponentMap.has(component.id)) {
-                        parentComponentMap.get(component.id).quantity += quantity;
-                    } else {
-                        parentComponentMap.set(component.id, {
-                            id: component.id,
-                            name: component.name,
-                            sku: component.sku,
-                            quantity: quantity,
-                        });
-                    }
-                });
-            }
-            
-            for (const [parentId, innerMap] of aggregatedComponents.entries()) {
-                componentsMap.set(parentId, Array.from(innerMap.values()));
-            }
-        }
-
-      const processedOrders = orderData.map(order => {
-          if (!order?.order_items) return null;
-
-          const processedItems = order.order_items.map(item => {
-            if (!item?.products) return null;
-            // Sort logs and comments by creation date
-            const sortedLogs = (item.assembly_logs || []).sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
-            const sortedComments = (item.assembly_comments || []).sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
-
-            return {
-              id: item.id,
-              name: item.products.name || '[ไม่มีชื่อสินค้า]',
-              sku: item.products.sku || 'N/A',
-              quantity: item.quantity,
-              status: item.status,
-              picked_component_ids: item.picked_component_ids || [],
-              manual_components: item.manual_components || [],
-              components: componentsMap.get(item.products.id) || [],
-              assembly_logs: sortedLogs, // Add sorted logs
-              assembly_comments: sortedComments // Add sorted comments
-            }
-          }).filter(Boolean);
-
-          if (processedItems.length === 0) return null;
-
-          return {
-              id: order.id,
-              orderId: `ORD-${String(order.id).padStart(6, '0')}`,
-              customerName: `${order.customers?.first_name || ''} ${order.customers?.last_name || ''}`.trim() || '(ไม่มีชื่อลูกค้า)',
-              dueDate: order.completed_at,
-              status: order.status,
-              itemCount: processedItems.reduce((acc, currentItem) => acc + currentItem.quantity, 0),
-              items: processedItems,
-              vehicleName: processedItems[0]?.name || 'สินค้าประกอบ',
-          };
-      }).filter(Boolean);
-
-      setOrders(processedOrders);
-    } catch (err) {
-      console.error('Data Fetch Error:', err);
-      setError('ไม่สามารถโหลดข้อมูลได้: ' + (err.message || 'เกิดข้อผิดพลาดที่ไม่สามารถระบุสาเหตุได้'));
-    } finally {
-      setLoading(false);
-    }
-  };
+  const [activeOrders, setActiveOrders] = useState([]);
+  const [currentOrder, setCurrentOrder] = useState(null); 
+  const [orderJobs, setOrderJobs] = useState([]); 
+  
+  // State สำหรับ Modal เพิ่มอะไหล่
+  const [addPartJob, setAddPartJob] = useState(null);
+  const [targetProductId, setTargetProductId] = useState(null);
 
   useEffect(() => {
-    fetchAssemblyOrders();
-
-    const handleRefresh = () => fetchAssemblyOrders();
-    window.addEventListener('refreshOrders', handleRefresh);
-    return () => window.removeEventListener('refreshOrders', handleRefresh);
-
+    fetchData();
   }, []);
 
-  const handleSelectOrderFromList = (order) => setActiveBoardOrder(order);
-  const handleBackFromBoard = () => {
-      setActiveBoardOrder(null);
-      window.dispatchEvent(new Event('refreshOrders'));
+  // ค้นหา Product ID เมื่อเปิด Modal เพิ่มอะไหล่
+  useEffect(() => {
+    if (!addPartJob) {
+        setTargetProductId(null);
+        return;
+    }
+
+    const fetchProductId = async () => {
+        if (addPartJob.ref_type === 'order') {
+            const { data } = await supabase.from('order_items')
+                .select('product_id')
+                .eq('order_id', addPartJob.ref_id)
+                .ilike('product_name', addPartJob.job_name)
+                .limit(1)
+                .maybeSingle();
+            
+            if (data?.product_id) setTargetProductId(data.product_id);
+        }
+    };
+
+    fetchProductId();
+  }, [addPartJob]);
+
+  const fetchData = async () => {
+    setLoading(true);
+    try {
+      const { data: orders } = await supabase.from('orders')
+        .select('id, order_number, customer_cache, status, order_date, created_at, grand_total, order_items(*)')
+        .eq('status', 'Assembling')
+        .order('created_at', { ascending: false });
+
+      const { data: services } = await supabase.from('services')
+        .select('id, service_number, customer_cache, status, received_date, created_at, grand_total, service_items(*)')
+        .eq('status', 'In Progress')
+        .order('created_at', { ascending: false });
+
+      const combined = [
+        ...(orders || []).map(o => ({ type: 'order', data: o, items: o.order_items })),
+        ...(services || []).map(s => ({ type: 'service', data: s, items: s.service_items }))
+      ].sort((a, b) => new Date(b.data.created_at) - new Date(a.data.created_at));
+
+      setActiveOrders(combined);
+    } catch (error) { console.error(error); } finally { setLoading(false); }
   };
 
-  const filteredForList = useMemo(() => {
-      return orders
-        .filter(order =>
-            order.orderId.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            order.customerName.toLowerCase().includes(searchTerm.toLowerCase())
-        )
-        .sort((a, b) => {
-            if (!a.dueDate) return 1;
-            if (!b.dueDate) return -1;
-            const dateA = new Date(a.dueDate);
-            const dateB = new Date(b.dueDate);
+  const handleEnterBoard = async (workOrder) => {
+    setLoading(true);
+    try {
+      const { data: existingJobs } = await supabase.from('assembly_jobs').select('*').eq('ref_type', workOrder.type).eq('ref_id', workOrder.data.id).neq('stage', 'archived');
+      let jobsToShow = existingJobs || [];
 
-            switch (sortOrder) {
-            case 'dueDate_asc': return dateA - dateB;
-            case 'dueDate_desc': return dateB - dateA;
-            case 'customer_asc': return a.customerName.localeCompare(b.customerName, 'th');
-            case 'customer_desc': return b.customerName.localeCompare(a.customerName, 'th');
-            default: return 0;
-            }
-        });
-  }, [orders, searchTerm, sortOrder]);
+      if (jobsToShow.length === 0 && workOrder.items?.length > 0) {
+        const newJobsPayload = workOrder.items.map((item, idx) => ({
+          ref_type: workOrder.type,
+          ref_id: workOrder.data.id,
+          stage: 'preparing',
+          job_name: item.product_name || item.description || 'รายการไม่ระบุชื่อ',
+          checklists: [], 
+          is_rework: false,
+          started_at: new Date().toISOString()
+        }));
+        const { data: createdJobs } = await supabase.from('assembly_jobs').insert(newJobsPayload).select();
+        if (createdJobs) jobsToShow = createdJobs;
+      }
+      setOrderJobs(jobsToShow);
+      setCurrentOrder(workOrder);
+      setViewMode('board');
+    } catch (error) { alert('Error: ' + error.message); } finally { setLoading(false); }
+  };
 
-  if (loading) {
-    return <div className="flex justify-center items-center h-screen bg-slate-50"><LoaderCircle className="animate-spin h-10 w-10 text-blue-500" /></div>;
-  }
+  const updateJobStage = async (jobId, newStage) => {
+    setOrderJobs(prev => prev.map(j => j.id === jobId ? { ...j, stage: newStage } : j));
+    const updatePayload = { stage: newStage };
+    if (newStage === 'completed') updatePayload.completed_at = new Date().toISOString();
+    await supabase.from('assembly_jobs').update(updatePayload).eq('id', jobId);
+  };
 
-  if (error) {
-    return <div className="flex flex-col items-center justify-center h-screen bg-slate-50 text-red-600 p-4">
-        <div className="text-center bg-red-50 border border-red-200 p-6 rounded-lg">
-            <AlertTriangle className="mx-auto h-12 w-12 text-red-500" />
-            <h3 className="mt-2 text-lg font-semibold">เกิดข้อผิดพลาด</h3>
-            <p className="mt-1 text-sm text-red-700 max-w-md">{error}</p>
-        </div>
-    </div>
-  }
-  
-  if (activeBoardOrder) {
-      return <AssemblyBoard order={activeBoardOrder} onBack={handleBackFromBoard} />;
-  }
+  const handleDragEnd = async (result) => {
+    const { destination, draggableId } = result;
+    if (!destination) return;
+    updateJobStage(parseInt(draggableId), destination.droppableId);
+  };
+
+  const handleManualMove = (jobId, newStage) => updateJobStage(jobId, newStage);
+
+  const handleJobUpdate = (updatedJob) => {
+    setOrderJobs(prev => prev.map(j => j.id === updatedJob.id ? updatedJob : j));
+    if (addPartJob?.id === updatedJob.id) setAddPartJob(updatedJob);
+  };
+
+  // ✅ Add Part & Close Modal immediately
+  const handleAddPartToJob = async (part) => {
+      if (!addPartJob) return;
+      const newItem = {
+        id: `part-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        name: part.name || part.description,
+        quantity: part.quantity || 1,
+        is_checked: false,
+        is_assembled: false, // Default
+        type: part.type === 'custom' ? 'custom' : 'part', 
+        ref_id: part.id || part.ref_id || null 
+      };
+      const newChecklists = [...(addPartJob.checklists || []), newItem];
+      
+      const updatedJob = { ...addPartJob, checklists: newChecklists };
+      handleJobUpdate(updatedJob); 
+      await supabase.from('assembly_jobs').update({ checklists: newChecklists }).eq('id', addPartJob.id);
+
+      // ✅ ปิด Modal ทันที
+      setAddPartJob(null);
+  };
 
   return (
-    <div className="bg-slate-50 min-h-screen">
-        <div className="max-w-screen-2xl mx-auto p-4 md:p-6 flex flex-col h-[calc(100vh-1rem)]">
-            <header className="pb-6">
-                 <div className="flex items-center gap-3">
-                    <div className='p-3 rounded-xl border bg-blue-100 border-blue-200'><Factory className='h-6 w-6 text-blue-600' /></div>
-                    <h1 className="text-3xl font-bold text-slate-800 tracking-tight">คิวงานประกอบ</h1>
-                </div>
-                <p className="text-slate-500 mt-2 ml-1">มี {filteredForList.length} รายการในคิว</p>
-            </header>
+    <div className="h-screen flex flex-col overflow-hidden font-sans text-gray-200" style={{ backgroundColor: '#1d2125' }}>
+      {/* Header */}
+      <div className="relative z-20 bg-[#161a1d] border-b border-white/10 px-4 h-14 shrink-0 flex items-center justify-between shadow-md">
+         <div className="flex items-center gap-3">
+             {viewMode === 'board' && (
+                <button onClick={() => setViewMode('list')} className="p-1.5 hover:bg-white/20 rounded text-gray-400 hover:text-white transition-colors">
+                  <ArrowLeft size={20}/>
+                </button>
+             )}
+             <div>
+                <h1 className="font-bold text-lg text-white flex items-center gap-2">
+                    {viewMode === 'list' ? <><Zap size={18} className="text-yellow-400 fill-yellow-400"/> Workshop Queue</> : <><KanbanSquare size={18} className="text-blue-400"/> Assembly Board</>}
+                </h1>
+                {viewMode === 'board' && currentOrder && (
+                  <div className="hidden md:flex items-center gap-2 text-xs text-gray-400">
+                     <span className="font-mono bg-white/10 px-1.5 rounded text-gray-300">{currentOrder.type === 'order' ? currentOrder.data.order_number : currentOrder.data.service_number}</span>
+                     <span>|</span>
+                     <span>{currentOrder.data.customer_cache?.first_name}</span>
+                  </div>
+                )}
+             </div>
+         </div>
+         <div className="flex items-center gap-3">
+            <button onClick={() => { fetchData(); if(currentOrder && viewMode === 'board') handleEnterBoard(currentOrder); }} className="p-1.5 hover:bg-white/20 rounded text-gray-400 hover:text-white transition-colors">
+               <RefreshCw size={18} className={loading ? 'animate-spin' : ''}/>
+            </button>
+         </div>
+      </div>
 
-            <div className="flex flex-col gap-y-6 animate-in fade-in duration-300 flex-1 overflow-hidden">
-                <div className="bg-white p-3 rounded-xl shadow-sm border border-slate-200 flex flex-col md:flex-row gap-3 sticky top-0 z-10">
-                    <div className="relative flex-grow">
-                        <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
-                        <input type="text" placeholder="ค้นหาด้วยเลขที่ออเดอร์, ชื่อลูกค้า..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-11 pr-4 py-2.5 bg-slate-50 border-transparent rounded-lg focus:ring-2 focus:ring-blue-500 focus:bg-white transition" />
-                    </div>
-                    <div className="relative w-full md:w-56">
-                        <select value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} className="w-full appearance-none bg-slate-50 pl-11 pr-4 py-2.5 border-transparent rounded-lg focus:ring-2 focus:ring-blue-500 focus:bg-white transition font-medium text-slate-600">
-                            <option value="dueDate_asc">กำหนดส่ง ใกล้-ไกล</option>
-                            <option value="dueDate_desc">กำหนดส่ง ไกล-ใกล้</option>
-                            <option value="customer_asc">ชื่อลูกค้า ก-ฮ</option>
-                            <option value="customer_desc">ชื่อลูกค้า ฮ-ก</option>
-                        </select>
-                        <ArrowUpDown size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"/>
-                    </div>
-                </div>
-                <main className="flex-1 overflow-y-auto">
-                    <div className="space-y-4 pb-6 pr-2">
-                        {filteredForList.length > 0 ? (
-                            filteredForList.map(order => (
-                                <AssemblyOrderListItem key={order.id} order={order} onSelect={() => handleSelectOrderFromList(order)} />
-                            ))
-                        ) : (
-                            <div className="text-center py-20 bg-white rounded-lg border border-slate-200 shadow-sm">
-                                <Factory className="mx-auto h-12 w-12 text-slate-400" />
-                                <h3 className="mt-4 text-lg font-semibold text-slate-700">ไม่พบรายการที่ต้องประกอบ</h3>
-                                <p className="mt-1 text-sm text-slate-500">ไม่มีออเดอร์ในสถานะ 'Picking', 'Assembling', หรือ 'Testing'</p>
-                            </div>
-                        )}
-                    </div>
-                </main>
-            </div>
-        </div>
+      {/* Content */}
+      <div className="flex-1 overflow-hidden relative z-10">
+         {viewMode === 'list' ? (
+             <div className="h-full overflow-y-auto p-4 md:p-8 scrollbar-thin scrollbar-thumb-white/20">
+                <div className="max-w-5xl mx-auto"><IncomingJobs orders={activeOrders} onEnterBoard={handleEnterBoard} /></div>
+             </div>
+         ) : (
+             <div className="h-full w-full overflow-x-auto overflow-y-hidden p-4">
+                <DragDropContext onDragEnd={handleDragEnd}>
+                   <AssemblyBoard 
+                        jobs={orderJobs} 
+                        onJobClick={() => {}} // ❌ ไม่ทำอะไรเมื่อคลิกการ์ด
+                        onManualMove={handleManualMove} 
+                        onJobUpdate={handleJobUpdate}
+                        onAddPartRequest={(job) => setAddPartJob(job)} 
+                   />
+                </DragDropContext>
+             </div>
+         )}
+      </div>
+
+      {/* Modal เพิ่มอะไหล่ */}
+      {addPartJob && (
+        <AssemblyAddPartModal 
+            productId={targetProductId} 
+            existingItems={addPartJob.checklists}
+            onClose={() => setAddPartJob(null)} 
+            onAdd={handleAddPartToJob} 
+        />
+      )}
     </div>
   );
-}
+};
+
+export default AssemblyMain;
