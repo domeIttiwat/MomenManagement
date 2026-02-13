@@ -1,30 +1,28 @@
 import React, { useState, useEffect } from 'react';
-import { DragDropContext } from '@hello-pangea/dnd';
 import { supabase } from '@/lib/supabase';
-import { RefreshCw, ArrowLeft, KanbanSquare, Zap, LayoutGrid, List as ListIcon } from 'lucide-react';
+import { RefreshCw, ArrowLeft, KanbanSquare, Zap, LayoutList } from 'lucide-react';
 import IncomingJobs from './IncomingJobs';
-import AssemblyBoard from './AssemblyBoard';
+import AssemblyTabs from './AssemblyTabs'; // ✅ ใช้ Tabs แทน Board
+import AssemblyStrip from './AssemblyStrip'; // ✅ ใช้ Strip แทน Card
 import AssemblyAddPartModal from './AssemblyAddPartModal';
 
 const AssemblyMain = () => {
   const [loading, setLoading] = useState(true);
-  const [viewMode, setViewMode] = useState('list'); // 'list' | 'board'
-  const [cardViewMode, setCardViewMode] = useState('card'); 
+  const [viewMode, setViewMode] = useState('list'); // 'list' (Queue) | 'workspace' (Tabs)
   
   const [activeOrders, setActiveOrders] = useState([]);
   const [currentOrder, setCurrentOrder] = useState(null); 
   const [orderJobs, setOrderJobs] = useState([]); 
-  const [selectedJob, setSelectedJob] = useState(null);
-  const [currentUser, setCurrentUser] = useState(null);
+  const [activeTab, setActiveTab] = useState('preparing'); // ✅ State สำหรับเลือก Tab
   
+  // State Modal
   const [addPartJob, setAddPartJob] = useState(null);
   const [targetProductId, setTargetProductId] = useState(null);
+  const [currentUser, setCurrentUser] = useState(null);
 
   useEffect(() => {
     fetchData();
     fetchUser();
-    const savedMode = localStorage.getItem('assembly_card_view_mode');
-    if (savedMode) setCardViewMode(savedMode);
   }, []);
 
   const fetchUser = async () => {
@@ -35,11 +33,7 @@ const AssemblyMain = () => {
     }
   };
 
-  const toggleCardView = (mode) => {
-      setCardViewMode(mode);
-      localStorage.setItem('assembly_card_view_mode', mode);
-  };
-
+  // Find Product ID for Modal
   useEffect(() => {
     if (!addPartJob) { setTargetProductId(null); return; }
     const fetchProductId = async () => {
@@ -70,49 +64,20 @@ const AssemblyMain = () => {
         .eq('status', 'In Progress')
         .order('created_at', { ascending: false });
 
-      // Fetch stats for all
-      const allOrderIds = orders?.map(o => o.id) || [];
-      const allServiceIds = services?.map(s => s.id) || [];
-      
-      const { data: allJobs } = await supabase.from('assembly_jobs')
-        .select('ref_id, ref_type, stage, assignees, comments, qc_logs')
-        .neq('stage', 'archived')
-        .in('ref_id', [...allOrderIds, ...allServiceIds]);
-
+      // Calculate Stats Logic (Simplified for List View)
       const getStats = (type, id) => {
-          const relatedJobs = allJobs?.filter(j => j.ref_type === type && j.ref_id === id) || [];
-          if (relatedJobs.length === 0) return null;
-
-          const total = relatedJobs.length;
-          const stages = { preparing: 0, assembling: 0, testing: 0, completed: 0 };
-          const assigneesMap = new Map();
-          let commentCount = 0;
-          let rejectCount = 0;
-
-          relatedJobs.forEach(j => {
-              stages[j.stage] = (stages[j.stage] || 0) + 1;
-              if (j.assignees) j.assignees.forEach(a => { if (a.user) assigneesMap.set(a.user.id, a.user); });
-              if (j.comments) commentCount += j.comments.length;
-              if (j.qc_logs) rejectCount += j.qc_logs.length;
-          });
-
-          const score = (stages.preparing * 1) + (stages.assembling * 2) + (stages.testing * 3) + (stages.completed * 4);
-          const maxScore = total * 4;
-          const percentage = total === 0 ? 0 : Math.round((score / maxScore) * 100);
-
-          return { total, stages, percentage, assignees: Array.from(assigneesMap.values()), commentCount, rejectCount };
+          return null; // Placeholder
       };
 
       const combined = [
-        ...(orders || []).map(o => ({ type: 'order', data: o, items: o.order_items, stats: getStats('order', o.id) })),
-        ...(services || []).map(s => ({ type: 'service', data: s, items: s.service_items, stats: getStats('service', s.id) }))
+        ...(orders || []).map(o => ({ type: 'order', data: o, items: o.order_items })),
+        ...(services || []).map(s => ({ type: 'service', data: s, items: s.service_items }))
       ].sort((a, b) => new Date(b.data.created_at) - new Date(a.data.created_at));
 
       setActiveOrders(combined);
     } catch (error) { console.error(error); } finally { setLoading(false); }
   };
 
-  // ✅ FIX: คืนค่า Array เสมอ ไม่คืน null
   const createDefaultJobs = async (workOrder) => {
       if (workOrder.items?.length > 0) {
         const newJobsPayload = workOrder.items.map((item, idx) => ({
@@ -126,7 +91,7 @@ const AssemblyMain = () => {
           created_by: currentUser ? { id: currentUser.id, name: currentUser.first_name || 'System', avatar_url: currentUser.avatar_url } : { name: 'System' }
         }));
         const { data: createdJobs } = await supabase.from('assembly_jobs').insert(newJobsPayload).select();
-        return createdJobs || []; // ✅ Force array
+        return createdJobs || [];
       }
       return [];
   };
@@ -134,51 +99,37 @@ const AssemblyMain = () => {
   const handleEnterBoard = async (workOrder) => {
     setLoading(true);
     try {
-      const { data: existingJobs } = await supabase.from('assembly_jobs').select('*').eq('ref_type', workOrder.type).eq('ref_id', workOrder.data.id).neq('stage', 'archived');
+      const { data: existingJobs } = await supabase.from('assembly_jobs')
+        .select('*')
+        .eq('ref_type', workOrder.type)
+        .eq('ref_id', workOrder.data.id)
+        .neq('stage', 'archived')
+        .order('created_at');
+        
       let jobsToShow = existingJobs || [];
 
       if (jobsToShow.length === 0) {
         jobsToShow = await createDefaultJobs(workOrder);
       }
-
-      setOrderJobs(jobsToShow || []); // ✅ ป้องกัน null
+      
+      setOrderJobs(jobsToShow);
       setCurrentOrder(workOrder);
-      setViewMode('board');
+      setViewMode('workspace');
+      setActiveTab('preparing'); // Default tab
     } catch (error) { alert('Error: ' + error.message); } finally { setLoading(false); }
   };
 
-  // ✅ Reset Board & Regenerate Default Cards
+  // ✅ ระบบ Reset (ล้างค่าแล้วสร้างใหม่)
   const handleResetBoard = async (workOrder) => {
       try {
-          // 1. Delete all jobs
           await supabase.from('assembly_jobs').delete().eq('ref_type', workOrder.type).eq('ref_id', workOrder.data.id);
-          
-          // 2. Regenerate immediately
           await createDefaultJobs(workOrder);
-          
-          // 3. Refresh Data
-          fetchData();
+          fetchData(); // Refresh list stats
       } catch (error) {
           console.error("Reset failed:", error);
           alert("Reset failed: " + error.message);
       }
   };
-
-  const updateJobStage = async (jobId, newStage) => {
-    setOrderJobs(prev => prev.map(j => j.id === jobId ? { ...j, stage: newStage } : j));
-    const updatePayload = { stage: newStage };
-    if (newStage === 'completed') updatePayload.completed_at = new Date().toISOString();
-    await supabase.from('assembly_jobs').update(updatePayload).eq('id', jobId);
-  };
-
-  const handleDragEnd = async (result) => {
-    const { destination, draggableId } = result;
-    if (!destination) return;
-    const realJobId = parseInt(draggableId.toString().split('::')[0]);
-    updateJobStage(realJobId, destination.droppableId);
-  };
-
-  const handleManualMove = (jobId, newStage) => updateJobStage(jobId, newStage);
 
   const handleJobUpdate = (updatedJob) => {
     setOrderJobs(prev => prev.map(j => j.id === updatedJob.id ? updatedJob : j));
@@ -199,24 +150,8 @@ const AssemblyMain = () => {
       const updatedJob = { ...addPartJob, checklists: newChecklists };
       handleJobUpdate(updatedJob); 
       await supabase.from('assembly_jobs').update({ checklists: newChecklists }).eq('id', addPartJob.id);
-      setAddPartJob(null);
-  };
-
-  const handleAddCard = async (stage, jobName) => {
-      if (!currentOrder) return;
-      const newJobPayload = {
-          ref_type: currentOrder.type,
-          ref_id: currentOrder.data.id,
-          stage: stage,
-          job_name: jobName,
-          checklists: [],
-          comments: [],
-          is_rework: false,
-          started_at: new Date().toISOString(),
-          created_by: currentUser ? { id: currentUser.id, name: currentUser.first_name || 'User', avatar_url: currentUser.avatar_url } : { name: 'Unknown' }
-      };
-      const { data, error } = await supabase.from('assembly_jobs').insert([newJobPayload]).select().single();
-      if (data && !error) setOrderJobs(prev => [data, ...prev]);
+      
+      // ไม่ปิด Modal เพื่อให้แอดต่อได้
   };
 
   const handleAddComment = async (job, text) => {
@@ -235,26 +170,45 @@ const AssemblyMain = () => {
       await supabase.from('assembly_jobs').update({ comments: newComments }).eq('id', job.id);
   };
 
-  const handleDeleteCard = async (jobId) => {
+  const handleDeleteJob = async (jobId) => {
       setOrderJobs(prev => prev.filter(j => j.id !== jobId));
       await supabase.from('assembly_jobs').delete().eq('id', jobId);
   };
+
+  // ✅ Logic การกรองงานตามแท็บ (Parallel View)
+  const getFilteredJobs = () => {
+      if (activeTab === 'preparing') {
+          return orderJobs.filter(j => j.stage === 'preparing' || j.stage === 'assembling');
+      }
+      if (activeTab === 'assembling') {
+          return orderJobs.filter(j => {
+             const isRelevant = j.stage === 'preparing' || j.stage === 'assembling';
+             if (!isRelevant) return false;
+             // ซ่อนงานเปล่าที่ยังไม่เตรียมของจากแท็บประกอบ
+             if (j.stage === 'preparing' && (!j.checklists || j.checklists.length === 0)) return false;
+             return true;
+          });
+      }
+      return orderJobs.filter(j => j.stage === activeTab);
+  };
+
+  const filteredJobs = getFilteredJobs();
 
   return (
     <div className="h-screen flex flex-col overflow-hidden font-sans text-gray-200" style={{ backgroundColor: '#1d2125' }}>
       {/* Header */}
       <div className="relative z-20 bg-[#161a1d] border-b border-white/10 px-4 h-14 shrink-0 flex items-center justify-between shadow-md">
          <div className="flex items-center gap-3">
-             {viewMode === 'board' && (
+             {viewMode === 'workspace' && (
                 <button onClick={() => setViewMode('list')} className="p-1.5 hover:bg-white/20 rounded text-gray-400 hover:text-white transition-colors">
                   <ArrowLeft size={20}/>
                 </button>
              )}
              <div>
                 <h1 className="font-bold text-lg text-white flex items-center gap-2">
-                    {viewMode === 'list' ? <><Zap size={18} className="text-yellow-400 fill-yellow-400"/> Workshop Queue</> : <><KanbanSquare size={18} className="text-blue-400"/> Assembly Board</>}
+                    {viewMode === 'list' ? <><Zap size={18} className="text-yellow-400 fill-yellow-400"/> Workshop Queue</> : <><KanbanSquare size={18} className="text-blue-400"/> Assembly Workspace</>}
                 </h1>
-                {viewMode === 'board' && currentOrder && (
+                {viewMode === 'workspace' && currentOrder && (
                   <div className="hidden md:flex items-center gap-2 text-xs text-gray-400">
                      <span className="font-mono bg-white/10 px-1.5 rounded text-gray-300">{currentOrder.type === 'order' ? currentOrder.data.order_number : currentOrder.data.service_number}</span>
                      <span>|</span>
@@ -263,49 +217,68 @@ const AssemblyMain = () => {
                 )}
              </div>
          </div>
-
          <div className="flex items-center gap-3">
-            {viewMode === 'board' && (
-                <div className="flex bg-[#22272b] p-0.5 rounded-lg border border-white/10 mr-2">
-                    <button onClick={() => toggleCardView('card')} className={`p-1.5 rounded-md transition-all ${cardViewMode === 'card' ? 'bg-blue-600 text-white shadow' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}><LayoutGrid size={16}/></button>
-                    <button onClick={() => toggleCardView('list')} className={`p-1.5 rounded-md transition-all ${cardViewMode === 'list' ? 'bg-blue-600 text-white shadow' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}><ListIcon size={16}/></button>
-                </div>
-            )}
-            <button onClick={() => { fetchData(); if(currentOrder && viewMode === 'board') handleEnterBoard(currentOrder); }} className="p-1.5 hover:bg-white/20 rounded text-gray-400 hover:text-white transition-colors">
+            <button onClick={() => { fetchData(); if(currentOrder && viewMode === 'workspace') handleEnterBoard(currentOrder); }} className="p-1.5 hover:bg-white/20 rounded text-gray-400 hover:text-white transition-colors">
                <RefreshCw size={18} className={loading ? 'animate-spin' : ''}/>
             </button>
-            <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-xs font-bold text-white cursor-pointer hover:bg-blue-500 shadow-sm border border-white/10 overflow-hidden" title={currentUser?.email}>
+            <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-xs font-bold text-white cursor-pointer hover:bg-blue-500 shadow-sm border border-white/10 overflow-hidden">
                 {currentUser?.avatar_url ? <img src={currentUser.avatar_url} className="w-full h-full object-cover"/> : (currentUser?.first_name?.[0] || 'U')}
             </div>
          </div>
       </div>
 
-      <div className="flex-1 overflow-hidden relative z-10">
+      <div className="flex-1 overflow-hidden relative z-10 flex flex-col">
          {viewMode === 'list' ? (
              <div className="h-full overflow-y-auto p-4 md:p-8 scrollbar-thin scrollbar-thumb-white/20">
                 <div className="max-w-5xl mx-auto"><IncomingJobs orders={activeOrders} onEnterBoard={handleEnterBoard} onReset={handleResetBoard} /></div>
              </div>
          ) : (
-             <div className="h-full w-full overflow-x-auto overflow-y-hidden p-4">
-                <DragDropContext onDragEnd={handleDragEnd}>
-                   <AssemblyBoard 
-                        jobs={orderJobs || []} // ✅ Pass safe array
-                        onJobClick={() => {}} 
-                        onManualMove={handleManualMove} 
-                        onJobUpdate={handleJobUpdate}
-                        onAddPartRequest={(job) => setAddPartJob(job)} 
-                        onAddCard={handleAddCard}
-                        onAddComment={handleAddComment}
-                        onDeleteCard={handleDeleteCard}
-                        currentUser={currentUser}
-                        cardViewMode={cardViewMode}
-                   />
-                </DragDropContext>
+             <div className="h-full flex flex-col max-w-6xl mx-auto w-full">
+                {/* ✅ 1. Tabs Navigation */}
+                <div className="px-4 pt-6 pb-2 shrink-0">
+                    <AssemblyTabs 
+                        activeTab={activeTab} 
+                        onTabChange={setActiveTab} 
+                        jobs={orderJobs} 
+                    />
+                </div>
+
+                {/* ✅ 2. Job Strips List */}
+                <div className="flex-1 overflow-y-auto px-4 pb-10 custom-scrollbar">
+                    <div className="space-y-3">
+                        {filteredJobs.length > 0 ? (
+                            filteredJobs.map(job => (
+                                <AssemblyStrip 
+                                    key={job.id} 
+                                    job={job} 
+                                    viewContext={activeTab}
+                                    currentUser={currentUser}
+                                    onUpdate={handleJobUpdate}
+                                    onAddPart={() => setAddPartJob(job)}
+                                    onAddComment={handleAddComment}
+                                    onDelete={handleDeleteJob}
+                                />
+                            ))
+                        ) : (
+                            <div className="text-center py-20 text-gray-500 border-2 border-dashed border-white/5 rounded-2xl mt-4">
+                                <LayoutList size={48} className="mx-auto mb-4 opacity-20"/>
+                                <p>ไม่มีงานในขั้นตอน {activeTab.toUpperCase()}</p>
+                            </div>
+                        )}
+                    </div>
+                </div>
              </div>
          )}
       </div>
 
-      {addPartJob && <AssemblyAddPartModal productId={targetProductId} existingItems={addPartJob.checklists} onClose={() => setAddPartJob(null)} onAdd={handleAddPartToJob} />}
+      {addPartJob && (
+        <AssemblyAddPartModal 
+            productId={targetProductId} 
+            existingItems={addPartJob.checklists}
+            onClose={() => setAddPartJob(null)} 
+            onAdd={handleAddPartToJob} 
+        />
+      )}
     </div>
   );
 };
