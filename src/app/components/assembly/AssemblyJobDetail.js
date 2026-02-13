@@ -236,5 +236,4 @@ const AssemblyJobDetail = ({ job, onClose, onUpdate }) => {
     document.body
   );
 };
-//send
 export default AssemblyJobDetail;

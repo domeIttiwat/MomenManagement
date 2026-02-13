@@ -289,5 +289,5 @@ const AssemblyAddPartModal = ({ productId, variantId, onClose, onAdd, existingIt
     document.body
   );
 };
-//send
+
 export default AssemblyAddPartModal;

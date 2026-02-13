@@ -307,5 +307,5 @@ const AssemblyStrip = ({ job, viewContext, onUpdate, onAddPart, onAddComment, on
     </div>
   );
 };
-//send
+
 export default AssemblyStrip;
