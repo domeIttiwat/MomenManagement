@@ -204,5 +204,4 @@ const AssemblyAddPartModal = ({ productId, onClose, onAdd, existingItems = [] })
   );
 };
 
-//ทดสอบ
 export default AssemblyAddPartModal;
