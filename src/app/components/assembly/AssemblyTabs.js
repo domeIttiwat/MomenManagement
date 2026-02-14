@@ -9,7 +9,6 @@ const tabs = [
 ];
 
 const AssemblyTabs = ({ activeTab, onTabChange, jobs }) => {
-  // Helper นับจำนวนงานในแต่ละ Tab
   const getCount = (tabId) => {
       if (tabId === 'preparing') return jobs.filter(j => j.stage === 'preparing' || j.stage === 'assembling').length;
       if (tabId === 'assembling') return jobs.filter(j => (j.stage === 'preparing' || j.stage === 'assembling') && (j.checklists && j.checklists.length > 0)).length;
@@ -21,7 +20,6 @@ const AssemblyTabs = ({ activeTab, onTabChange, jobs }) => {
         {tabs.map(tab => {
             const isActive = activeTab === tab.id;
             const count = getCount(tab.id);
-            
             return (
                 <button
                     key={tab.id}
@@ -36,11 +34,7 @@ const AssemblyTabs = ({ activeTab, onTabChange, jobs }) => {
                 >
                     <tab.icon size={16} className={isActive ? tab.color : 'text-gray-500'}/>
                     <span>{tab.label}</span>
-                    {count > 0 && (
-                        <span className={`ml-1 text-[10px] px-1.5 py-0.5 rounded-full ${isActive ? 'bg-white/10 text-white' : 'bg-black/30 text-gray-500'}`}>
-                            {count}
-                        </span>
-                    )}
+                    {count > 0 && <span className={`ml-1 text-[10px] px-1.5 py-0.5 rounded-full ${isActive ? 'bg-white/10 text-white' : 'bg-black/30 text-gray-500'}`}>{count}</span>}
                 </button>
             );
         })}
