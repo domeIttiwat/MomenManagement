@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Plus, Search, Wrench, Loader2, List as ListIcon, LayoutGrid, Filter, ArrowUpDown } from 'lucide-react';
+import { Plus, Search, Wrench, Loader2, List as ListIcon, LayoutGrid, Filter, ArrowUpDown, History } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import ServiceList from './ServiceList';
 import ServiceForm from './ServiceForm';
@@ -15,6 +15,7 @@ const ServiceMain = () => {
   
   const [filterStatus, setFilterStatus] = useState('All');
   const [sortOption, setSortOption] = useState('newest');
+  const [showHistory, setShowHistory] = useState(false);
 
   const fetchServices = async () => {
     setLoading(true);
@@ -38,6 +39,10 @@ const ServiceMain = () => {
   const filteredAndSorted = useMemo(() => {
     let result = [...services];
 
+    if (!showHistory) {
+      result = result.filter(item => item.status !== 'Completed' && item.status !== 'Cancelled');
+    }
+
     if (search) {
       const s = search.toLowerCase();
       result = result.filter(item => 
@@ -59,7 +64,7 @@ const ServiceMain = () => {
     }
 
     return result;
-  }, [services, search, filterStatus, sortOption]);
+  }, [services, search, filterStatus, sortOption, showHistory]);
 
   if (view === 'form') return <ServiceForm onCancel={() => setView('list')} onSuccess={() => { setView('list'); fetchServices(); }} initialData={selectedService} />;
   if (view === 'detail') return <ServiceDetail service={selectedService} onBack={() => setView('list')} onEdit={() => setView('form')} onDelete={() => handleDelete(selectedService.id)} />;
@@ -68,15 +73,21 @@ const ServiceMain = () => {
     <div className="max-w-[1600px] mx-auto space-y-6 animate-in fade-in duration-500 pb-20">
       
       {/* Header */}
-      <div className="flex flex-col md:flex-row justify-between items-center bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
-        <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-3">
-           <Wrench className="text-indigo-600"/> คิวซ่อม / งานบริการ
-        </h1>
-        <button 
-          onClick={() => { setSelectedService(null); setView('form'); }} 
-          className="bg-gray-900 hover:bg-black text-white px-5 py-2.5 rounded-xl font-medium shadow-lg flex items-center gap-2 transition-all active:scale-95"
+      <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-gradient-to-r from-orange-500 to-amber-500 p-6 rounded-2xl shadow-lg text-white">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight text-white flex items-center gap-3">
+            <Wrench size={32} className="text-orange-100"/> คิวซ่อม / งานบริการ
+          </h1>
+          <p className="text-orange-100 mt-1 font-medium ml-1">
+            รายการทั้งหมด ({filteredAndSorted.length})
+            {!showHistory && <span className="text-xs bg-white/20 px-2 py-0.5 rounded ml-2 text-white">ซ่อนรายการเสร็จสิ้น</span>}
+          </p>
+        </div>
+        <button
+          onClick={() => { setSelectedService(null); setView('form'); }}
+          className="bg-white text-orange-600 hover:bg-orange-50 px-6 py-3 rounded-xl font-bold shadow-md flex items-center gap-2 transition-all active:scale-95"
         >
-           <Plus size={20}/> เปิดใบงานใหม่
+          <Plus size={24}/> เปิดใบงานใหม่
         </button>
       </div>
 
@@ -92,6 +103,17 @@ const ServiceMain = () => {
          </div>
 
          <div className="flex flex-wrap items-center gap-2 px-2">
+            {/* Show History Toggle */}
+            <button
+              onClick={() => setShowHistory(!showHistory)}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all ${showHistory ? 'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200' : 'text-gray-500 hover:bg-gray-50'}`}
+              title="แสดงงานที่เสร็จสิ้น/ยกเลิก"
+            >
+              <History size={18}/> {showHistory ? 'แสดงทั้งหมด' : 'ดูประวัติเก่า'}
+            </button>
+
+            <div className="w-px h-8 bg-gray-200 mx-1 hidden md:block"/>
+
             {/* Status Filter */}
             <div className="relative">
                <select 
