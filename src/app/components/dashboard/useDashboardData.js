@@ -399,7 +399,7 @@ export const useDashboardData = (initialDateFilter = 'this_month') => {
              
              // Product
              const pName = i.product_name || i.name || 'Unknown Product';
-             if (!productStats[pName]) productStats[pName] = { name: pName, quantity: 0, total: 0, profit: 0 };
+             if (!productStats[pName]) productStats[pName] = { name: pName, quantity: 0, total: 0, profit: 0, category: catName };
              productStats[pName].quantity += qty;
              productStats[pName].total += totalItemSales;
              productStats[pName].profit += itemProfit;
@@ -415,6 +415,19 @@ export const useDashboardData = (initialDateFilter = 'this_month') => {
 
     const categoryData = Object.values(categoryStats).sort((a,b) => b.sales - a.sales);
     const topProducts = Object.values(productStats).filter(p=>p.total > 0).sort((a,b) => b.total - a.total).slice(0, 10);
+
+    const isScooterCat = (cat) => {
+      const c = (cat || '').toLowerCase();
+      return c.includes('scooter') || c.includes('bike');
+    };
+    const isAccessoryCat = (cat) => {
+      const c = (cat || '').toLowerCase();
+      return c.includes('accessor') || c.includes('spare') || c.includes('part');
+    };
+
+    const allValidProducts = Object.values(productStats).filter(p => p.total > 0);
+    const topScooters = allValidProducts.filter(p => isScooterCat(p.category)).sort((a, b) => b.total - a.total).slice(0, 10);
+    const topAccessories = allValidProducts.filter(p => isAccessoryCat(p.category)).sort((a, b) => b.total - a.total).slice(0, 10);
     const topLocations = Object.values(locationStats).filter(l=>l.total > 0 && l.province !== 'ไม่ระบุ').sort((a,b) => b.total - a.total).slice(0, 5);
 
     // Service Helper
@@ -460,6 +473,8 @@ export const useDashboardData = (initialDateFilter = 'this_month') => {
         chartData,
         categoryData,
         topProducts,
+        topScooters,
+        topAccessories,
         topLocations,
         serviceStats: {
             totalRevenue: serviceRevenue,

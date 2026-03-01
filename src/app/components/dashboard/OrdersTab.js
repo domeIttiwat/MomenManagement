@@ -135,9 +135,10 @@ const OrdersTab = ({ data, loading }) => {
       </div>
 
       {/* Top Rankings (Only Locations) */}
-      <TopRankings 
-        topProducts={[]} // ส่งค่าว่างไปเพื่อไม่แสดงสินค้า
-        topLocations={data.topLocations} 
+      <TopRankings
+        topScooters={data.topScooters || []}
+        topAccessories={data.topAccessories || []}
+        topLocations={data.topLocations}
       />
     </div>
   );
