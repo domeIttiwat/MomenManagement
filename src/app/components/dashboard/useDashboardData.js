@@ -20,8 +20,8 @@ export const useDashboardData = (initialDateFilter = 'this_month') => {
   const [dateFilter, setDateFilter] = useState(initialDateFilter);
   const [compareMode, setCompareMode] = useState('prev_period');
   
-  const [rawData, setRawData] = useState({ 
-    orders: [], services: [], marketing: [], products: [] 
+  const [rawData, setRawData] = useState({
+    orders: [], services: [], marketing: [], products: []
   });
 
   const fetchData = async () => {
@@ -45,16 +45,11 @@ export const useDashboardData = (initialDateFilter = 'this_month') => {
         .select('*')
         .order('expense_date', { ascending: true });
 
-      // 4. Fetch Products (ดึง product_categories ให้ครบ)
-      const { data: products } = await supabase
-        .from('products')
-        .select('id, name, category_id, categories(name), product_categories(category_id, categories(name))');
-
-      setRawData({ 
-        orders: orders || [], 
+      setRawData({
+        orders: orders || [],
         services: services || [],
         marketing: marketing || [],
-        products: products || [] 
+        products: []
       });
 
     } catch (err) {
@@ -69,22 +64,9 @@ export const useDashboardData = (initialDateFilter = 'this_month') => {
   const processedData = useMemo(() => {
     if (loading && rawData.orders.length === 0) return null;
 
-    const { orders, services, marketing, products } = rawData;
+    const { orders, services, marketing } = rawData;
     const now = new Date();
     
-    // --- 0. Prepare Product Category Map ---
-    const productCatMap = {};
-    products.forEach(p => {
-        let catName = 'สินค้าทั่วไป';
-        if (p.product_categories && p.product_categories.length > 0) {
-            const firstValid = p.product_categories.find(pc => pc.categories?.name);
-            if (firstValid) catName = firstValid.categories.name;
-        } else if (p.categories?.name) {
-            catName = p.categories.name;
-        }
-        productCatMap[String(p.id)] = catName;
-    });
-
     // --- 1. Date Filter Logic ---
     let start, end, prevStart, prevEnd;
     let groupBy = 'day';
@@ -371,61 +353,44 @@ export const useDashboardData = (initialDateFilter = 'this_month') => {
     });
 
     // --- Ranking Data ---
-    const categoryStats = {};
     const productStats = {};
     const locationStats = {};
-    
+
     validOrders.forEach(o => {
       // Location
       let prov = o.customer_cache?.address_parsed?.prov;
       if (!prov) {
-          const raw = o.customer_cache?.address_raw || '';
-          const match = raw.match(/(?:จังหวัด|จ\.)\s*([^\s,]+)/) || raw.match(/(กรุงเทพมหานคร|กรุงเทพฯ|กทม)/);
-          prov = match ? match[1] : 'ไม่ระบุ';
+        const raw = o.customer_cache?.address_raw || '';
+        const match = raw.match(/(?:จังหวัด|จ\.)\s*([^\s,]+)/) || raw.match(/(กรุงเทพมหานคร|กรุงเทพฯ|กทม)/);
+        prov = match ? match[1] : 'ไม่ระบุ';
       }
       prov = prov.replace(/^(จังหวัด|จ\.|แขวง|เขต)/, '').trim();
-
       if (!locationStats[prov]) locationStats[prov] = { province: prov, count: 0, total: 0 };
-      locationStats[prov].count += 1; 
+      locationStats[prov].count += 1;
       locationStats[prov].total += (Number(o.grand_total) || 0);
 
-      // Items
-      if (o.order_items && Array.isArray(o.order_items)) {
-          o.order_items.forEach(i => {
-             const qty = Number(i.quantity) || 0;
-             const totalItemSales = (Number(i.sell_price) * qty);
-             const totalItemCost = (Number(i.cost_price) * qty);
-             const itemProfit = totalItemSales - totalItemCost;
-             
-             // Category
-             const catName = productCatMap[String(i.product_id)] || 'สินค้าทั่วไป';
-
-             // Product
-             const pName = i.product_name || i.name || 'Unknown Product';
-             if (!productStats[pName]) productStats[pName] = { name: pName, quantity: 0, total: 0, profit: 0, category: catName };
-             if (!categoryStats[catName]) categoryStats[catName] = { name: catName, sales: 0, profit: 0 };
-             categoryStats[catName].sales += totalItemSales;
-             categoryStats[catName].profit += itemProfit;
-          });
-      }
+      // Products — group by product name directly from order_items
+      (o.order_items || []).forEach(i => {
+        const pName = i.product_name || i.name || 'ไม่ระบุ';
+        const qty = Number(i.quantity) || 0;
+        const total = (Number(i.sell_price) || 0) * qty;
+        const profit = total - (Number(i.cost_price) || 0) * qty;
+        if (!productStats[pName]) productStats[pName] = { name: pName, quantity: 0, total: 0, profit: 0 };
+        productStats[pName].quantity += qty;
+        productStats[pName].total += total;
+        productStats[pName].profit += profit;
+      });
     });
 
-    const categoryData = Object.values(categoryStats).sort((a,b) => b.sales - a.sales);
-    const topProducts = Object.values(productStats).filter(p=>p.total > 0).sort((a,b) => b.total - a.total).slice(0, 10);
+    const topProducts = Object.values(productStats)
+      .filter(p => p.total > 0)
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 10);
 
-    const isScooterCat = (cat) => {
-      const c = (cat || '').toLowerCase();
-      return c.includes('scooter') || c.includes('bike');
-    };
-    const isAccessoryCat = (cat) => {
-      const c = (cat || '').toLowerCase();
-      return c.includes('accessor') || c.includes('spare') || c.includes('part');
-    };
-
-    const allValidProducts = Object.values(productStats).filter(p => p.total > 0);
-    const topScooters = allValidProducts.filter(p => isScooterCat(p.category)).sort((a, b) => b.total - a.total).slice(0, 10);
-    const topAccessories = allValidProducts.filter(p => isAccessoryCat(p.category)).sort((a, b) => b.total - a.total).slice(0, 10);
-    const topLocations = Object.values(locationStats).filter(l=>l.total > 0 && l.province !== 'ไม่ระบุ').sort((a,b) => b.total - a.total).slice(0, 5);
+    const topLocations = Object.values(locationStats)
+      .filter(l => l.total > 0 && l.province !== 'ไม่ระบุ')
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 5);
 
     // Service Helper
     const calcServiceStatsForTab = (srvs) => {
@@ -468,10 +433,7 @@ export const useDashboardData = (initialDateFilter = 'this_month') => {
         overviewStats,
         orderStats,
         chartData,
-        categoryData,
         topProducts,
-        topScooters,
-        topAccessories,
         topLocations,
         serviceStats: {
             totalRevenue: serviceRevenue,

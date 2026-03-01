@@ -134,11 +134,10 @@ const OrdersTab = ({ data, loading }) => {
             </div>
       </div>
 
-      {/* Top Rankings (Only Locations) */}
+      {/* Top Rankings */}
       <TopRankings
-        topScooters={data.topScooters || []}
-        topAccessories={data.topAccessories || []}
-        topLocations={data.topLocations}
+        topProducts={data.topProducts || []}
+        topLocations={data.topLocations || []}
       />
     </div>
   );
