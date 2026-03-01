@@ -71,7 +71,15 @@ export const useDashboardData = (initialDateFilter = 'this_month') => {
     let start, end, prevStart, prevEnd;
     let groupBy = 'day';
 
-    if (dateFilter === 'this_month') {
+    if (dateFilter.startsWith('custom_')) {
+      const parts = dateFilter.split('_');
+      const yr = parseInt(parts[1]);
+      const mo = parseInt(parts[2]) - 1; // 0-indexed
+      const customDate = new Date(yr, mo, 1);
+      start = startOfMonth(customDate); end = endOfMonth(customDate);
+      prevStart = startOfMonth(subMonths(customDate, 1)); prevEnd = endOfMonth(subMonths(customDate, 1));
+      groupBy = 'day';
+    } else if (dateFilter === 'this_month') {
       start = startOfMonth(now); end = endOfMonth(now);
       prevStart = startOfMonth(subMonths(now, 1)); prevEnd = endOfMonth(subMonths(now, 1));
       groupBy = 'day';

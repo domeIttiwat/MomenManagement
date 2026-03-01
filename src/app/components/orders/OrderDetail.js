@@ -342,96 +342,179 @@ const OrderDetail = ({ order, onBack, onEdit, onDelete, showProfit, setShowProfi
             </div>
           </div>
 
-          {/* Timeline Feed */}
-          <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
-              <h3 className="font-bold text-gray-800 mb-6 flex items-center gap-2 text-lg">
-                 <MessageCircle size={20} className="text-indigo-500"/> ความคืบหน้า (Timeline)
-              </h3>
-              
-              <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 mb-6">
-                 <div className="flex gap-3 mb-3">
-                    <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 font-bold shrink-0">
-                       <User size={20}/>
-                    </div>
-                    <div className="flex-1">
-                       <textarea 
-                          className="w-full bg-white border border-gray-300 rounded-xl p-3 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none resize-none"
-                          placeholder="บันทึกความคืบหน้า..."
-                          rows="2"
-                          value={newUpdate.description}
-                          onChange={e => setNewUpdate({...newUpdate, description: e.target.value})}
-                       />
-                    </div>
-                 </div>
-                 <div className="flex justify-between items-center pl-12">
-                     <div className="flex gap-2">
-                         <input type="date" className="text-xs border rounded-lg px-2 py-1 bg-white" value={newUpdate.date} onChange={e => setNewUpdate({...newUpdate, date: e.target.value})}/>
-                         <div className="relative">
-                            <label className="cursor-pointer text-gray-500 hover:text-indigo-600 flex items-center gap-1 text-xs px-2 py-1 hover:bg-gray-100 rounded-lg transition-colors">
-                                <Paperclip size={14}/> แนบรูป
-                                <input type="file" multiple accept="image/*" className="hidden" onChange={handleFileSelect} ref={fileInputRef} />
-                            </label>
-                         </div>
-                     </div>
-                     <button onClick={handlePostUpdate} disabled={isPosting || (!newUpdate.description.trim() && newUpdate.images.length === 0)} className="bg-indigo-600 text-white px-4 py-1.5 rounded-lg text-sm font-bold hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-2">
-                        {isPosting ? <Loader2 size={14} className="animate-spin"/> : <Send size={14}/>} โพสต์
-                     </button>
-                 </div>
-                 {newUpdate.images.length > 0 && (
-                    <div className="flex gap-2 mt-3 pl-12 overflow-x-auto">
-                        {newUpdate.images.map((img, i) => (
-                            <div key={i} className="relative w-16 h-16 shrink-0 group">
-                                <img src={img.url} className="w-full h-full object-cover rounded-lg border"/>
-                                <button onClick={() => removeNewImage(i)} className="absolute -top-1 -right-1 bg-black/50 text-white rounded-full p-0.5 hover:bg-red-500"><X size={10}/></button>
-                            </div>
-                        ))}
-                    </div>
-                 )}
-              </div>
+          {/* Timeline Feed — Social Media Style */}
+          <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
+            {/* Header */}
+            <div className="px-6 pt-6 pb-4 border-b border-gray-100 flex items-center gap-2">
+              <MessageCircle size={20} className="text-indigo-500"/>
+              <h3 className="font-bold text-gray-800 text-lg">ความคืบหน้า</h3>
+              {updates.length > 0 && (
+                <span className="ml-auto text-xs font-bold text-indigo-500 bg-indigo-50 px-2.5 py-1 rounded-full">{updates.length} รายการ</span>
+              )}
+            </div>
 
-              <div className="relative pl-4 border-l-2 border-indigo-100 ml-2 space-y-6 mb-6">
-                {updates.length > 0 ? updates.map((update, i) => (
-                    <div key={update.id} className="relative group">
-                       <div className="absolute -left-[23px] top-1 w-3 h-3 bg-white border-2 border-indigo-500 rounded-full shadow-sm z-10"></div>
-                       {editingUpdateId === update.id ? (
-                           <div className="bg-white p-4 rounded-xl border-2 border-indigo-500 shadow-lg">
-                               <textarea className="w-full border rounded-lg p-2 text-sm mb-2" value={editData.description} onChange={e => setEditData({...editData, description: e.target.value})}/>
-                               <div className="flex justify-between items-center">
-                                  <input type="date" value={editData.date} onChange={e => setEditData({...editData, date: e.target.value})} className="text-xs border rounded px-2 py-1"/>
-                                  <div className="flex gap-2">
-                                      <button onClick={() => setEditingUpdateId(null)} className="text-xs text-gray-500 px-3 py-1 rounded hover:bg-gray-100">ยกเลิก</button>
-                                      <button onClick={() => saveEditUpdate(update.id)} className="text-xs bg-indigo-600 text-white px-3 py-1 rounded font-bold hover:bg-indigo-700">บันทึก</button>
-                                  </div>
-                               </div>
-                           </div>
-                       ) : (
-                           <div className="bg-gray-50 rounded-xl p-4 border border-gray-100 hover:border-indigo-200 transition-colors">
-                              <div className="flex justify-between items-start mb-2">
-                                 <div className="flex items-center gap-2 text-xs text-gray-500 font-medium">
-                                    <span className="text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md">{new Date(update.update_date).toLocaleDateString('th-TH')}</span>
-                                    <span className="text-gray-300">|</span>
-                                    <span>{new Date(update.created_at).toLocaleTimeString('th-TH', {hour: '2-digit', minute:'2-digit'})}</span>
-                                 </div>
-                                 <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <button onClick={() => startEditUpdate(update)} className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-white rounded-lg transition-colors"><Edit size={12}/></button>
-                                    <button onClick={() => handleDeleteUpdate(update.id)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-white rounded-lg transition-colors"><Trash2 size={12}/></button>
-                                 </div>
+            {/* Comment Feed */}
+            <div className="px-6 py-4 space-y-5 max-h-[520px] overflow-y-auto">
+              {updates.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-12 text-gray-400">
+                  <MessageCircle size={36} className="mb-3 opacity-20"/>
+                  <p className="text-sm font-medium">ยังไม่มีการอัปเดต</p>
+                  <p className="text-xs mt-1">เพิ่มความคืบหน้าด้านล่าง</p>
+                </div>
+              ) : updates.map((update) => (
+                <div key={update.id} className="group flex gap-3">
+                  {/* Avatar */}
+                  <div className="w-9 h-9 rounded-full bg-gradient-to-br from-indigo-400 to-indigo-600 flex items-center justify-center text-white shrink-0 shadow-sm mt-0.5">
+                    <User size={16}/>
+                  </div>
+
+                  <div className="flex-1 min-w-0">
+                    {editingUpdateId === update.id ? (
+                      /* Edit Mode */
+                      <div className="bg-white border-2 border-indigo-400 rounded-2xl p-4 shadow-md">
+                        <textarea
+                          className="w-full text-sm outline-none resize-none text-gray-800 placeholder:text-gray-400 mb-3"
+                          rows={3}
+                          value={editData.description}
+                          onChange={e => setEditData({...editData, description: e.target.value})}
+                        />
+                        {/* Edit image previews */}
+                        {editData.images?.length > 0 && (
+                          <div className="flex gap-2 mb-3 overflow-x-auto">
+                            {editData.images.map((img, i) => (
+                              <div key={i} className="relative w-16 h-16 shrink-0">
+                                <img src={img.url} className="w-full h-full object-cover rounded-xl border"/>
+                                <button onClick={() => removeNewImage(i, true)} className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center hover:bg-red-600 shadow"><X size={10}/></button>
                               </div>
-                              <p className="text-sm text-gray-800 whitespace-pre-line leading-relaxed">{update.description}</p>
-                              {update.images?.length > 0 && (
-                                <div className="flex gap-2 overflow-x-auto pb-1 mt-3">
-                                   {update.images.map((img, imgIdx) => (
-                                     <img key={imgIdx} src={img} className="w-20 h-20 rounded-lg object-cover cursor-pointer hover:opacity-90 border border-gray-200" onClick={() => setLightboxImg(img)} />
-                                   ))}
-                                </div>
-                              )}
-                           </div>
-                       )}
+                            ))}
+                          </div>
+                        )}
+                        <div className="flex items-center justify-between gap-2 pt-3 border-t border-gray-100">
+                          <input type="date" value={editData.date} onChange={e => setEditData({...editData, date: e.target.value})} className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-gray-50 focus:outline-none focus:border-indigo-400"/>
+                          <div className="flex gap-2">
+                            <button onClick={() => setEditingUpdateId(null)} className="px-4 py-1.5 text-sm font-semibold text-gray-600 hover:bg-gray-100 rounded-xl transition-all">ยกเลิก</button>
+                            <button onClick={() => saveEditUpdate(update.id)} className="px-4 py-1.5 text-sm font-bold bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-all shadow-sm shadow-indigo-200">บันทึก</button>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      /* View Mode */
+                      <div className="bg-gray-50 rounded-2xl rounded-tl-sm px-4 py-3 border border-gray-100 group-hover:border-gray-200 transition-colors">
+                        {/* Meta row */}
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-bold text-gray-700">อัปเดต</span>
+                            <span className="text-[11px] text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full font-semibold">
+                              {new Date(update.update_date).toLocaleDateString('th-TH', {day:'numeric', month:'short', year:'numeric'})}
+                            </span>
+                            <span className="text-[10px] text-gray-400">
+                              {new Date(update.created_at).toLocaleTimeString('th-TH', {hour:'2-digit', minute:'2-digit'})}
+                            </span>
+                          </div>
+                          {/* Action buttons — show on hover */}
+                          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button
+                              onClick={() => startEditUpdate(update)}
+                              className="w-7 h-7 flex items-center justify-center rounded-lg text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-all"
+                            ><Edit size={13}/></button>
+                            <button
+                              onClick={() => handleDeleteUpdate(update.id)}
+                              className="w-7 h-7 flex items-center justify-center rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-all"
+                            ><Trash2 size={13}/></button>
+                          </div>
+                        </div>
+                        {/* Content */}
+                        {update.description && (
+                          <p className="text-sm text-gray-800 whitespace-pre-line leading-relaxed">{update.description}</p>
+                        )}
+                        {/* Images */}
+                        {update.images?.length > 0 && (
+                          <div className="flex gap-2 flex-wrap mt-3">
+                            {update.images.map((img, imgIdx) => (
+                              <img
+                                key={imgIdx}
+                                src={img}
+                                className="w-20 h-20 rounded-xl object-cover cursor-zoom-in hover:opacity-90 border border-gray-200 transition-opacity shadow-sm"
+                                onClick={() => setLightboxImg(img)}
+                              />
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Compose Box — bottom, social media style */}
+            <div className="px-6 pb-6 pt-4 border-t border-gray-100 bg-gray-50/50">
+              {/* Image Preview Row */}
+              {newUpdate.images.length > 0 && (
+                <div className="flex gap-2 mb-3 pl-12 overflow-x-auto">
+                  {newUpdate.images.map((img, i) => (
+                    <div key={i} className="relative w-16 h-16 shrink-0">
+                      <img src={img.url} className="w-full h-full object-cover rounded-xl border border-gray-200 shadow-sm"/>
+                      <button
+                        onClick={() => removeNewImage(i)}
+                        className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center hover:bg-red-600 shadow"
+                      ><X size={10}/></button>
                     </div>
-                )) : (
-                    <div className="text-center py-6 text-gray-400 text-sm italic">ยังไม่มีการอัปเดต</div>
-                )}
+                  ))}
+                </div>
+              )}
+
+              <div className="flex gap-3 items-end">
+                {/* Avatar */}
+                <div className="w-9 h-9 rounded-full bg-gradient-to-br from-indigo-400 to-indigo-600 flex items-center justify-center text-white shrink-0 shadow-sm">
+                  <User size={16}/>
+                </div>
+
+                {/* Input area */}
+                <div className="flex-1 bg-white border border-gray-200 rounded-2xl focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-100 transition-all overflow-hidden">
+                  <textarea
+                    className="w-full px-4 pt-3 pb-1 text-sm outline-none resize-none text-gray-800 placeholder:text-gray-400 bg-transparent"
+                    placeholder="บันทึกความคืบหน้า..."
+                    rows={2}
+                    value={newUpdate.description}
+                    onChange={e => setNewUpdate({...newUpdate, description: e.target.value})}
+                    onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) handlePostUpdate(); }}
+                  />
+                  {/* Bottom toolbar */}
+                  <div className="flex items-center justify-between px-3 pb-2.5 pt-1">
+                    <div className="flex items-center gap-1">
+                      {/* Date picker */}
+                      <label className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 px-2.5 py-1.5 rounded-xl cursor-pointer transition-all font-medium">
+                        <Calendar size={14}/>
+                        <input
+                          type="date"
+                          className="w-0 opacity-0 absolute"
+                          value={newUpdate.date}
+                          onChange={e => setNewUpdate({...newUpdate, date: e.target.value})}
+                        />
+                        <span>{new Date(newUpdate.date + 'T00:00:00').toLocaleDateString('th-TH', {day:'numeric', month:'short'})}</span>
+                      </label>
+                      {/* Image attach */}
+                      <label className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 px-2.5 py-1.5 rounded-xl cursor-pointer transition-all font-medium">
+                        <ImageIcon size={14}/>
+                        <span>รูปภาพ</span>
+                        <input type="file" multiple accept="image/*" className="hidden" onChange={handleFileSelect} ref={fileInputRef}/>
+                      </label>
+                    </div>
+                    {/* Send button */}
+                    <button
+                      onClick={handlePostUpdate}
+                      disabled={isPosting || (!newUpdate.description.trim() && newUpdate.images.length === 0)}
+                      className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold px-4 py-2 rounded-xl transition-all active:scale-95 shadow-sm shadow-indigo-200"
+                    >
+                      {isPosting ? <Loader2 size={13} className="animate-spin"/> : <Send size={13}/>}
+                      โพสต์
+                    </button>
+                  </div>
+                </div>
               </div>
+              <p className="text-[10px] text-gray-400 mt-2 pl-12">กด Ctrl+Enter เพื่อส่งด่วน</p>
+            </div>
           </div>
         </div>
 

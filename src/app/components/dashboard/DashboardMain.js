@@ -1,6 +1,6 @@
 import React from 'react';
 import { Activity, Shield, Filter } from 'lucide-react';
-import { useAuth } from '../../context/AuthContext'; 
+import { useAuth } from '../../context/AuthContext';
 
 // Imported Refactored Components
 import { useDashboardData } from './useDashboardData';
@@ -8,6 +8,7 @@ import OverviewTab from './OverviewTab';
 import OrdersTab from './OrdersTab';
 import ServicesTab from './ServicesTab';
 import YearlyOverviewTab from './YearlyOverviewTab';
+import MonthYearPicker from './MonthYearPicker';
 
 const DashboardMain = () => {
   const auth = useAuth();
@@ -36,34 +37,40 @@ const DashboardMain = () => {
           )}
         </h1>
         
-        <div className="flex flex-wrap items-center gap-3">
-           <div className="relative">
-             <Filter size={16} className="absolute left-3 top-3 text-gray-400"/>
-             <select 
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Preset filter dropdown */}
+          <div className="relative">
+            <Filter size={15} className="absolute left-3 top-3 text-gray-400 pointer-events-none"/>
+            <select
               className="bg-gray-50 border border-gray-200 text-gray-700 text-sm rounded-xl pl-9 pr-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer font-bold"
-              value={dateFilter}
+              value={dateFilter.startsWith('custom_') ? '' : dateFilter}
               onChange={(e) => setDateFilter(e.target.value)}
             >
+              {dateFilter.startsWith('custom_') && <option value="" disabled>— เดือน/ปีที่เลือก —</option>}
               <option value="this_month">เดือนนี้</option>
               <option value="last_month">เดือนที่แล้ว</option>
-              <option value="Q1">Q1 (ม.ค.-มี.ค.)</option>
-              <option value="Q2">Q2 (เม.ย.-มิ.ย.)</option>
-              <option value="Q3">Q3 (ก.ค.-ก.ย.)</option>
-              <option value="Q4">Q4 (ต.ค.-ธ.ค.)</option>
+              <option value="Q1">Q1 (ม.ค.–มี.ค.)</option>
+              <option value="Q2">Q2 (เม.ย.–มิ.ย.)</option>
+              <option value="Q3">Q3 (ก.ค.–ก.ย.)</option>
+              <option value="Q4">Q4 (ต.ค.–ธ.ค.)</option>
               <option value="this_year">ปีนี้</option>
             </select>
-           </div>
-           
-           <div className="relative">
-            <select 
-              className="bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 rounded-lg px-3 py-2.5 text-sm font-medium outline-none cursor-pointer"
-              value={compareMode}
-              onChange={(e) => setCompareMode(e.target.value)}
-            >
-              <option value="prev_period">เปรียบเทียบกับช่วงก่อน</option>
-              <option value="none">ไม่เปรียบเทียบ</option>
-            </select>
-           </div>
+          </div>
+
+          {/* Custom Month/Year Picker */}
+          <MonthYearPicker value={dateFilter} onChange={setDateFilter} />
+
+          <div className="w-px h-6 bg-gray-200 hidden sm:block" />
+
+          {/* Compare mode */}
+          <select
+            className="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 text-sm font-medium outline-none cursor-pointer text-gray-600 hover:bg-gray-100 focus:ring-2 focus:ring-indigo-500 transition-all"
+            value={compareMode}
+            onChange={(e) => setCompareMode(e.target.value)}
+          >
+            <option value="prev_period">เทียบช่วงก่อน</option>
+            <option value="none">ไม่เปรียบเทียบ</option>
+          </select>
         </div>
       </div>
 
