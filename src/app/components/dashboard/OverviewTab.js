@@ -1,5 +1,5 @@
 import React from 'react';
-import { DollarSign, TrendingUp, ShoppingBag, Wrench, Activity } from 'lucide-react';
+import { DollarSign, TrendingUp, ShoppingBag, Wrench, Activity, AlertCircle } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart, Line, PieChart, Pie, Cell } from 'recharts';
 import KpiCard from './KpiCard';
 
@@ -147,6 +147,44 @@ const OverviewTab = ({ data, compareMode }) => {
               </div>
           </div>
       </div>
+
+      {/* Outstanding Balances */}
+      {data.overviewStats?.outstandingOrdersList?.length > 0 && (
+        <div className="bg-white p-6 rounded-3xl shadow-sm border border-amber-100">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="font-bold text-gray-800 flex items-center gap-2">
+              <AlertCircle size={18} className="text-amber-500"/> ยอดค้างชำระ
+            </h3>
+            <span className="font-bold text-amber-600 text-lg">
+              รวม ฿{(data.overviewStats.totalOutstandingAll || 0).toLocaleString()}
+            </span>
+          </div>
+          <div className="overflow-auto max-h-64">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-xs text-gray-400 border-b border-gray-100">
+                  <th className="text-left py-2 font-medium">ลูกค้า</th>
+                  <th className="text-left font-medium">เลขออเดอร์</th>
+                  <th className="text-right font-medium">ยอดรวม</th>
+                  <th className="text-right font-medium">รับแล้ว</th>
+                  <th className="text-right font-medium text-amber-600">ค้างชำระ</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.overviewStats.outstandingOrdersList.map(o => (
+                  <tr key={o.id} className="border-b border-gray-50 hover:bg-amber-50/50 transition-colors">
+                    <td className="py-2 font-medium text-gray-800">{o.customerName}</td>
+                    <td className="text-gray-500 text-xs">{o.orderNumber}</td>
+                    <td className="text-right text-gray-500">฿{o.grandTotal.toLocaleString()}</td>
+                    <td className="text-right text-emerald-600">฿{o.received.toLocaleString()}</td>
+                    <td className="text-right font-bold text-amber-600">฿{o.outstanding.toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Combined Chart */}
       <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
