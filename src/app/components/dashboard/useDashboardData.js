@@ -397,15 +397,12 @@ export const useDashboardData = (initialDateFilter = 'this_month') => {
              const totalItemCost = (Number(i.cost_price) * qty);
              const itemProfit = totalItemSales - totalItemCost;
              
+             // Category
+             const catName = productCatMap[String(i.product_id)] || 'สินค้าทั่วไป';
+
              // Product
              const pName = i.product_name || i.name || 'Unknown Product';
              if (!productStats[pName]) productStats[pName] = { name: pName, quantity: 0, total: 0, profit: 0, category: catName };
-             productStats[pName].quantity += qty;
-             productStats[pName].total += totalItemSales;
-             productStats[pName].profit += itemProfit;
-
-             // Category
-             const catName = productCatMap[String(i.product_id)] || 'สินค้าทั่วไป';
              if (!categoryStats[catName]) categoryStats[catName] = { name: catName, sales: 0, profit: 0 };
              categoryStats[catName].sales += totalItemSales;
              categoryStats[catName].profit += itemProfit;
