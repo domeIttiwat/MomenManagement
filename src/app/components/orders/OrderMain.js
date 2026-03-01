@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Plus, Search, LayoutGrid, List as ListIcon, Loader2, ArrowUpDown, Filter, Eye, EyeOff, History, ShoppingBag } from 'lucide-react';
+import { Plus, Search, LayoutGrid, List as ListIcon, Loader2, ArrowUpDown, Filter, Eye, EyeOff, History, ShoppingBag, FileText } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import OrderList from './OrderList';
 import OrderForm from './OrderForm';
@@ -16,8 +16,9 @@ const OrderMain = ({ initialNavData, onViewCustomer }) => {
   
   const [sortOption, setSortOption] = useState('newest');
   const [filterStatus, setFilterStatus] = useState('All');
-  const [showProfit, setShowProfit] = useState(false); 
-  const [showHistory, setShowHistory] = useState(false); 
+  const [showProfit, setShowProfit] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [showQuotation, setShowQuotation] = useState(false);
 
   const fetchOrders = async () => {
     setLoading(true);
@@ -53,6 +54,10 @@ const OrderMain = ({ initialNavData, onViewCustomer }) => {
       result = result.filter(o => o.status !== 'Completed' && o.status !== 'Cancelled');
     }
 
+    if (!showQuotation) {
+      result = result.filter(o => o.status !== 'Quotation');
+    }
+
     if (search) {
       const s = search.toLowerCase();
       result = result.filter(o => 
@@ -74,7 +79,7 @@ const OrderMain = ({ initialNavData, onViewCustomer }) => {
     }
 
     return result;
-  }, [orders, search, filterStatus, sortOption, showHistory]);
+  }, [orders, search, filterStatus, sortOption, showHistory, showQuotation]);
 
   if (view === 'form') return <OrderForm onCancel={() => setView('list')} onSuccess={() => { setView('list'); fetchOrders(); }} initialData={selectedOrder} />;
   
@@ -124,12 +129,21 @@ const OrderMain = ({ initialNavData, onViewCustomer }) => {
         
         <div className="flex flex-wrap items-center gap-2 px-2">
           {/* Show History Toggle */}
-          <button 
-            onClick={() => setShowHistory(!showHistory)} 
+          <button
+            onClick={() => setShowHistory(!showHistory)}
             className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all ${showHistory ? 'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200' : 'text-gray-500 hover:bg-gray-50'}`}
             title="แสดงออเดอร์ที่เสร็จสิ้น/ยกเลิก"
           >
              <History size={18} /> {showHistory ? 'แสดงทั้งหมด' : 'ดูประวัติเก่า'}
+          </button>
+
+          {/* Show Quotation Toggle */}
+          <button
+            onClick={() => setShowQuotation(!showQuotation)}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all ${showQuotation ? 'bg-amber-50 text-amber-700 ring-1 ring-amber-200' : 'text-gray-500 hover:bg-gray-50'}`}
+            title="แสดง/ซ่อนใบเสนอราคา"
+          >
+            <FileText size={18} /> {showQuotation ? 'ซ่อนเสนอราคา' : 'เสนอราคา'}
           </button>
 
           <div className="w-px h-8 bg-gray-200 mx-2 hidden md:block" />
