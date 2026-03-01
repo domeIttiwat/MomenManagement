@@ -65,12 +65,40 @@ const ServiceBillPreview = ({ service, onClose }) => {
     if (!contentRef.current) return;
     setDownloading(true);
     try {
-      const canvas = await html2canvas(contentRef.current, {
+      const el = contentRef.current;
+      const allEls = [el, ...Array.from(el.querySelectorAll('*'))];
+      const styleMap = allEls.map(orig => {
+        const s = window.getComputedStyle(orig);
+        return {
+          color: s.color,
+          backgroundColor: s.backgroundColor,
+          borderTopColor: s.borderTopColor,
+          borderRightColor: s.borderRightColor,
+          borderBottomColor: s.borderBottomColor,
+          borderLeftColor: s.borderLeftColor,
+        };
+      });
+      const canvas = await html2canvas(el, {
         scale: 2,
         useCORS: true,
         backgroundColor: '#ffffff',
         logging: false,
-        removeContainer: true
+        removeContainer: true,
+        onclone: (clonedDoc, clonedEl) => {
+          // Patch style tags — replace oklch/lab/lch so html2canvas parser doesn't crash
+          clonedDoc.querySelectorAll('style').forEach(styleTag => {
+            styleTag.textContent = styleTag.textContent
+              .replace(/oklch\([^)]*\)/g, 'transparent')
+              .replace(/\blab\([^)]*\)/g, 'transparent')
+              .replace(/\blch\([^)]*\)/g, 'transparent');
+          });
+          // Apply pre-computed rgb inline styles to override the transparent fallbacks
+          const clonedEls = [clonedEl, ...Array.from(clonedEl.querySelectorAll('*'))];
+          clonedEls.forEach((cel, i) => {
+            if (!styleMap[i]) return;
+            Object.assign(cel.style, styleMap[i]);
+          });
+        }
       });
       const image = canvas.toDataURL("image/png");
       const link = document.createElement("a");
@@ -171,7 +199,7 @@ const ServiceBillPreview = ({ service, onClose }) => {
                         <div className="w-2/3 pr-8">
                             <h1 className="text-3xl font-bold text-gray-900 mb-1 tracking-tight">MOMENTECH</h1>
                             <p className="text-[11px] text-gray-600 leading-snug">
-                            97 หมู่ 1 ซอยรังสิต-นครนายก 64 ต.ประชาธิปัตย์<br/>
+                            97 ซอยรังสิต-นครนายก 64 ต.ประชาธิปัตย์<br/>
                             อ.ธัญบุรี จ.ปทุมธานี 12130<br/>
                             โทร: 093-121-5740
                             </p>

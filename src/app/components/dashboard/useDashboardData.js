@@ -406,7 +406,7 @@ export const useDashboardData = (initialDateFilter = 'this_month') => {
         orderStats,
         chartData,
         categoryData,
-        topProducts, 
+        topProducts,
         topLocations,
         serviceStats: {
             totalRevenue: serviceRevenue,
@@ -425,5 +425,42 @@ export const useDashboardData = (initialDateFilter = 'this_month') => {
     };
   }, [rawData, dateFilter]);
 
-  return { loading, processedData, dateFilter, setDateFilter, compareMode, setCompareMode };
+  const yearlyData = useMemo(() => {
+    if (rawData.orders.length === 0 && rawData.services.length === 0 && rawData.marketing.length === 0) return [];
+    const { orders, services, marketing } = rawData;
+    const now = new Date();
+    const months = eachMonthOfInterval({ start: startOfYear(now), end: endOfYear(now) });
+    const isValidStatus = (status) => status !== 'Cancelled' && status !== 'Quotation';
+    const safeD = (d) => { if (!d) return null; const dt = new Date(d); return isValid(dt) ? dt : null; };
+
+    return months.map(monthDate => {
+      const mOrders = orders.filter(o => isValidStatus(o.status) && (() => { const d = safeD(o.order_date); return d && isSameMonth(d, monthDate); })());
+      const mServices = services.filter(s => isValidStatus(s.status) && (() => { const d = safeD(s.received_date); return d && isSameMonth(d, monthDate); })());
+      const mMarketing = marketing.filter(m => { const d = safeD(m.expense_date); return d && isSameMonth(d, monthDate); });
+
+      const orderSales = mOrders.reduce((sum, o) => sum + (Number(o.grand_total) || 0), 0);
+      const serviceSales = mServices.reduce((sum, s) => sum + (Number(s.grand_total) || 0), 0);
+      const totalSales = orderSales + serviceSales;
+
+      const cogs = mOrders.reduce((sum, o) => {
+        const iCost = o.order_items?.reduce((s, i) => s + Number(i.cost_price) * Number(i.quantity), 0) || 0;
+        return sum + iCost + (Number(o.shipping_cost) || 0);
+      }, 0);
+      const serviceCost = mServices.reduce((sum, s) => sum + (s.service_items?.filter(i => i.type === 'Part').reduce((c, i) => c + Number(i.cost_price) * Number(i.quantity), 0) || 0), 0);
+      const mktCost = mMarketing.reduce((sum, m) => sum + (Number(m.amount) || 0), 0);
+
+      const profit = (orderSales - cogs - mktCost) + (serviceSales - serviceCost);
+      const marketingRatio = totalSales > 0 ? parseFloat((mktCost / totalSales * 100).toFixed(1)) : 0;
+
+      return {
+        month: format(monthDate, 'MMM', { locale: th }),
+        sales: totalSales,
+        profit,
+        marketing: mktCost,
+        marketingRatio,
+      };
+    });
+  }, [rawData]);
+
+  return { loading, processedData, yearlyData, dateFilter, setDateFilter, compareMode, setCompareMode };
 };
