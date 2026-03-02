@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, Plus, Save, Trash2, CheckCircle, AlertCircle, RefreshCw, Loader2 } from 'lucide-react';
+import { Shield, Plus, Save, Trash2, CheckCircle, AlertCircle, RefreshCw, Loader2, X } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 
 // รายการระบบและสิทธิ์ที่ทำได้
@@ -28,6 +28,7 @@ const RoleManager = () => {
   const [loading, setLoading] = useState(false);
   const [newRoleName, setNewRoleName] = useState('');
   const [isAdding, setIsAdding] = useState(false);
+  const [savedMsg, setSavedMsg] = useState(false);
 
   useEffect(() => {
     fetchRoles();
@@ -105,24 +106,34 @@ const RoleManager = () => {
   const savePermissions = async () => {
     if (!selectedRole) return;
     setLoading(true);
-    
+
     try {
-      // 1. Prepare Upsert Data
+      // 1. Backup existing permissions (for rollback)
+      const { data: backup } = await supabase.from('role_permissions').select('*').eq('role_id', selectedRole.id);
+
+      // 2. Prepare new data
       const upsertData = RESOURCES.map(res => ({
         role_id: selectedRole.id,
         resource: res.id,
-        actions: permissions[res.id]
+        actions: permissions[res.id],
       }));
 
-      // 2. Clear old perms & Insert new (Simple Sync)
-      // Note: Using delete+insert is safer for full sync here
+      // 3. Delete old
       await supabase.from('role_permissions').delete().eq('role_id', selectedRole.id);
+
+      // 4. Insert new
       const { error } = await supabase.from('role_permissions').insert(upsertData);
-      
-      if (error) throw error;
-      alert('บันทึกสิทธิ์เรียบร้อย');
+
+      if (error) {
+        // Rollback: restore backup
+        if (backup?.length) await supabase.from('role_permissions').insert(backup);
+        throw error;
+      }
+
+      setSavedMsg(true);
+      setTimeout(() => setSavedMsg(false), 3000);
     } catch (err) {
-      alert('Error: ' + err.message);
+      alert('บันทึกไม่สำเร็จ: ' + err.message);
     } finally {
       setLoading(false);
     }
@@ -189,7 +200,12 @@ const RoleManager = () => {
                  </h2>
                  <p className="text-sm text-gray-500 mt-1">{selectedRole.description || 'จัดการสิทธิ์การเข้าถึงสำหรับตำแหน่งนี้'}</p>
                </div>
-               <div className="flex gap-3">
+               <div className="flex gap-3 items-center">
+                 {savedMsg && (
+                   <span className="flex items-center gap-1.5 text-emerald-600 text-sm font-medium animate-in fade-in">
+                     <CheckCircle size={16}/> บันทึกแล้ว
+                   </span>
+                 )}
                  {!selectedRole.is_system && (
                    <button onClick={() => handleDeleteRole(selectedRole.id)} className="px-4 py-2 border border-red-100 text-red-600 rounded-xl text-sm font-medium hover:bg-red-50">ลบตำแหน่ง</button>
                  )}

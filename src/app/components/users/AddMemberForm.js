@@ -34,6 +34,14 @@ const AddMemberForm = ({ onCancel, onSuccess, roles }) => {
 
     setLoading(true);
     try {
+      // 0. Check duplicate email
+      const { data: existing } = await supabase.from('profiles').select('id').eq('email', formData.email.trim()).maybeSingle();
+      if (existing) {
+        alert('อีเมลนี้มีอยู่ในระบบแล้ว กรุณาใช้อีเมลอื่น');
+        setLoading(false);
+        return;
+      }
+
       // 1. Upload Image
       let avatarUrl = null;
       if (formData.images.length > 0) {
@@ -68,26 +76,16 @@ const AddMemberForm = ({ onCancel, onSuccess, roles }) => {
         social_channels: formData.line_id ? [{ type: 'Line', value: formData.line_id }] : []
       };
 
-      console.log('Sending Payload:', payload);
-
       // 3. Insert into Profiles
-      const { data, error } = await supabase.from('profiles').insert([payload]).select();
-      
-      if (error) {
-        console.error('Supabase Insert Error Detail:', JSON.stringify(error, null, 2));
-        throw error;
-      }
+      const { error } = await supabase.from('profiles').insert([payload]).select();
+      if (error) throw error;
 
-      alert('เพิ่มทีมงานเรียบร้อย');
       onSuccess();
     } catch (err) {
-      console.error('Full Error Object:', err);
-      
       let msg = err.message || 'Unknown Error';
-      if (err.code === '42703') msg = `ฐานข้อมูลไม่พบคอลัมน์: ${err.message} (กรุณารัน SQL อัปเดต)`;
-      if (err.code === '23503') msg = `Foreign Key Error: กรุณารัน SQL ปลดล็อค profiles_id_fkey`;
-      if (err.code === '42501') msg = `Permission Denied: กรุณารัน SQL ปลดล็อค RLS Policy`;
-
+      if (err.code === '23505') msg = 'อีเมลนี้มีอยู่ในระบบแล้ว';
+      if (err.code === '23503') msg = 'ข้อมูลอ้างอิงไม่ถูกต้อง (Foreign Key)';
+      if (err.code === '42501') msg = 'ไม่มีสิทธิ์ดำเนินการ (Permission Denied)';
       alert('บันทึกไม่สำเร็จ: ' + msg);
     } finally {
       setLoading(false);
