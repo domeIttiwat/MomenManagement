@@ -1,7 +1,10 @@
 import React from 'react';
-import { LayoutDashboard, Package, Users, ShoppingBag, X, LogOut, Megaphone, ShieldCheck, Wrench, Hammer } from 'lucide-react';
+import { LayoutDashboard, Package, Users, ShoppingBag, X, Megaphone, ShieldCheck, Wrench, Hammer } from 'lucide-react';
+import { useAuth } from '@/app/context/AuthContext';
 
 const Sidebar = ({ activeTab, setActiveTab, isOpen, onClose = () => {} }) => {
+  const { canView } = useAuth();
+
   const menuItems = [
     { id: 'dashboard', label: 'ภาพรวม', icon: LayoutDashboard },
     { id: 'products', label: 'สินค้า', icon: Package },
@@ -11,7 +14,7 @@ const Sidebar = ({ activeTab, setActiveTab, isOpen, onClose = () => {} }) => {
     { id: 'assembly', label: 'งานประกอบ', icon: Hammer },
     { id: 'marketing', label: 'การตลาด', icon: Megaphone },
     { id: 'users', label: 'จัดการทีมงาน', icon: ShieldCheck },
-  ];
+  ].filter(item => canView(item.id));
 
   return (
     <>

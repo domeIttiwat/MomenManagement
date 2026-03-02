@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 
 // Import Components
@@ -16,12 +16,21 @@ import ServiceMain from './components/services/ServiceMain';
 import AssemblyMain from './components/assembly/AssemblyMain';
 
 // สร้าง Wrapper Component
+const ALL_TABS = ['dashboard', 'products', 'customers', 'orders', 'services', 'assembly', 'marketing', 'users'];
+
 const AppContent = () => {
-  const { user, loading, profile } = useAuth();
-  // FIX: ตั้งค่าเริ่มต้นเป็น 'dashboard'
-  const [activeTab, setActiveTab] = useState<any>('dashboard'); 
+  const { user, loading, profile, canView, permissions } = useAuth();
+  const [activeTab, setActiveTab] = useState<any>('dashboard');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [navData, setNavData] = useState<any>(null);
+
+  // เมื่อ permissions โหลดเสร็จหรือเปลี่ยน ถ้าแท็บที่อยู่ไม่มีสิทธิ์ → ย้ายไปแท็บแรกที่เข้าถึงได้
+  useEffect(() => {
+    if (permissions.length > 0 && !canView(activeTab)) {
+      const first = ALL_TABS.find(t => canView(t)) || 'dashboard';
+      setActiveTab(first);
+    }
+  }, [permissions]);
 
   if (loading) return <div className="h-screen flex items-center justify-center bg-gray-50 text-gray-500">กำลังโหลดข้อมูล...</div>;
   
@@ -40,16 +49,13 @@ const AppContent = () => {
 
   // Navigation Handlers
   const handleNavigateToCustomer = (customerId: any) => {
-    setActiveTab('customers');
-    setNavData({ target: 'customer', id: customerId, timestamp: Date.now() });
+    if (canView('customers')) { setActiveTab('customers'); setNavData({ target: 'customer', id: customerId, timestamp: Date.now() }); }
   };
   const handleNavigateToOrder = (order: any) => {
-    setActiveTab('orders');
-    setNavData({ target: 'order', data: order, timestamp: Date.now() });
+    if (canView('orders')) { setActiveTab('orders'); setNavData({ target: 'order', data: order, timestamp: Date.now() }); }
   };
   const handleTabChange = (tab: any) => {
-    setActiveTab(tab);
-    setNavData(null); 
+    if (canView(tab)) { setActiveTab(tab); setNavData(null); }
   };
 
   return (
@@ -72,29 +78,39 @@ const AppContent = () => {
         </div>
 
         <div className="max-w-[1600px] mx-auto animate-in fade-in duration-500">
-          {activeTab === 'dashboard' && <DashboardMain />}
-          {activeTab === 'products' && <ProductMain />}
-          {activeTab === 'customers' && (
-            <CustomerMain 
-              initialNavData={navData?.target === 'customer' ? navData : null} 
+          {activeTab === 'dashboard' && (canView('dashboard') ? <DashboardMain /> : <AccessDenied />)}
+          {activeTab === 'products' && (canView('products') ? <ProductMain /> : <AccessDenied />)}
+          {activeTab === 'customers' && (canView('customers') ? (
+            <CustomerMain
+              initialNavData={navData?.target === 'customer' ? navData : null}
               onViewOrder={handleNavigateToOrder}
             />
-          )}
-          {activeTab === 'orders' && (
-            <OrderMain 
-              initialNavData={navData?.target === 'order' ? navData : null} 
+          ) : <AccessDenied />)}
+          {activeTab === 'orders' && (canView('orders') ? (
+            <OrderMain
+              initialNavData={navData?.target === 'order' ? navData : null}
               onViewCustomer={handleNavigateToCustomer}
             />
-          )}
-          {activeTab === 'marketing' && <MarketingMain />}
-          {activeTab === 'users' && <UserMain />}
-          {activeTab === 'services' && <ServiceMain />}
-          {activeTab === 'assembly' && <AssemblyMain />}
+          ) : <AccessDenied />)}
+          {activeTab === 'services' && (canView('services') ? <ServiceMain /> : <AccessDenied />)}
+          {activeTab === 'assembly' && (canView('assembly') ? <AssemblyMain /> : <AccessDenied />)}
+          {activeTab === 'marketing' && (canView('marketing') ? <MarketingMain /> : <AccessDenied />)}
+          {activeTab === 'users' && (canView('users') ? <UserMain /> : <AccessDenied />)}
         </div>
       </main>
     </div>
   );
 };
+
+const AccessDenied = () => (
+  <div className="flex flex-col items-center justify-center py-32 text-center">
+    <div className="w-16 h-16 bg-red-50 rounded-2xl flex items-center justify-center mb-4">
+      <span className="text-3xl">🔒</span>
+    </div>
+    <h2 className="text-xl font-bold text-gray-700 mb-2">ไม่มีสิทธิ์เข้าถึง</h2>
+    <p className="text-gray-400 text-sm">ตำแหน่งของคุณไม่มีสิทธิ์เข้าถึงหน้านี้<br/>กรุณาติดต่อผู้ดูแลระบบ</p>
+  </div>
+);
 
 export default function Home() {
   return (

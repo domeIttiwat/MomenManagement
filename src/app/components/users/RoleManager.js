@@ -8,6 +8,8 @@ const RESOURCES = [
   { id: 'products', label: 'สินค้า (Products)' },
   { id: 'orders', label: 'คำสั่งซื้อ (Orders)' },
   { id: 'customers', label: 'ลูกค้า (Customers)' },
+  { id: 'services', label: 'งานบริการ/ซ่อม (Services)' },
+  { id: 'assembly', label: 'งานประกอบ (Assembly)' },
   { id: 'marketing', label: 'การตลาด (Marketing)' },
   { id: 'users', label: 'จัดการทีมงาน (Users)' },
 ];
