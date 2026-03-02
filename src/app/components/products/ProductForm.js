@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ArrowLeft, Save, Loader2, Info, Wrench, Package, Layers, Sparkles } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/app/context/AuthContext';
 import ImageUploader from './ImageUploader';
 import CategoryManager from './CategoryManager';
 import VariantManager from './VariantManager';
@@ -10,6 +11,8 @@ import ProductAccessorySelector from './ProductAccessorySelector';
 import NumericInput from './NumericInput';
 
 const ProductForm = ({ onCancel, onSuccess, initialData }) => {
+  const { profile } = useAuth();
+  const meRef = () => profile ? { id: profile.id, name: `${profile.first_name} ${profile.last_name}` } : null;
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('info'); 
   const [currentCategoryNames, setCurrentCategoryNames] = useState([]);
@@ -126,13 +129,13 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
 
       let productId = initialData?.id;
       let resultData = null;
-      
+
       if (productId) {
-        const { data } = await supabase.from('products').update(productPayload).eq('id', productId).select().single();
+        const { data } = await supabase.from('products').update({ ...productPayload, updated_by: meRef() }).eq('id', productId).select().single();
         resultData = data;
         await supabase.from('product_categories').delete().eq('product_id', productId);
       } else {
-        const { data, error } = await supabase.from('products').insert([productPayload]).select().single();
+        const { data, error } = await supabase.from('products').insert([{ ...productPayload, created_by: meRef() }]).select().single();
         if (error) throw error;
         productId = data.id;
         resultData = data;

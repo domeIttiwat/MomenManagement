@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, Plus, Save, Trash2, CheckCircle, AlertCircle, RefreshCw, Loader2, X } from 'lucide-react';
+import { Shield, Plus, Trash2, CheckCircle, AlertCircle, RefreshCw, Loader2, Eye } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/app/context/AuthContext';
 
 // รายการระบบและสิทธิ์ที่ทำได้
 const RESOURCES = [
@@ -15,15 +16,21 @@ const RESOURCES = [
 ];
 
 const ACTIONS = [
-  { id: 'view', label: 'ดูข้อมูล' },
-  { id: 'create', label: 'เพิ่ม' },
-  { id: 'edit', label: 'แก้ไข' },
-  { id: 'delete', label: 'ลบ' },
-  { id: 'show_cost', label: 'เห็นราคาทุน' }, // Special
-  { id: 'show_profit', label: 'เห็นกำไร' },   // Special
+  { id: 'view',        label: 'ดูข้อมูล' },
+  { id: 'create',      label: 'เพิ่ม' },
+  { id: 'edit',        label: 'แก้ไข' },
+  { id: 'delete',      label: 'ลบ' },
+  { id: 'show_cost',   label: 'เห็นราคาทุน', onlyFor: ['products', 'orders', 'services'] },
+  { id: 'show_profit', label: 'เห็นกำไร',    onlyFor: ['products', 'orders', 'services'] },
+  { id: 'prepare',     label: 'เตรียมของ',    onlyFor: ['assembly'] },
+  { id: 'assemble',    label: 'ประกอบ/ทำ',   onlyFor: ['assembly'] },
+  { id: 'qc',          label: 'QC / ตีกลับ', onlyFor: ['assembly'] },
 ];
 
 const RoleManager = () => {
+  const { realRole, impersonate, isImpersonating, stopImpersonating, role: currentRole } = useAuth();
+  const canSimulate = realRole?.name === 'Supervisor' || realRole?.name === 'Admin';
+
   const [roles, setRoles] = useState([]);
   const [selectedRole, setSelectedRole] = useState(null);
   const [permissions, setPermissions] = useState({}); // { resource: { action: true/false } }
@@ -95,45 +102,32 @@ const RoleManager = () => {
     else setSelectedRole(null);
   };
 
-  const togglePermission = (resId, actId) => {
-    setPermissions(prev => ({
-      ...prev,
+  const togglePermission = async (resId, actId) => {
+    const newPermissions = {
+      ...permissions,
       [resId]: {
-        ...prev[resId],
-        [actId]: !prev[resId][actId]
+        ...permissions[resId],
+        [actId]: !permissions[resId][actId]
       }
-    }));
+    };
+    setPermissions(newPermissions);
+    await savePermissions(newPermissions);
   };
 
-  const savePermissions = async () => {
+  const savePermissions = async (permData) => {
     if (!selectedRole) return;
     setLoading(true);
-
     try {
-      // 1. Backup existing permissions (for rollback)
-      const { data: backup } = await supabase.from('role_permissions').select('*').eq('role_id', selectedRole.id);
-
-      // 2. Prepare new data
       const upsertData = RESOURCES.map(res => ({
         role_id: selectedRole.id,
         resource: res.id,
-        actions: permissions[res.id],
+        actions: permData[res.id],
       }));
-
-      // 3. Delete old
       await supabase.from('role_permissions').delete().eq('role_id', selectedRole.id);
-
-      // 4. Insert new
       const { error } = await supabase.from('role_permissions').insert(upsertData);
-
-      if (error) {
-        // Rollback: restore backup
-        if (backup?.length) await supabase.from('role_permissions').insert(backup);
-        throw error;
-      }
-
+      if (error) throw error;
       setSavedMsg(true);
-      setTimeout(() => setSavedMsg(false), 3000);
+      setTimeout(() => setSavedMsg(false), 2000);
     } catch (err) {
       alert('บันทึกไม่สำเร็จ: ' + err.message);
     } finally {
@@ -152,19 +146,43 @@ const RoleManager = () => {
         </div>
         
         <div className="flex-1 overflow-y-auto p-2 space-y-1">
-          {roles.map(r => (
-            <div 
-              key={r.id}
-              onClick={() => handleRoleSelect(r)}
-              className={`p-3 rounded-xl cursor-pointer flex justify-between items-center transition-all ${selectedRole?.id === r.id ? 'bg-indigo-50 text-indigo-700 border border-indigo-200 shadow-sm' : 'hover:bg-gray-50 text-gray-600 border border-transparent'}`}
-            >
-              <div className="flex items-center gap-2">
-                 <Shield size={16} className={selectedRole?.id === r.id ? 'text-indigo-500' : 'text-gray-400'}/>
-                 <span className="font-medium text-sm">{r.name}</span>
+          {roles.map(r => {
+            const isSimulating = isImpersonating && currentRole?.id === r.id;
+            return (
+              <div key={r.id} className={`rounded-xl border transition-all ${selectedRole?.id === r.id ? 'bg-indigo-50 border-indigo-200 shadow-sm' : 'border-transparent hover:bg-gray-50'}`}>
+                <div
+                  onClick={() => handleRoleSelect(r)}
+                  className={`p-3 cursor-pointer flex justify-between items-center ${selectedRole?.id === r.id ? 'text-indigo-700' : 'text-gray-600'}`}
+                >
+                  <div className="flex items-center gap-2">
+                    <Shield size={16} className={selectedRole?.id === r.id ? 'text-indigo-500' : 'text-gray-400'}/>
+                    <span className="font-medium text-sm">{r.name}</span>
+                    {isSimulating && <span className="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-bold">จำลองอยู่</span>}
+                  </div>
+                  {r.is_system && <span className="text-[10px] bg-gray-200 text-gray-500 px-1.5 py-0.5 rounded">System</span>}
+                </div>
+                {canSimulate && (
+                  <div className="px-3 pb-2">
+                    {isSimulating ? (
+                      <button
+                        onClick={stopImpersonating}
+                        className="w-full text-xs font-semibold text-amber-700 bg-amber-100 hover:bg-amber-200 px-3 py-1.5 rounded-lg transition-colors flex items-center justify-center gap-1.5"
+                      >
+                        <Eye size={12}/> ออกจากโหมดจำลอง
+                      </button>
+                    ) : (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); impersonate(r.name); }}
+                        className="w-full text-xs font-semibold text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 px-3 py-1.5 rounded-lg transition-colors flex items-center justify-center gap-1.5"
+                      >
+                        <Eye size={12}/> จำลองมุมมอง
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
-              {r.is_system && <span className="text-[10px] bg-gray-200 text-gray-500 px-1.5 py-0.5 rounded">System</span>}
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         <div className="p-3 border-t border-gray-100 bg-gray-50">
@@ -203,17 +221,18 @@ const RoleManager = () => {
                  <p className="text-sm text-gray-500 mt-1">{selectedRole.description || 'จัดการสิทธิ์การเข้าถึงสำหรับตำแหน่งนี้'}</p>
                </div>
                <div className="flex gap-3 items-center">
-                 {savedMsg && (
-                   <span className="flex items-center gap-1.5 text-emerald-600 text-sm font-medium animate-in fade-in">
-                     <CheckCircle size={16}/> บันทึกแล้ว
+                 {loading ? (
+                   <span className="flex items-center gap-1.5 text-gray-400 text-sm font-medium">
+                     <Loader2 size={15} className="animate-spin"/> กำลังบันทึก...
                    </span>
-                 )}
+                 ) : savedMsg ? (
+                   <span className="flex items-center gap-1.5 text-emerald-600 text-sm font-medium animate-in fade-in">
+                     <CheckCircle size={15}/> บันทึกแล้ว
+                   </span>
+                 ) : null}
                  {!selectedRole.is_system && (
                    <button onClick={() => handleDeleteRole(selectedRole.id)} className="px-4 py-2 border border-red-100 text-red-600 rounded-xl text-sm font-medium hover:bg-red-50">ลบตำแหน่ง</button>
                  )}
-                 <button onClick={savePermissions} disabled={loading} className="px-6 py-2 bg-indigo-600 text-white rounded-xl text-sm font-bold shadow-lg shadow-indigo-200 hover:bg-indigo-700 flex items-center gap-2">
-                   {loading ? <Loader2 className="animate-spin" size={18}/> : <Save size={18}/>} บันทึกการเปลี่ยนแปลง
-                 </button>
                </div>
             </div>
 
@@ -223,13 +242,17 @@ const RoleManager = () => {
                    <thead>
                      <tr className="bg-gray-50 text-gray-500 border-b border-gray-200 text-xs uppercase tracking-wider">
                        <th className="px-6 py-4 text-left font-bold w-48">ระบบงาน (Module)</th>
-                       {ACTIONS.map(act => (
-                         <th key={act.id} className={`px-4 py-4 text-center font-bold ${
-                           ['show_cost', 'show_profit'].includes(act.id) ? 'bg-amber-50 text-amber-700' : ''
-                         }`}>
-                           {act.label}
-                         </th>
-                       ))}
+                       {ACTIONS.map(act => {
+                         const isSpecial  = ['show_cost', 'show_profit'].includes(act.id);
+                         const isAssembly = ['prepare', 'assemble', 'qc'].includes(act.id);
+                         return (
+                           <th key={act.id} className={`px-4 py-4 text-center font-bold ${
+                             isAssembly || isSpecial ? 'bg-amber-50 text-amber-700' : ''
+                           }`}>
+                             {act.label}
+                           </th>
+                         );
+                       })}
                      </tr>
                    </thead>
                    <tbody className="divide-y divide-gray-100">
@@ -237,24 +260,30 @@ const RoleManager = () => {
                        <tr key={res.id} className="hover:bg-gray-50 transition-colors">
                          <td className="px-6 py-4 font-bold text-gray-800">{res.label}</td>
                          {ACTIONS.map(act => {
-                           const isSpecial = ['show_cost', 'show_profit'].includes(act.id);
-                           // บาง Module อาจไม่มี cost/profit ให้ซ่อน checkbox
-                           const isHidden = isSpecial && ['users', 'marketing'].includes(res.id); 
+                           const isSpecial  = ['show_cost', 'show_profit'].includes(act.id);
+                           const isAssembly = ['prepare', 'assemble', 'qc'].includes(act.id);
+                           const isHidden   = act.onlyFor && !act.onlyFor.includes(res.id);
 
                            return (
-                             <td key={act.id} className={`px-4 py-4 text-center ${isSpecial ? 'bg-amber-50/30' : ''}`}>
-                               {!isHidden && (
-                                 <label className="relative inline-flex items-center justify-center cursor-pointer group">
-                                   <input 
-                                     type="checkbox" 
+                             <td key={act.id} className={`px-4 py-4 text-center ${
+                               isAssembly ? 'bg-amber-50/20' :
+                               isSpecial  ? 'bg-amber-50/30' : ''
+                             }`}>
+                               {isHidden ? (
+                                 <span className="text-gray-200 select-none">—</span>
+                               ) : (
+                                 <label className={`relative inline-flex items-center justify-center group ${loading ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}>
+                                   <input
+                                     type="checkbox"
                                      className="peer sr-only"
                                      checked={permissions[res.id]?.[act.id] || false}
-                                     onChange={() => togglePermission(res.id, act.id)}
+                                     onChange={() => !loading && togglePermission(res.id, act.id)}
+                                     disabled={loading}
                                    />
                                    <div className={`w-5 h-5 border-2 rounded transition-all flex items-center justify-center ${
-                                     permissions[res.id]?.[act.id] 
-                                       ? (isSpecial ? 'bg-amber-500 border-amber-500' : 'bg-indigo-600 border-indigo-600') 
-                                       : 'border-gray-300 bg-white group-hover:border-indigo-400'
+                                     permissions[res.id]?.[act.id]
+                                       ? (isSpecial || isAssembly ? 'bg-amber-500 border-amber-500' : 'bg-indigo-600 border-indigo-600')
+                                       : `border-gray-300 bg-white ${!loading ? 'group-hover:border-indigo-400' : ''}`
                                    }`}>
                                      {permissions[res.id]?.[act.id] && <CheckCircle size={14} className="text-white" strokeWidth={3} />}
                                    </div>

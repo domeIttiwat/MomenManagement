@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ArrowLeft, Save, Loader2, Info, Wrench, Calendar, Clock, User, FileText, CheckCircle, Printer, History } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/app/context/AuthContext';
 import CustomerSelector from '../orders/CustomerSelector';
 import ImageUploader from '../orders/ImageUploader';
 import PaymentManager from '../orders/PaymentManager';
@@ -11,6 +12,8 @@ import ServiceBillPreview from './ServiceBillPreview';
 import ServiceUpdateManager from './ServiceUpdateManager';
 
 const ServiceForm = ({ onCancel, onSuccess, initialData }) => {
+  const { profile } = useAuth();
+  const meRef = () => profile ? { id: profile.id, name: `${profile.first_name} ${profile.last_name}` } : null;
   const [loading, setLoading] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   
@@ -161,7 +164,7 @@ const ServiceForm = ({ onCancel, onSuccess, initialData }) => {
       let serviceId = initialData?.id;
 
       if (serviceId) {
-        const { error } = await supabase.from('services').update(payload).eq('id', serviceId);
+        const { error } = await supabase.from('services').update({ ...payload, updated_by: meRef() }).eq('id', serviceId);
         if (error) throw error;
         
         await supabase.from('service_items').delete().eq('service_id', serviceId);
@@ -169,7 +172,7 @@ const ServiceForm = ({ onCancel, onSuccess, initialData }) => {
         await supabase.from('service_payments').delete().eq('service_id', serviceId);
         await supabase.from('service_updates').delete().eq('service_id', serviceId);
       } else {
-        const { data, error } = await supabase.from('services').insert([payload]).select().single();
+        const { data, error } = await supabase.from('services').insert([{ ...payload, created_by: meRef() }]).select().single();
         if (error) throw error;
         serviceId = data.id;
       }

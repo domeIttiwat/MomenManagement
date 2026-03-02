@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Users, Plus, Search, ShieldCheck, UserPlus, Loader2, RefreshCw, CheckCircle, XCircle } from 'lucide-react';
+import { Users, Search, ShieldCheck, UserPlus, Loader2, RefreshCw, CheckCircle, XCircle, Clock, ArrowLeft } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import UserList from './UserList';
 import UserDetail from './UserDetail';
@@ -14,6 +14,7 @@ const UserMain = () => {
   const [loading, setLoading] = useState(false);
   const [selectedUser, setSelectedUser] = useState(null);
   const [search, setSearch] = useState('');
+  const [filterStatus, setFilterStatus] = useState('all');
   const [toast, setToast] = useState(null); // { type: 'success'|'error', msg }
 
   const showToast = (msg, type = 'success') => {
@@ -69,15 +70,18 @@ const UserMain = () => {
     fetchUsers();
   };
 
+  const pendingUsers = useMemo(() => users.filter(u => u.status === 'pending'), [users]);
+
   const filteredUsers = useMemo(() => {
-    if (!search) return users;
+    let list = filterStatus === 'pending' ? users.filter(u => u.status === 'pending') : users;
+    if (!search) return list;
     const s = search.toLowerCase();
-    return users.filter(u =>
+    return list.filter(u =>
       u.first_name?.toLowerCase().includes(s) ||
       u.email?.toLowerCase().includes(s) ||
       u.nickname?.toLowerCase().includes(s)
     );
-  }, [users, search]);
+  }, [users, search, filterStatus]);
 
   // Views Routing
   if (view === 'roles') return (
@@ -115,7 +119,7 @@ const UserMain = () => {
     <UserForm
       initialData={selectedUser}
       roles={roles}
-      onCancel={() => setView('detail')}
+      onCancel={() => setView(selectedUser?.status === 'pending' ? 'list' : 'detail')}
       onSuccess={() => { setView('list'); fetchUsers(); showToast('บันทึกข้อมูลเรียบร้อยแล้ว'); }}
     />
   );
@@ -131,7 +135,9 @@ const UserMain = () => {
           <h1 className="text-3xl font-bold tracking-tight text-white flex items-center gap-3">
             <Users size={32} className="text-indigo-100" /> จัดการทีมงาน
           </h1>
-          <p className="text-indigo-100 mt-1 font-medium ml-1">สมาชิกทั้งหมด ({filteredUsers.length})</p>
+          <p className="text-indigo-100 mt-1 font-medium ml-1">
+            {filterStatus === 'pending' ? `รออนุมัติ (${filteredUsers.length})` : `สมาชิกทั้งหมด (${filteredUsers.length})`}
+          </p>
         </div>
         <div className="flex gap-2">
           <button onClick={() => setView('roles')} className="bg-white/10 hover:bg-white/20 text-white px-4 py-2.5 rounded-xl font-medium backdrop-blur-sm transition-all text-sm border border-white/10">
@@ -142,6 +148,31 @@ const UserMain = () => {
           </button>
         </div>
       </div>
+
+      {/* Pending Banner */}
+      {pendingUsers.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            <Clock size={18} className="text-amber-600 shrink-0" />
+            <span className="bg-amber-500 text-white text-xs font-bold px-2 py-0.5 rounded-full shrink-0">
+              {pendingUsers.length}
+            </span>
+            <p className="text-sm font-semibold text-amber-800 shrink-0">คำขอรออนุมัติ</p>
+            <p className="text-xs text-amber-600 truncate hidden sm:block">
+              {pendingUsers.map(u => `${u.first_name} ${u.last_name}`.trim()).join(', ')}
+            </p>
+          </div>
+          {filterStatus === 'pending' ? (
+            <button onClick={() => setFilterStatus('all')} className="text-xs text-amber-700 font-semibold hover:underline flex items-center gap-1 shrink-0">
+              <ArrowLeft size={12} /> ดูทั้งหมด
+            </button>
+          ) : (
+            <button onClick={() => setFilterStatus('pending')} className="text-xs text-amber-700 font-semibold hover:underline shrink-0">
+              ดูทั้งหมด →
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Toolbar */}
       <div className="bg-white p-2 rounded-2xl shadow-sm border border-gray-100 flex gap-3 justify-between items-center">
@@ -165,7 +196,7 @@ const UserMain = () => {
         <UserList
           users={filteredUsers}
           roles={roles}
-          onSelect={(u) => { setSelectedUser(u); setView('detail'); }}
+          onSelect={(u) => { setSelectedUser(u); setView(u.status === 'pending' ? 'form' : 'detail'); }}
           onUpdateStatus={updateStatus}
           onUpdateRole={updateRole}
         />

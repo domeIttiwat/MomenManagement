@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   ArrowLeft, Edit, Trash2, CheckCircle, XCircle, RotateCcw, X,
   ChevronRight, Loader2, Send, User, Clock, MessageCircle,
-  Phone, MapPin, Image as ImageIcon, ZoomIn, UserCheck, Search,
+  Phone, MapPin, Image as ImageIcon, ZoomIn, UserCheck, Search, Eye,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
@@ -68,7 +68,7 @@ const TimelineWidget = ({ events }) => (
 );
 
 const AssemblyDetail = ({ job: initialJob, onBack, onEdit, onDelete }) => {
-  const { profile } = useAuth();
+  const { profile, can } = useAuth();
   const [job, setJob]       = useState(initialJob);
   const [saving, setSaving] = useState(false);
   const [rejectInputs, setRejectInputs] = useState({});
@@ -80,6 +80,11 @@ const AssemblyDetail = ({ job: initialJob, onBack, onEdit, onDelete }) => {
   const [postingComment, setPostingComment] = useState(false);
   const [timelineImages, setTimelineImages] = useState([]);
   const [lightboxImg, setLightboxImg] = useState(null);
+  const [previewUser, setPreviewUser] = useState(null);
+  const [showPreviewPicker, setShowPreviewPicker] = useState(false);
+  const [assembleModal, setAssembleModal]   = useState(null); // null | { itemId, itemName }
+  const [assembleImages, setAssembleImages] = useState([]);   // [{ url, file }]
+  const [uploadingImages, setUploadingImages] = useState(false);
 
   useEffect(() => {
     setJob(initialJob);
@@ -124,6 +129,14 @@ const AssemblyDetail = ({ job: initialJob, onBack, onEdit, onDelete }) => {
     : { id: null, name: 'Admin' };
 
   const isActive = job.stage !== 'completed' && job.stage !== 'cancelled';
+
+  // ── Preview mode ──
+  const effectiveUserId = previewUser?.id || profile?.id;
+  const isPreviewMode = !!previewUser;
+  const isItemOpenToUser = (item, uid) => {
+    if (!item.item_assignees || item.item_assignees.length === 0) return true;
+    return item.item_assignees.some(a => a.id === uid);
+  };
 
   // ── Per-item assignment (multiple) ──
   const addItemAssignee = async (itemId, user) => {
@@ -171,16 +184,38 @@ const AssemblyDetail = ({ job: initialJob, onBack, onEdit, onDelete }) => {
     setSaving(false);
   };
 
-  const markAssembled = async (itemId) => {
+  const markAssembled = async (itemId, imageUrls = []) => {
     setSaving(true);
     const now = new Date().toISOString();
     const newItems = job.items.map(it =>
       it.id === itemId
-        ? { ...it, assembled_by: meRef(), assembled_at: now, started_at: it.started_at || now }
+        ? { ...it, assembled_by: meRef(), assembled_at: now, started_at: it.started_at || now, assembled_images: imageUrls }
         : it
     );
     await updateJobInDB({ items: newItems });
     setSaving(false);
+  };
+
+  const handleAssembleConfirm = async (skipImages = false) => {
+    if (!assembleModal) return;
+    setUploadingImages(true);
+    let imageUrls = [];
+    if (!skipImages && assembleImages.length > 0) {
+      imageUrls = await Promise.all(assembleImages.map(async (imgObj) => {
+        if (imgObj.file) {
+          const ext = imgObj.file.name.split('.').pop();
+          const fileName = `asm-${job.id}-${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+          await supabase.storage.from('orders').upload(fileName, imgObj.file);
+          const { data } = supabase.storage.from('orders').getPublicUrl(fileName);
+          return data.publicUrl;
+        }
+        return imgObj.url;
+      }));
+    }
+    await markAssembled(assembleModal.itemId, imageUrls);
+    setUploadingImages(false);
+    setAssembleModal(null);
+    setAssembleImages([]);
   };
 
   const cancelPrepared = async (itemId) => {
@@ -373,11 +408,14 @@ const AssemblyDetail = ({ job: initialJob, onBack, onEdit, onDelete }) => {
 
   // ── Prepare Cell ──
   const PrepareCell = ({ item }) => {
+    const hasRolePerm = can('assembly', 'prepare');
+    const notAssigned = (item.item_assignees?.length > 0) && !isItemOpenToUser(item, effectiveUserId);
+
     if (item.prepared_at) return (
       <div className="text-center">
         <div className="flex items-center justify-center gap-1">
           <span className="text-xs text-emerald-400 font-semibold">✓ เตรียมแล้ว</span>
-          {isActive && (
+          {isActive && !isPreviewMode && (
             <button onClick={() => cancelPrepared(item.id)} disabled={saving}
               className="text-slate-600 hover:text-red-400 transition-colors" title="ยกเลิก">
               <X size={11} />
@@ -392,7 +430,7 @@ const AssemblyDetail = ({ job: initialJob, onBack, onEdit, onDelete }) => {
       <div className="text-center">
         <div className="flex items-center justify-center gap-1">
           <span className="text-xs text-slate-500 font-semibold">– ข้ามการเตรียม</span>
-          {isActive && (
+          {isActive && !isPreviewMode && (
             <button onClick={() => cancelSkipPrepare(item.id)} disabled={saving}
               className="text-slate-600 hover:text-red-400 transition-colors" title="ยกเลิก">
               <X size={11} />
@@ -402,8 +440,14 @@ const AssemblyDetail = ({ job: initialJob, onBack, onEdit, onDelete }) => {
       </div>
     );
     if (!isActive) return <span className="text-slate-700 text-xs">—</span>;
+    if (!hasRolePerm) return null;
+    if (notAssigned) return (
+      <div className="flex items-center justify-center gap-1.5 py-1.5 px-2 border border-dashed border-slate-700 rounded-lg bg-slate-900/50">
+        <span className="text-xs text-slate-500">🔒 ไม่ได้รับมอบหมาย</span>
+      </div>
+    );
     return (
-      <div className="space-y-1">
+      <div className={`space-y-1 ${isPreviewMode ? 'pointer-events-none opacity-50' : ''}`}>
         <button onClick={() => markPrepared(item.id)} disabled={saving}
           className="text-xs bg-amber-500/15 hover:bg-amber-500/25 text-amber-400 border border-amber-500/25 px-3 py-1.5 rounded-lg font-semibold transition-all active:scale-95 disabled:opacity-50 w-full">
           ✓ เตรียมแล้ว
@@ -418,21 +462,26 @@ const AssemblyDetail = ({ job: initialJob, onBack, onEdit, onDelete }) => {
 
   // ── Assemble Cell ──
   const AssembleCell = ({ item }) => {
+    const hasRolePerm = can('assembly', 'assemble');
+    const notAssigned = (item.item_assignees?.length > 0) && !isItemOpenToUser(item, effectiveUserId);
     const rejected = item.qc_status === 'rejected';
     const readyToAssemble = item.prepared_at || item.skip_prepare;
 
-    if (rejected) return (
-      <button onClick={() => resetAssembled(item.id)} disabled={saving}
-        className="text-xs bg-orange-500/15 hover:bg-orange-500/25 text-orange-400 border border-orange-500/20 px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1 mx-auto transition-all">
-        <RotateCcw size={11} /> ทำใหม่
-      </button>
-    );
+    if (rejected) {
+      if (!hasRolePerm || notAssigned) return null;
+      return (
+        <button onClick={() => resetAssembled(item.id)} disabled={saving || isPreviewMode}
+          className={`text-xs bg-orange-500/15 hover:bg-orange-500/25 text-orange-400 border border-orange-500/20 px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1 mx-auto transition-all ${isPreviewMode ? 'pointer-events-none opacity-50' : ''}`}>
+          <RotateCcw size={11} /> ทำใหม่
+        </button>
+      );
+    }
 
     if (item.assembled_at) return (
       <div className="text-center">
         <div className="flex items-center justify-center gap-1">
           <span className="text-xs text-blue-400 font-semibold">✓ ทำเสร็จ</span>
-          {isActive && item.qc_status !== 'passed' && (
+          {isActive && item.qc_status !== 'passed' && !isPreviewMode && (
             <button onClick={() => cancelAssembled(item.id)} disabled={saving}
               className="text-slate-600 hover:text-red-400 transition-colors" title="ยกเลิก">
               <X size={11} />
@@ -442,6 +491,14 @@ const AssemblyDetail = ({ job: initialJob, onBack, onEdit, onDelete }) => {
         {item.started_at && <p className="text-[10px] text-slate-600 mt-0.5">เริ่ม {fmtTime(item.started_at)}</p>}
         <p className="text-[10px] text-slate-600">เสร็จ {fmtTime(item.assembled_at)}</p>
         <p className="text-[10px] text-slate-600">{item.assembled_by?.name}</p>
+        {item.assembled_images?.length > 0 && (
+          <div className="flex gap-1 mt-1.5 justify-center flex-wrap">
+            {item.assembled_images.map((url, i) => (
+              <img key={i} src={url} onClick={() => setLightboxImg(url)}
+                className="w-9 h-9 object-cover rounded-lg cursor-zoom-in border border-slate-700 hover:border-amber-500/50 transition-colors" alt="" />
+            ))}
+          </div>
+        )}
       </div>
     );
 
@@ -449,9 +506,15 @@ const AssemblyDetail = ({ job: initialJob, onBack, onEdit, onDelete }) => {
     if (!readyToAssemble) return (
       <span className="text-[11px] text-slate-700 italic text-center block">รอเตรียมของก่อน</span>
     );
+    if (!hasRolePerm) return null;
+    if (notAssigned) return (
+      <div className="flex items-center justify-center gap-1.5 py-1.5 px-2 border border-dashed border-slate-700 rounded-lg bg-slate-900/50">
+        <span className="text-xs text-slate-500">🔒 ไม่ได้รับมอบหมาย</span>
+      </div>
+    );
 
     return (
-      <div className="space-y-1.5 text-center">
+      <div className={`space-y-1.5 text-center ${isPreviewMode ? 'pointer-events-none opacity-50' : ''}`}>
         {item.started_at ? (
           <p className="text-[10px] text-slate-600">▶ {fmtTime(item.started_at)}</p>
         ) : (
@@ -460,7 +523,7 @@ const AssemblyDetail = ({ job: initialJob, onBack, onEdit, onDelete }) => {
             ▶ บันทึกเวลาเริ่ม
           </button>
         )}
-        <button onClick={() => markAssembled(item.id)} disabled={saving}
+        <button onClick={() => { setAssembleModal({ itemId: item.id, itemName: item.name }); setAssembleImages([]); }} disabled={saving}
           className="text-xs bg-blue-500/15 hover:bg-blue-500/25 text-blue-400 border border-blue-500/20 px-3 py-1.5 rounded-lg font-semibold transition-all active:scale-95 disabled:opacity-50 w-full">
           ✓ ทำเสร็จ
         </button>
@@ -508,25 +571,29 @@ const AssemblyDetail = ({ job: initialJob, onBack, onEdit, onDelete }) => {
             ))}
           </div>
         )}
-        <div className="flex gap-1 justify-center">
-          <button onClick={() => markQCPass(item.id)} disabled={saving}
-            className="text-xs bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 border border-emerald-500/20 px-2 py-1.5 rounded-lg font-semibold flex items-center gap-1 transition-all">
-            <CheckCircle size={11} /> ผ่าน
-          </button>
-          <button onClick={() => setRejectInputs(p => ({ ...p, [item.id]: p[item.id] !== undefined ? undefined : '' }))}
-            className="text-xs bg-red-500/15 hover:bg-red-500/25 text-red-400 border border-red-500/20 px-2 py-1.5 rounded-lg font-semibold flex items-center gap-1 transition-all">
-            <XCircle size={11} /> ตีกลับ
-          </button>
-        </div>
-        {showRI && (
-          <div className="flex gap-1">
-            <input className="text-xs bg-slate-800 border border-red-500/30 text-white rounded-lg px-2 py-1.5 flex-1 focus:outline-none focus:border-red-400 placeholder:text-slate-600"
-              placeholder="เหตุผล..." value={rejectInputs[item.id]}
-              onChange={e => setRejectInputs(p => ({ ...p, [item.id]: e.target.value }))}
-              autoFocus onKeyDown={e => { if (e.key === 'Enter') markQCReject(item.id); }} />
-            <button onClick={() => markQCReject(item.id)}
-              className="text-xs bg-red-500 hover:bg-red-400 text-white px-2 py-1.5 rounded-lg font-semibold">ยืนยัน</button>
-          </div>
+        {can('assembly', 'qc') && (
+          <>
+            <div className={`flex gap-1 justify-center ${isPreviewMode ? 'pointer-events-none opacity-50' : ''}`}>
+              <button onClick={() => markQCPass(item.id)} disabled={saving}
+                className="text-xs bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 border border-emerald-500/20 px-2 py-1.5 rounded-lg font-semibold flex items-center gap-1 transition-all">
+                <CheckCircle size={11} /> ผ่าน
+              </button>
+              <button onClick={() => setRejectInputs(p => ({ ...p, [item.id]: p[item.id] !== undefined ? undefined : '' }))}
+                className="text-xs bg-red-500/15 hover:bg-red-500/25 text-red-400 border border-red-500/20 px-2 py-1.5 rounded-lg font-semibold flex items-center gap-1 transition-all">
+                <XCircle size={11} /> ตีกลับ
+              </button>
+            </div>
+            {showRI && !isPreviewMode && (
+              <div className="flex gap-1">
+                <input className="text-xs bg-slate-800 border border-red-500/30 text-white rounded-lg px-2 py-1.5 flex-1 focus:outline-none focus:border-red-400 placeholder:text-slate-600"
+                  placeholder="เหตุผล..." value={rejectInputs[item.id]}
+                  onChange={e => setRejectInputs(p => ({ ...p, [item.id]: e.target.value }))}
+                  autoFocus onKeyDown={e => { if (e.key === 'Enter') markQCReject(item.id); }} />
+                <button onClick={() => markQCReject(item.id)}
+                  className="text-xs bg-red-500 hover:bg-red-400 text-white px-2 py-1.5 rounded-lg font-semibold">ยืนยัน</button>
+              </div>
+            )}
+          </>
         )}
       </div>
     );
@@ -612,58 +679,95 @@ const AssemblyDetail = ({ job: initialJob, onBack, onEdit, onDelete }) => {
         </div>
 
         {/* Prepare */}
-        {item.prepared_at ? (
-          <span className="text-xs text-emerald-400 font-semibold bg-emerald-500/10 px-2 py-1.5 rounded-lg inline-flex items-center gap-1.5 mr-2 mb-2">
-            ✓ เตรียมแล้ว {fmtTime(item.prepared_at)}
-            {isActive && <button onClick={() => cancelPrepared(item.id)} disabled={saving} className="text-emerald-700 hover:text-red-400 transition-colors"><X size={11} /></button>}
-          </span>
-        ) : item.skip_prepare ? (
-          <span className="text-xs text-slate-500 bg-slate-800 px-2 py-1.5 rounded-lg inline-flex items-center gap-1.5 mr-2 mb-2">
-            – ข้ามการเตรียม
-            {isActive && <button onClick={() => cancelSkipPrepare(item.id)} disabled={saving} className="text-slate-600 hover:text-red-400 transition-colors"><X size={11} /></button>}
-          </span>
-        ) : isActive ? (
-          <div className="flex gap-2 mb-2">
-            <button onClick={() => markPrepared(item.id)} disabled={saving}
-              className="text-xs bg-amber-500/15 text-amber-400 border border-amber-500/20 px-3 py-1.5 rounded-lg font-semibold">
-              ✓ เตรียมแล้ว
-            </button>
-            <button onClick={() => markSkipPrepare(item.id)} disabled={saving}
-              className="text-xs text-slate-600 hover:text-slate-400 border border-slate-700 px-3 py-1.5 rounded-lg transition-colors">
-              ข้ามการเตรียม
-            </button>
-          </div>
-        ) : null}
+        {(() => {
+          const hasPrepPerm = can('assembly', 'prepare');
+          const notAssigned = (item.item_assignees?.length > 0) && !isItemOpenToUser(item, effectiveUserId);
+          if (item.prepared_at) return (
+            <span className="text-xs text-emerald-400 font-semibold bg-emerald-500/10 px-2 py-1.5 rounded-lg inline-flex items-center gap-1.5 mr-2 mb-2">
+              ✓ เตรียมแล้ว {fmtTime(item.prepared_at)}
+              {isActive && !isPreviewMode && <button onClick={() => cancelPrepared(item.id)} disabled={saving} className="text-emerald-700 hover:text-red-400 transition-colors"><X size={11} /></button>}
+            </span>
+          );
+          if (item.skip_prepare) return (
+            <span className="text-xs text-slate-500 bg-slate-800 px-2 py-1.5 rounded-lg inline-flex items-center gap-1.5 mr-2 mb-2">
+              – ข้ามการเตรียม
+              {isActive && !isPreviewMode && <button onClick={() => cancelSkipPrepare(item.id)} disabled={saving} className="text-slate-600 hover:text-red-400 transition-colors"><X size={11} /></button>}
+            </span>
+          );
+          if (!isActive || !hasPrepPerm) return null;
+          if (notAssigned) return (
+            <span className="text-xs text-slate-500 bg-slate-900 border border-dashed border-slate-700 px-2 py-1.5 rounded-lg inline-flex items-center gap-1.5 mr-2 mb-2">
+              🔒 ไม่ได้รับมอบหมาย
+            </span>
+          );
+          return (
+            <div className={`flex gap-2 mb-2 ${isPreviewMode ? 'pointer-events-none opacity-50' : ''}`}>
+              <button onClick={() => markPrepared(item.id)} disabled={saving}
+                className="text-xs bg-amber-500/15 text-amber-400 border border-amber-500/20 px-3 py-1.5 rounded-lg font-semibold">
+                ✓ เตรียมแล้ว
+              </button>
+              <button onClick={() => markSkipPrepare(item.id)} disabled={saving}
+                className="text-xs text-slate-600 hover:text-slate-400 border border-slate-700 px-3 py-1.5 rounded-lg transition-colors">
+                ข้ามการเตรียม
+              </button>
+            </div>
+          );
+        })()}
 
         {/* Assemble / Done */}
-        {rejected ? (
-          <button onClick={() => resetAssembled(item.id)} disabled={saving}
-            className="text-xs bg-orange-500/15 text-orange-400 border border-orange-500/20 px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1 mb-2">
-            <RotateCcw size={11} /> ทำใหม่
-          </button>
-        ) : item.assembled_at ? (
-          <span className="text-xs text-blue-400 font-semibold bg-blue-500/10 px-2 py-1.5 rounded-lg inline-flex items-center gap-1.5 mr-2 mb-2">
-            ✓ ทำเสร็จ {fmtTime(item.assembled_at)}
-            {isActive && item.qc_status !== 'passed' && (
-              <button onClick={() => cancelAssembled(item.id)} disabled={saving} className="text-blue-700 hover:text-red-400 transition-colors"><X size={11} /></button>
-            )}
-          </span>
-        ) : isActive && (item.prepared_at || item.skip_prepare) ? (
-          <div className="flex flex-wrap gap-2 mb-2">
-            {!item.started_at ? (
-              <button onClick={() => markStarted(item.id)} disabled={saving}
-                className="text-xs bg-slate-700 text-slate-400 border border-slate-600 px-3 py-1.5 rounded-lg font-semibold">
-                ▶ เริ่มทำ
+        {(() => {
+          const hasAssemblePerm = can('assembly', 'assemble');
+          const notAssigned = (item.item_assignees?.length > 0) && !isItemOpenToUser(item, effectiveUserId);
+          if (rejected) {
+            if (!hasAssemblePerm || notAssigned) return null;
+            return (
+              <button onClick={() => resetAssembled(item.id)} disabled={saving || isPreviewMode}
+                className={`text-xs bg-orange-500/15 text-orange-400 border border-orange-500/20 px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1 mb-2 ${isPreviewMode ? 'pointer-events-none opacity-50' : ''}`}>
+                <RotateCcw size={11} /> ทำใหม่
               </button>
-            ) : (
-              <span className="text-xs text-slate-500 py-1.5">▶ เริ่ม {fmtTime(item.started_at)}</span>
-            )}
-            <button onClick={() => markAssembled(item.id)} disabled={saving}
-              className="text-xs bg-blue-500/15 text-blue-400 border border-blue-500/20 px-3 py-1.5 rounded-lg font-semibold">
-              ✓ ทำเสร็จ
-            </button>
-          </div>
-        ) : null}
+            );
+          }
+          if (item.assembled_at) return (
+            <div className="mr-2 mb-2">
+              <span className="text-xs text-blue-400 font-semibold bg-blue-500/10 px-2 py-1.5 rounded-lg inline-flex items-center gap-1.5">
+                ✓ ทำเสร็จ {fmtTime(item.assembled_at)}
+                {isActive && item.qc_status !== 'passed' && !isPreviewMode && (
+                  <button onClick={() => cancelAssembled(item.id)} disabled={saving} className="text-blue-700 hover:text-red-400 transition-colors"><X size={11} /></button>
+                )}
+              </span>
+              {item.assembled_images?.length > 0 && (
+                <div className="flex gap-1.5 flex-wrap mt-1">
+                  {item.assembled_images.map((url, i) => (
+                    <img key={i} src={url} onClick={() => setLightboxImg(url)}
+                      className="w-12 h-12 object-cover rounded-xl cursor-zoom-in border border-slate-700" alt="" />
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+          if (!isActive || !(item.prepared_at || item.skip_prepare) || !hasAssemblePerm) return null;
+          if (notAssigned) return (
+            <span className="text-xs text-slate-500 bg-slate-900 border border-dashed border-slate-700 px-2 py-1.5 rounded-lg inline-flex items-center gap-1.5 mr-2 mb-2">
+              🔒 ไม่ได้รับมอบหมาย
+            </span>
+          );
+          return (
+            <div className={`flex flex-wrap gap-2 mb-2 ${isPreviewMode ? 'pointer-events-none opacity-50' : ''}`}>
+              {!item.started_at ? (
+                <button onClick={() => markStarted(item.id)} disabled={saving}
+                  className="text-xs bg-slate-700 text-slate-400 border border-slate-600 px-3 py-1.5 rounded-lg font-semibold">
+                  ▶ เริ่มทำ
+                </button>
+              ) : (
+                <span className="text-xs text-slate-500 py-1.5">▶ เริ่ม {fmtTime(item.started_at)}</span>
+              )}
+              <button onClick={() => { setAssembleModal({ itemId: item.id, itemName: item.name }); setAssembleImages([]); }} disabled={saving}
+                className="text-xs bg-blue-500/15 text-blue-400 border border-blue-500/20 px-3 py-1.5 rounded-lg font-semibold">
+                ✓ ทำเสร็จ
+              </button>
+            </div>
+          );
+        })()}
 
         {/* QC history */}
         {(item.reject_history || []).length > 0 && (
@@ -681,8 +785,8 @@ const AssemblyDetail = ({ job: initialJob, onBack, onEdit, onDelete }) => {
             ✓ ผ่าน QC · {fmtTime(item.qc_at)}
           </span>
         )}
-        {job.stage === 'qc' && item.assembled_at && item.qc_status === 'pending' && (
-          <div className="flex flex-wrap gap-2 mt-1">
+        {job.stage === 'qc' && item.assembled_at && item.qc_status === 'pending' && can('assembly', 'qc') && (
+          <div className={`flex flex-wrap gap-2 mt-1 ${isPreviewMode ? 'pointer-events-none opacity-50' : ''}`}>
             <button onClick={() => markQCPass(item.id)} disabled={saving}
               className="text-xs bg-emerald-500/15 text-emerald-400 border border-emerald-500/20 px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1">
               <CheckCircle size={11} /> ผ่าน QC
@@ -693,7 +797,7 @@ const AssemblyDetail = ({ job: initialJob, onBack, onEdit, onDelete }) => {
             </button>
           </div>
         )}
-        {showRI && (
+        {showRI && can('assembly', 'qc') && !isPreviewMode && (
           <div className="flex gap-2 mt-2">
             <input className="text-xs bg-slate-800 border border-red-500/30 text-white rounded-lg px-3 py-2 flex-1 focus:outline-none placeholder:text-slate-600"
               placeholder="เหตุผล..." value={rejectInputs[item.id]}
@@ -744,6 +848,70 @@ const AssemblyDetail = ({ job: initialJob, onBack, onEdit, onDelete }) => {
         </div>
       )}
 
+      {/* Assemble Confirm Modal */}
+      {assembleModal && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md shadow-2xl animate-in fade-in zoom-in-95">
+            {/* Header */}
+            <div className="p-5 border-b border-slate-800 flex items-center justify-between">
+              <div>
+                <h3 className="text-white font-bold">ยืนยันทำเสร็จ</h3>
+                <p className="text-xs text-slate-400 mt-0.5 truncate">{assembleModal.itemName}</p>
+              </div>
+              <button onClick={() => { setAssembleModal(null); setAssembleImages([]); }}
+                className="text-slate-600 hover:text-white transition-colors">
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Upload area */}
+            <div className="p-5 space-y-3">
+              <p className="text-sm text-slate-400">อัพโหลดรูปภาพหลักฐาน <span className="text-slate-600">(ไม่บังคับ)</span></p>
+
+              {assembleImages.length > 0 && (
+                <div className="grid grid-cols-3 gap-2">
+                  {assembleImages.map((imgObj, idx) => (
+                    <div key={idx} className="relative aspect-square rounded-xl overflow-hidden border border-slate-700 group">
+                      <img src={imgObj.url} className="w-full h-full object-cover" alt="" />
+                      <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-all flex items-center justify-center">
+                        <button
+                          onClick={() => setAssembleImages(prev => prev.filter((_, i) => i !== idx))}
+                          className="text-white bg-red-500/80 hover:bg-red-500 rounded-full p-1.5 transition-colors">
+                          <X size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <label className="flex items-center justify-center gap-2 w-full py-3 border-2 border-dashed border-slate-700 hover:border-amber-500/50 rounded-xl cursor-pointer transition-colors text-slate-500 hover:text-amber-400 text-sm">
+                <input type="file" accept="image/*" className="hidden" multiple
+                  onChange={e => {
+                    const files = Array.from(e.target.files || []);
+                    const newImgs = files.map(f => ({ url: URL.createObjectURL(f), file: f }));
+                    setAssembleImages(prev => [...prev, ...newImgs]);
+                    e.target.value = '';
+                  }} />
+                <ImageIcon size={16} /> เพิ่มรูปภาพ
+              </label>
+            </div>
+
+            {/* Actions */}
+            <div className="p-5 pt-0 flex gap-3">
+              <button onClick={() => handleAssembleConfirm(true)} disabled={uploadingImages || saving}
+                className="flex-1 py-2.5 text-sm text-slate-400 hover:text-white border border-slate-700 hover:border-slate-500 rounded-xl transition-colors disabled:opacity-50">
+                ข้ามรูป
+              </button>
+              <button onClick={() => handleAssembleConfirm(false)} disabled={uploadingImages || saving}
+                className="flex-1 py-2.5 text-sm bg-blue-500 hover:bg-blue-400 text-white font-semibold rounded-xl transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2">
+                {(uploadingImages || saving) && <Loader2 size={15} className="animate-spin" />}
+                ✓ ยืนยัน
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Sticky Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-slate-900/80 backdrop-blur-md p-4 rounded-2xl border border-slate-800 sticky top-2 z-20 mb-5">
@@ -752,16 +920,70 @@ const AssemblyDetail = ({ job: initialJob, onBack, onEdit, onDelete }) => {
           <ArrowLeft size={18} /> <span className="hidden sm:inline">ย้อนกลับ</span>
         </button>
         <div className="flex flex-wrap gap-2">
-          <button onClick={onEdit}
-            className="flex items-center gap-2 px-5 py-2.5 bg-slate-700 hover:bg-slate-600 text-white rounded-xl font-medium text-sm transition-all active:scale-95">
-            <Edit size={16} /> แก้ไข
-          </button>
-          <button onClick={onDelete}
-            className="flex items-center gap-2 px-3 py-2.5 border border-slate-700 text-red-400 hover:bg-red-500/10 rounded-xl text-sm transition-all active:scale-95">
-            <Trash2 size={16} />
-          </button>
+          {can('assembly', 'edit') && (
+            <div className="relative">
+              <button
+                onClick={() => setShowPreviewPicker(!showPreviewPicker)}
+                className="flex items-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl font-medium text-sm transition-all border border-slate-700"
+              >
+                <Eye size={16} /> ดูมุมมองช่าง
+              </button>
+              {showPreviewPicker && (
+                <>
+                  <div className="fixed inset-0 z-30" onClick={() => setShowPreviewPicker(false)} />
+                  <div className="absolute right-0 top-11 z-40 bg-slate-800 rounded-xl shadow-2xl border border-slate-700 p-2 w-56 animate-in fade-in zoom-in-95">
+                    <p className="text-xs text-slate-500 px-2 py-1.5 font-medium">เลือกช่างที่ต้องการดู</p>
+                    <div className="border-t border-slate-700 mb-1" />
+                    <div className="max-h-56 overflow-y-auto space-y-0.5">
+                      {allUsers.map(u => (
+                        <div key={u.id}
+                          onClick={() => { setPreviewUser({ id: u.id, name: `${u.first_name} ${u.last_name}` }); setShowPreviewPicker(false); }}
+                          className="flex items-center gap-2 px-2.5 py-2 hover:bg-slate-700 rounded-lg cursor-pointer transition-colors">
+                          <div className="w-7 h-7 rounded-full bg-amber-900/50 border border-amber-800/40 flex items-center justify-center text-xs text-amber-300 font-bold overflow-hidden shrink-0">
+                            {u.avatar_url ? <img src={u.avatar_url} alt="" className="w-full h-full object-cover" /> : u.first_name?.[0] || '?'}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-xs text-slate-200 font-medium truncate">{u.first_name} {u.last_name}</p>
+                            {u.roles?.name && <p className="text-[10px] text-slate-500">{u.roles.name}</p>}
+                          </div>
+                        </div>
+                      ))}
+                      {allUsers.length === 0 && (
+                        <p className="text-xs text-slate-600 text-center py-3">ไม่มีรายชื่อ</p>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+          {can('assembly', 'edit') && (
+            <button onClick={onEdit}
+              className="flex items-center gap-2 px-5 py-2.5 bg-slate-700 hover:bg-slate-600 text-white rounded-xl font-medium text-sm transition-all active:scale-95">
+              <Edit size={16} /> แก้ไข
+            </button>
+          )}
+          {can('assembly', 'delete') && (
+            <button onClick={onDelete}
+              className="flex items-center gap-2 px-3 py-2.5 border border-slate-700 text-red-400 hover:bg-red-500/10 rounded-xl text-sm transition-all active:scale-95">
+              <Trash2 size={16} />
+            </button>
+          )}
         </div>
       </div>
+
+      {/* Preview Mode Banner */}
+      {isPreviewMode && (
+        <div className="flex items-center justify-between bg-amber-500/15 border border-amber-500/30 rounded-xl px-4 py-2.5 mb-2 -mt-2">
+          <div className="flex items-center gap-2 text-amber-400 text-sm font-medium">
+            <Eye size={15} />
+            <span>กำลังดูมุมมองของ <strong>{previewUser.name}</strong></span>
+          </div>
+          <button onClick={() => setPreviewUser(null)} className="text-amber-600 hover:text-amber-400 transition-colors text-xs flex items-center gap-1">
+            ออกจากโหมดนี้ <X size={14} />
+          </button>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
 

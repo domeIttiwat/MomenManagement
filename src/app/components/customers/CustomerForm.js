@@ -1,9 +1,12 @@
 import React, { useState } from 'react';
 import { ArrowLeft, Save, Loader2, User, Phone, MapPin, MessageSquare, Map, Wand2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/app/context/AuthContext';
 import ImageUploader from './ImageUploader';
 
 const CustomerForm = ({ onCancel, onSuccess, initialData }) => {
+  const { profile } = useAuth();
+  const meRef = () => profile ? { id: profile.id, name: `${profile.first_name} ${profile.last_name}` } : null;
   const [loading, setLoading] = useState(false);
   
   const normalizeImages = (imgs) => {
@@ -109,7 +112,7 @@ const CustomerForm = ({ onCancel, onSuccess, initialData }) => {
       let error;
       if (initialData?.id) {
         // กรณีแก้ไข: ไม่ต้องยุ่งกับ code
-        const res = await supabase.from('customers').update(payload).eq('id', initialData.id);
+        const res = await supabase.from('customers').update({ ...payload, updated_by: meRef() }).eq('id', initialData.id);
         error = res.error;
       } else {
         // กรณีสร้างใหม่: สร้างรหัสลูกค้าอัตโนมัติ (C-YYMM-XXXX)
@@ -117,7 +120,7 @@ const CustomerForm = ({ onCancel, onSuccess, initialData }) => {
         const code = `C-${d.getFullYear().toString().substr(-2)}${String(d.getMonth() + 1).padStart(2, '0')}-${Math.floor(1000 + Math.random() * 9000)}`;
         payload.code = code;
 
-        const res = await supabase.from('customers').insert([payload]);
+        const res = await supabase.from('customers').insert([{ ...payload, created_by: meRef() }]);
         error = res.error;
       }
 

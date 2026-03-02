@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Plus, Search, LayoutGrid, List as ListIcon, Loader2, ArrowUpDown, Users } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/app/context/AuthContext';
 import CustomerList from './CustomerList';
 import CustomerForm from './CustomerForm';
 import CustomerDetail from './CustomerDetail';
 
 const CustomerMain = ({ initialNavData, onViewOrder }) => {
+  const { can } = useAuth();
   const [view, setView] = useState('list');
   const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -85,12 +87,14 @@ const CustomerMain = ({ initialNavData, onViewOrder }) => {
           </h1>
           <p className="text-blue-100 mt-1 font-medium ml-1">ฐานข้อมูลลูกค้าทั้งหมด ({filteredAndSorted.length})</p>
         </div>
-        <button 
-            onClick={() => { setSelectedCustomer(null); setView('form'); }} 
-            className="bg-white text-blue-600 hover:bg-blue-50 px-6 py-3 rounded-xl font-bold shadow-md flex items-center gap-2 transition-all active:scale-95"
-        >
-          <Plus size={24} /> เพิ่มลูกค้า
-        </button>
+        {can('customers', 'create') && (
+          <button
+              onClick={() => { setSelectedCustomer(null); setView('form'); }}
+              className="bg-white text-blue-600 hover:bg-blue-50 px-6 py-3 rounded-xl font-bold shadow-md flex items-center gap-2 transition-all active:scale-95"
+          >
+            <Plus size={24} /> เพิ่มลูกค้า
+          </button>
+        )}
       </div>
 
       <div className="bg-white p-2 rounded-2xl shadow-sm border border-gray-100 flex flex-col md:flex-row gap-3">

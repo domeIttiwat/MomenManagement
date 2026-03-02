@@ -9,6 +9,7 @@ import OrdersTab from './OrdersTab';
 import ServicesTab from './ServicesTab';
 import YearlyOverviewTab from './YearlyOverviewTab';
 import MonthYearPicker from './MonthYearPicker';
+import AssemblyPerformance from '../assembly/AssemblyPerformance';
 
 const DashboardMain = () => {
   const auth = useAuth();
@@ -75,11 +76,12 @@ const DashboardMain = () => {
       </div>
 
       {/* Tabs Menu */}
-      <div className="flex p-1 bg-gray-100/80 rounded-xl w-fit">
+      <div className="flex flex-wrap p-1 bg-gray-100/80 rounded-xl w-fit gap-0.5">
          <button onClick={() => setActiveTab('overview')} className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'overview' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>ภาพรวมทั้งหมด</button>
          <button onClick={() => setActiveTab('orders')} className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'orders' ? 'bg-white text-emerald-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>ยอดขายออเดอร์</button>
          <button onClick={() => setActiveTab('services')} className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'services' ? 'bg-white text-orange-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>งานซ่อม/บริการ</button>
          <button onClick={() => setActiveTab('yearly')} className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'yearly' ? 'bg-white text-violet-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>ภาพรวมรายปี</button>
+         <button onClick={() => setActiveTab('assembly')} className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${activeTab === 'assembly' ? 'bg-white text-amber-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>ประสิทธิภาพช่าง</button>
       </div>
 
       {/* Tab Content */}
@@ -88,6 +90,7 @@ const DashboardMain = () => {
         {activeTab === 'orders' && <OrdersTab data={processedData} loading={loading} />}
         {activeTab === 'services' && <ServicesTab data={processedData} compareMode={compareMode} />}
         {activeTab === 'yearly' && <YearlyOverviewTab yearlyData={yearlyData} />}
+        {activeTab === 'assembly' && <AssemblyPerformance dateFilter={dateFilter} />}
       </div>
 
     </div>

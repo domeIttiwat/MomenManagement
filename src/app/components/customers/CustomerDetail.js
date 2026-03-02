@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { ArrowLeft, Edit, Trash2, MapPin, Phone, MessageSquare, Facebook, Instagram, MessageCircle, X, ShoppingBag, TrendingUp, DollarSign, Eye, EyeOff, Package, ExternalLink, Map } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/app/context/AuthContext';
 
 const CustomerDetail = ({ customer, onBack, onEdit, onDelete, onViewOrder }) => {
+  const { can } = useAuth();
   const [lightboxImg, setLightboxImg] = useState(null);
   const [orders, setOrders] = useState([]);
   const [loadingOrders, setLoadingOrders] = useState(false);
@@ -69,14 +71,20 @@ const CustomerDetail = ({ customer, onBack, onEdit, onDelete, onViewOrder }) => 
           <ArrowLeft size={20} /> <span className="hidden sm:inline">ย้อนกลับ</span>
         </button>
         <div className="flex gap-2">
-           <button 
-            onClick={() => setShowProfit(!showProfit)} 
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all border ${showProfit ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-white text-gray-500 border-gray-200'}`}
-          >
-            {showProfit ? <Eye size={18}/> : <EyeOff size={18}/>} {showProfit ? 'ซ่อนกำไร' : 'แสดงกำไร'}
-          </button>
-          <button onClick={onEdit} className="px-4 py-2.5 bg-gray-900 text-white rounded-xl flex items-center gap-2 shadow-lg hover:bg-black transition-all active:scale-95 text-sm font-medium"><Edit size={16}/> แก้ไข</button>
-          <button onClick={onDelete} className="px-4 py-2.5 bg-white text-red-600 border border-gray-200 rounded-xl flex items-center gap-2 hover:bg-red-50 hover:border-red-100 transition-all active:scale-95 text-sm font-medium"><Trash2 size={16}/> ลบ</button>
+          {can('customers', 'show_profit') && (
+            <button
+              onClick={() => setShowProfit(!showProfit)}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all border ${showProfit ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-white text-gray-500 border-gray-200'}`}
+            >
+              {showProfit ? <Eye size={18}/> : <EyeOff size={18}/>} {showProfit ? 'ซ่อนกำไร' : 'แสดงกำไร'}
+            </button>
+          )}
+          {can('customers', 'edit') && (
+            <button onClick={onEdit} className="px-4 py-2.5 bg-gray-900 text-white rounded-xl flex items-center gap-2 shadow-lg hover:bg-black transition-all active:scale-95 text-sm font-medium"><Edit size={16}/> แก้ไข</button>
+          )}
+          {can('customers', 'delete') && (
+            <button onClick={onDelete} className="px-4 py-2.5 bg-white text-red-600 border border-gray-200 rounded-xl flex items-center gap-2 hover:bg-red-50 hover:border-red-100 transition-all active:scale-95 text-sm font-medium"><Trash2 size={16}/> ลบ</button>
+          )}
         </div>
       </div>
 
@@ -280,6 +288,19 @@ const CustomerDetail = ({ customer, onBack, onEdit, onDelete, onViewOrder }) => 
 
         </div>
       </div>
+
+      {/* Audit Footer */}
+      {(customer.created_by || customer.updated_by) && (
+        <div className="text-xs text-gray-400 text-center py-2 border-t border-gray-100 mt-4">
+          {customer.created_by && (
+            <span>สร้างโดย <span className="font-medium text-gray-500">{customer.created_by.name}</span> · {new Date(customer.created_at).toLocaleDateString('th-TH')}</span>
+          )}
+          {customer.created_by && customer.updated_by && <span className="mx-2">|</span>}
+          {customer.updated_by && (
+            <span>แก้ไขล่าสุดโดย <span className="font-medium text-gray-500">{customer.updated_by.name}</span> · {new Date(customer.updated_at).toLocaleDateString('th-TH')}</span>
+          )}
+        </div>
+      )}
     </div>
   );
 };

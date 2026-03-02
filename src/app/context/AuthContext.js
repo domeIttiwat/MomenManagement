@@ -72,16 +72,6 @@ export const AuthProvider = ({ children }) => {
 
   // ฟังก์ชันสวมบทบาท (เฉพาะ UI ไม่ได้เปลี่ยน Database)
   const impersonate = async (roleName) => {
-    if (roleName === 'Supervisor') {
-        setImpersonatedRole(null); // ยกเลิกการสวมบท
-        // Fetch permission เดิมกลับมา
-        if (profile?.role_id) {
-            const { data: perms } = await supabase.from('role_permissions').select('*').eq('role_id', profile.role_id);
-            setPermissions(perms || []);
-        }
-        return;
-    }
-
     // หา Role ID จากชื่อ
     const { data: roleData } = await supabase.from('roles').select('*').eq('name', roleName).single();
     if (roleData) {
@@ -92,24 +82,37 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // ตรวจสอบว่า role ปัจจุบันมีสิทธิ์ view resource นี้หรือเปล่า
+  // ออกจากโหมดจำลอง → กลับ permission จริงของตัวเอง
+  const stopImpersonating = async () => {
+    setImpersonatedRole(null);
+    if (profile?.role_id) {
+        const { data: perms } = await supabase.from('role_permissions').select('*').eq('role_id', profile.role_id);
+        setPermissions(perms || []);
+    }
+  };
+
+  // ตรวจสอบว่า role ปัจจุบันมีสิทธิ์ action นี้สำหรับ resource นี้หรือเปล่า
   // ถ้าไม่มี record เลย (role ใหม่ยังไม่ได้ตั้ง) → อนุญาตไว้ก่อน (true)
-  const canView = (resource) => {
+  const can = (resource, action) => {
     if (!permissions || permissions.length === 0) return true;
     const perm = permissions.find(p => p.resource === resource);
     if (!perm) return true;
-    return perm.actions?.view === true;
+    return perm.actions?.[action] === true;
   };
+  const canView = (resource) => can(resource, 'view');
 
   const value = {
     user,
     profile,
     role: impersonatedRole || role,
+    realRole: role,
     permissions,
+    can,
     canView,
     loading,
     isImpersonating: !!impersonatedRole,
     impersonate,
+    stopImpersonating,
     signOut: () => supabase.auth.signOut(),
   };
 

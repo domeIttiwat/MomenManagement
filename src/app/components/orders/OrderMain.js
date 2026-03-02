@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Plus, Search, LayoutGrid, List as ListIcon, Loader2, ArrowUpDown, Filter, Eye, EyeOff, History, ShoppingBag, FileText } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/app/context/AuthContext';
 import OrderList from './OrderList';
 import OrderForm from './OrderForm';
 import OrderDetail from './OrderDetail';
 import OrderCard from './OrderCard';
 
 const OrderMain = ({ initialNavData, onViewCustomer }) => {
+  const { can } = useAuth();
   const [view, setView] = useState('list');
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -109,12 +111,14 @@ const OrderMain = ({ initialNavData, onViewCustomer }) => {
              {!showHistory && <span className="text-xs bg-white/20 px-2 py-0.5 rounded ml-2 text-white">ซ่อนรายการเสร็จสิ้น</span>}
            </p>
         </div>
-        <button 
-          onClick={() => { setSelectedOrder(null); setView('form'); }} 
-          className="bg-white text-emerald-600 hover:bg-emerald-50 px-6 py-3 rounded-xl font-bold shadow-md flex items-center gap-2 transition-all active:scale-95"
-        >
-          <Plus size={24}/> สร้างออเดอร์ใหม่
-        </button>
+        {can('orders', 'create') && (
+          <button
+            onClick={() => { setSelectedOrder(null); setView('form'); }}
+            className="bg-white text-emerald-600 hover:bg-emerald-50 px-6 py-3 rounded-xl font-bold shadow-md flex items-center gap-2 transition-all active:scale-95"
+          >
+            <Plus size={24}/> สร้างออเดอร์ใหม่
+          </button>
+        )}
       </div>
 
       <div className="bg-white p-2 rounded-2xl shadow-sm border border-gray-100 flex flex-col xl:flex-row gap-3">
@@ -183,13 +187,15 @@ const OrderMain = ({ initialNavData, onViewCustomer }) => {
           <div className="w-px h-8 bg-gray-200 mx-2 hidden md:block" />
           
           {/* Profit Toggle */}
-          <button 
-            onClick={() => setShowProfit(!showProfit)} 
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all ${showProfit ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200' : 'text-gray-500 hover:bg-gray-50'}`}
-          >
-            {showProfit ? <Eye size={18}/> : <EyeOff size={18}/>}
-            <span className="hidden sm:inline">{showProfit ? 'ซ่อนกำไร' : 'แสดงกำไร'}</span>
-          </button>
+          {can('orders', 'show_profit') && (
+            <button
+              onClick={() => setShowProfit(!showProfit)}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all ${showProfit ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200' : 'text-gray-500 hover:bg-gray-50'}`}
+            >
+              {showProfit ? <Eye size={18}/> : <EyeOff size={18}/>}
+              <span className="hidden sm:inline">{showProfit ? 'ซ่อนกำไร' : 'แสดงกำไร'}</span>
+            </button>
+          )}
 
           <div className="flex bg-gray-100 p-1 rounded-xl">
             <button onClick={() => setViewMode('list')} className={`p-2 rounded-lg transition-all ${viewMode === 'list' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}><ListIcon size={20}/></button>

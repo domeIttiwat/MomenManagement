@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ArrowLeft, Save, Loader2, Trash2, Receipt, Truck, Printer, PackagePlus, DollarSign, Calculator, History, Sparkles } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/app/context/AuthContext';
 import CustomerSelector from './CustomerSelector';
 import ProductSelector from './ProductSelector';
 import PaymentManager from './PaymentManager';
@@ -12,6 +13,8 @@ import OrderTeamSelector from './OrderTeamSelector';
 import AccessorySuggestionModal from './AccessorySuggestionModal';
 
 const OrderForm = ({ onCancel, onSuccess, initialData }) => {
+  const { profile } = useAuth();
+  const meRef = () => profile ? { id: profile.id, name: `${profile.first_name} ${profile.last_name}` } : null;
   const [loading, setLoading] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   
@@ -283,7 +286,7 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
       let orderId = initialData?.id;
 
       if (orderId) {
-        await supabase.from('orders').update(orderPayload).eq('id', orderId);
+        await supabase.from('orders').update({ ...orderPayload, updated_by: meRef() }).eq('id', orderId);
         
         // ลบข้อมูลเก่าทั้งหมด (Strategy: Delete & Re-insert)
         // ข้อดี: ง่ายและจัดการลำดับได้ดี
@@ -293,7 +296,7 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
         await supabase.from('order_updates').delete().eq('order_id', orderId);
         await supabase.from('order_assignees').delete().eq('order_id', orderId);
       } else {
-        const { data } = await supabase.from('orders').insert([orderPayload]).select().single();
+        const { data } = await supabase.from('orders').insert([{ ...orderPayload, created_by: meRef() }]).select().single();
         orderId = data.id;
       }
 

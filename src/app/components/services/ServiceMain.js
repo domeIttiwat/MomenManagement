@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Plus, Search, Wrench, Loader2, List as ListIcon, LayoutGrid, Filter, ArrowUpDown, History } from 'lucide-react';
+import { Plus, Search, Wrench, Loader2, List as ListIcon, LayoutGrid, Filter, ArrowUpDown, History, Eye, EyeOff } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/app/context/AuthContext';
 import ServiceList from './ServiceList';
 import ServiceForm from './ServiceForm';
 import ServiceDetail from './ServiceDetail';
 
 const ServiceMain = () => {
+  const { can } = useAuth();
   const [view, setView] = useState('list');
   const [services, setServices] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -16,6 +18,7 @@ const ServiceMain = () => {
   const [filterStatus, setFilterStatus] = useState('All');
   const [sortOption, setSortOption] = useState('newest');
   const [showHistory, setShowHistory] = useState(false);
+  const [showProfit, setShowProfit] = useState(false);
 
   const fetchServices = async () => {
     setLoading(true);
@@ -67,7 +70,7 @@ const ServiceMain = () => {
   }, [services, search, filterStatus, sortOption, showHistory]);
 
   if (view === 'form') return <ServiceForm onCancel={() => setView('list')} onSuccess={() => { setView('list'); fetchServices(); }} initialData={selectedService} />;
-  if (view === 'detail') return <ServiceDetail service={selectedService} onBack={() => setView('list')} onEdit={() => setView('form')} onDelete={() => handleDelete(selectedService.id)} />;
+  if (view === 'detail') return <ServiceDetail service={selectedService} onBack={() => setView('list')} onEdit={() => setView('form')} onDelete={() => handleDelete(selectedService.id)} showProfit={showProfit} setShowProfit={setShowProfit} />;
 
   return (
     <div className="max-w-[1600px] mx-auto space-y-6 animate-in fade-in duration-500 pb-20">
@@ -83,12 +86,14 @@ const ServiceMain = () => {
             {!showHistory && <span className="text-xs bg-white/20 px-2 py-0.5 rounded ml-2 text-white">ซ่อนรายการเสร็จสิ้น</span>}
           </p>
         </div>
-        <button
-          onClick={() => { setSelectedService(null); setView('form'); }}
-          className="bg-white text-orange-600 hover:bg-orange-50 px-6 py-3 rounded-xl font-bold shadow-md flex items-center gap-2 transition-all active:scale-95"
-        >
-          <Plus size={24}/> เปิดใบงานใหม่
-        </button>
+        {can('services', 'create') && (
+          <button
+            onClick={() => { setSelectedService(null); setView('form'); }}
+            className="bg-white text-orange-600 hover:bg-orange-50 px-6 py-3 rounded-xl font-bold shadow-md flex items-center gap-2 transition-all active:scale-95"
+          >
+            <Plus size={24}/> เปิดใบงานใหม่
+          </button>
+        )}
       </div>
 
       {/* Toolbar */}
@@ -144,6 +149,19 @@ const ServiceMain = () => {
                </select>
                <ArrowUpDown size={16} className="absolute left-3.5 top-3.5 text-gray-400 pointer-events-none"/>
             </div>
+
+            <div className="w-px h-8 bg-gray-200 mx-2 hidden xl:block" />
+
+            {/* Profit Toggle */}
+            {can('services', 'show_profit') && (
+              <button
+                onClick={() => setShowProfit(!showProfit)}
+                className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all ${showProfit ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200' : 'text-gray-500 hover:bg-gray-50'}`}
+              >
+                {showProfit ? <Eye size={18}/> : <EyeOff size={18}/>}
+                <span className="hidden sm:inline">{showProfit ? 'ซ่อนกำไร' : 'แสดงกำไร'}</span>
+              </button>
+            )}
 
             <div className="w-px h-8 bg-gray-200 mx-2 hidden xl:block" />
 

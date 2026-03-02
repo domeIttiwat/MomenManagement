@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Plus, Search, Loader2, History, Filter, Hammer, ChevronRight } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/app/context/AuthContext';
 import AssemblyForm from './AssemblyForm';
 import AssemblyDetail from './AssemblyDetail';
 
@@ -21,6 +22,7 @@ const PROGRESS_COLOR = {
 };
 
 const AssemblyMain = () => {
+  const { can } = useAuth();
   const [view, setView] = useState('list');
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -91,6 +93,9 @@ const AssemblyMain = () => {
   const JobCard = ({ job }) => {
     const items = job.items || [];
     const total = items.length;
+    const prepared  = items.filter(i => i.prepared_at || i.skip_prepare).length;
+    const assembled = items.filter(i => i.assembled_at).length;
+    const remaining = total - assembled;
     const done = items.filter(i => i.qc_status === 'passed' || i.assembled_at || i.prepared_at).length;
     const pct = total > 0 ? Math.round((done / total) * 100) : 0;
     const stageConf = STAGE_CONFIG[job.stage] || STAGE_CONFIG.preparing;
@@ -151,7 +156,7 @@ const AssemblyMain = () => {
         </div>
 
         {total > 0 && (
-          <div className="mt-2 mb-3">
+          <div className="mt-2 mb-3 space-y-2">
             <div className="flex justify-between text-xs mb-1.5">
               <span className="text-slate-600">ความคืบหน้า</span>
               <span className="text-slate-500">{pct}%</span>
@@ -161,6 +166,24 @@ const AssemblyMain = () => {
                 className={`h-full rounded-full transition-all duration-700 ${PROGRESS_COLOR[job.stage] || 'bg-amber-500'}`}
                 style={{ width: `${pct}%` }}
               />
+            </div>
+            <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+              <span className="text-[11px] text-slate-500 bg-slate-800 border border-slate-700 px-2 py-0.5 rounded-lg">
+                รายการ <span className="text-slate-300 font-semibold">{total}</span>
+              </span>
+              <span className="text-[11px] text-amber-600/80 bg-amber-500/8 border border-amber-500/15 px-2 py-0.5 rounded-lg">
+                เตรียมแล้ว <span className="font-semibold">{prepared}</span>
+              </span>
+              <span className="text-[11px] text-blue-400/80 bg-blue-500/8 border border-blue-500/15 px-2 py-0.5 rounded-lg">
+                ทำเสร็จ <span className="font-semibold">{assembled}</span>
+              </span>
+              <span className={`text-[11px] px-2 py-0.5 rounded-lg border ${
+                remaining === 0
+                  ? 'text-emerald-400/80 bg-emerald-500/8 border-emerald-500/15'
+                  : 'text-slate-500 bg-slate-800/60 border-slate-700'
+              }`}>
+                คงเหลือ <span className="font-semibold">{remaining}</span>
+              </span>
             </div>
           </div>
         )}
@@ -196,54 +219,56 @@ const AssemblyMain = () => {
             )}
           </p>
         </div>
-        <button
-          onClick={() => { setSelectedJob(null); setView('form'); }}
-          className="bg-amber-600 hover:bg-amber-500 text-white px-5 py-2.5 rounded-xl font-bold shadow-lg shadow-amber-950 flex items-center gap-2 transition-all active:scale-95"
-        >
-          <Plus size={20} /> สร้างใบงานใหม่
-        </button>
+        {can('assembly', 'create') && (
+          <button
+            onClick={() => { setSelectedJob(null); setView('form'); }}
+            className="bg-amber-600 hover:bg-amber-500 text-white px-5 py-2.5 rounded-xl font-bold shadow-lg shadow-amber-950 flex items-center gap-2 transition-all active:scale-95"
+          >
+            <Plus size={20} /> สร้างใบงานใหม่
+          </button>
+        )}
       </div>
 
       {/* Toolbar */}
       <div className="bg-slate-900 border border-slate-800 p-2 rounded-2xl flex flex-col xl:flex-row gap-3">
-        <div className="relative flex-1">
-          <Search className="absolute left-4 top-3.5 text-slate-500" size={18} />
-          <input
-            className="w-full pl-11 pr-4 py-3 bg-slate-800 text-white placeholder:text-slate-500 rounded-xl outline-none border border-slate-700 focus:border-amber-500 transition-colors text-sm"
-            placeholder="ค้นหาเลขที่ใบงาน, ชื่องาน, ลูกค้า..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-          />
-        </div>
-        <div className="flex flex-wrap items-center gap-2 px-2">
-          <button
-            onClick={() => setShowHistory(!showHistory)}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all ${
-              showHistory
-                ? 'bg-amber-600/20 text-amber-400 ring-1 ring-amber-500/30'
-                : 'text-slate-400 hover:bg-slate-800'
-            }`}
-          >
-            <History size={16} /> {showHistory ? 'แสดงทั้งหมด' : 'ดูประวัติเก่า'}
-          </button>
-          <div className="w-px h-7 bg-slate-700 hidden md:block" />
-          <div className="relative">
-            <select
-              className="appearance-none bg-slate-800 border border-slate-700 text-slate-300 pl-9 pr-7 py-2.5 rounded-xl text-sm focus:outline-none focus:border-amber-500 cursor-pointer"
-              value={filterStage}
-              onChange={e => setFilterStage(e.target.value)}
+          <div className="relative flex-1">
+            <Search className="absolute left-4 top-3.5 text-slate-500" size={18} />
+            <input
+              className="w-full pl-11 pr-4 py-3 bg-slate-800 text-white placeholder:text-slate-500 rounded-xl outline-none border border-slate-700 focus:border-amber-500 transition-colors text-sm"
+              placeholder="ค้นหาเลขที่ใบงาน, ชื่องาน, ลูกค้า..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
+          </div>
+          <div className="flex flex-wrap items-center gap-2 px-2">
+            <button
+              onClick={() => setShowHistory(!showHistory)}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all ${
+                showHistory
+                  ? 'bg-amber-600/20 text-amber-400 ring-1 ring-amber-500/30'
+                  : 'text-slate-400 hover:bg-slate-800'
+              }`}
             >
-              <option value="All">ทุกขั้นตอน</option>
-              <option value="preparing">เตรียมของ</option>
-              <option value="in_progress">กำลังทำ</option>
-              <option value="qc">QC / ทดสอบ</option>
-              <option value="completed">เสร็จสิ้น</option>
-              <option value="cancelled">ยกเลิก</option>
-            </select>
-            <Filter size={14} className="absolute left-3 top-3 text-slate-500 pointer-events-none" />
+              <History size={16} /> {showHistory ? 'แสดงทั้งหมด' : 'ดูประวัติเก่า'}
+            </button>
+            <div className="w-px h-7 bg-slate-700 hidden md:block" />
+            <div className="relative">
+              <select
+                className="appearance-none bg-slate-800 border border-slate-700 text-slate-300 pl-9 pr-7 py-2.5 rounded-xl text-sm focus:outline-none focus:border-amber-500 cursor-pointer"
+                value={filterStage}
+                onChange={e => setFilterStage(e.target.value)}
+              >
+                <option value="All">ทุกขั้นตอน</option>
+                <option value="preparing">เตรียมของ</option>
+                <option value="in_progress">กำลังทำ</option>
+                <option value="qc">QC / ทดสอบ</option>
+                <option value="completed">เสร็จสิ้น</option>
+                <option value="cancelled">ยกเลิก</option>
+              </select>
+              <Filter size={14} className="absolute left-3 top-3 text-slate-500 pointer-events-none" />
+            </div>
           </div>
         </div>
-      </div>
 
       {/* List */}
       {loading ? (

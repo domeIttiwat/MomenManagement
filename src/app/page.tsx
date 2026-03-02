@@ -19,7 +19,7 @@ import AssemblyMain from './components/assembly/AssemblyMain';
 const ALL_TABS = ['dashboard', 'products', 'customers', 'orders', 'services', 'assembly', 'marketing', 'users'];
 
 const AppContent = () => {
-  const { user, loading, profile, canView, permissions } = useAuth();
+  const { user, loading, profile, canView, permissions, isImpersonating, stopImpersonating, role } = useAuth();
   const [activeTab, setActiveTab] = useState<any>('dashboard');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [navData, setNavData] = useState<any>(null);
@@ -67,7 +67,24 @@ const AppContent = () => {
         onClose={() => setIsMobileMenuOpen(false)}
       />
 
-      <main className="flex-1 md:ml-72 p-4 md:p-8 overflow-y-auto h-screen w-full transition-all">
+      <main className="flex-1 md:ml-72 overflow-y-auto h-screen w-full transition-all flex flex-col">
+        {isImpersonating && (
+          <div className="sticky top-0 z-40 bg-amber-500 text-white px-4 py-2.5 flex items-center justify-between shadow-lg shrink-0">
+            <div className="flex items-center gap-2 text-sm">
+              <span className="text-lg">👁</span>
+              <span className="font-bold">โหมดจำลองมุมมอง:</span>
+              <span className="bg-white/20 px-2 py-0.5 rounded font-bold">{role?.name}</span>
+              <span className="text-amber-200 hidden sm:inline">— เมนูและสิทธิ์แสดงตามตำแหน่งนี้</span>
+            </div>
+            <button
+              onClick={stopImpersonating}
+              className="bg-white text-amber-700 hover:bg-amber-50 px-3 py-1 rounded-lg text-xs font-bold transition-colors shrink-0"
+            >
+              ✕ ออกจากโหมดจำลอง
+            </button>
+          </div>
+        )}
+        <div className="flex-1 p-4 md:p-8">
         {/* Mobile Header */}
         <div className="md:hidden mb-6 flex items-center justify-between bg-white p-3 rounded-xl shadow-sm border border-slate-200">
           <button onClick={() => setIsMobileMenuOpen(true)} className="p-2 -ml-2 rounded-lg text-slate-600 hover:bg-slate-100">
@@ -96,6 +113,7 @@ const AppContent = () => {
           {activeTab === 'assembly' && (canView('assembly') ? <AssemblyMain /> : <AccessDenied />)}
           {activeTab === 'marketing' && (canView('marketing') ? <MarketingMain /> : <AccessDenied />)}
           {activeTab === 'users' && (canView('users') ? <UserMain /> : <AccessDenied />)}
+        </div>
         </div>
       </main>
     </div>

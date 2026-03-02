@@ -70,6 +70,7 @@ const AssemblyForm = ({ initialData, onCancel, onSuccess }) => {
     const { data } = await supabase
       .from('services')
       .select('id, service_number, customer_cache, status, created_at, service_items(*)')
+      .not('status', 'in', '("Completed","completed","Cancelled","cancelled")')
       .order('created_at', { ascending: false });
     if (data) setServices(data);
   };

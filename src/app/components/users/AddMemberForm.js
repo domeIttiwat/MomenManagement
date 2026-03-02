@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ArrowLeft, Save, Loader2, User, Phone, Mail, MessageCircle, Shield, Camera } from 'lucide-react';
+import { ArrowLeft, Save, Loader2, Phone, Mail, MessageCircle, Shield, Camera } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import ImageUploader from '../customers/ImageUploader';
 
@@ -17,16 +17,6 @@ const AddMemberForm = ({ onCancel, onSuccess, roles }) => {
     images: [] 
   });
 
-  const generateUUID = () => {
-    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-      return crypto.randomUUID();
-    }
-    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-      var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
-      return v.toString(16);
-    });
-  };
-
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!formData.email || !formData.first_name) return alert('กรุณากรอกข้อมูลสำคัญ (อีเมล, ชื่อ)');
@@ -34,14 +24,6 @@ const AddMemberForm = ({ onCancel, onSuccess, roles }) => {
 
     setLoading(true);
     try {
-      // 0. Check duplicate email
-      const { data: existing } = await supabase.from('profiles').select('id').eq('email', formData.email.trim()).maybeSingle();
-      if (existing) {
-        alert('อีเมลนี้มีอยู่ในระบบแล้ว กรุณาใช้อีเมลอื่น');
-        setLoading(false);
-        return;
-      }
-
       // 1. Upload Image
       let avatarUrl = null;
       if (formData.images.length > 0) {
@@ -50,7 +32,7 @@ const AddMemberForm = ({ onCancel, onSuccess, roles }) => {
           const fileName = `avatar-${Date.now()}-${Math.random().toString(36).substring(7)}`;
           const { error: uploadError } = await supabase.storage.from('avatars').upload(fileName, imgObj.file);
           if (uploadError) throw new Error('Upload Avatar Failed: ' + uploadError.message);
-          
+
           const { data } = supabase.storage.from('avatars').getPublicUrl(fileName);
           avatarUrl = data.publicUrl;
         } else {
@@ -58,12 +40,9 @@ const AddMemberForm = ({ onCancel, onSuccess, roles }) => {
         }
       }
 
-      // 2. Prepare Payload
-      const newId = generateUUID(); 
-      
+      // 2. สร้าง auth user + profile ผ่าน API route (server-side Admin API)
       const payload = {
-        id: newId,
-        email: formData.email,
+        email: formData.email.trim(),
         first_name: formData.first_name,
         last_name: formData.last_name,
         nickname: formData.nickname,
@@ -72,21 +51,22 @@ const AddMemberForm = ({ onCancel, onSuccess, roles }) => {
         role_id: parseInt(formData.role_id),
         status: formData.status,
         avatar_url: avatarUrl,
-        // ส่ง social_channels ได้แล้ว เพราะเพิ่ม column ใน DB แล้ว
-        social_channels: formData.line_id ? [{ type: 'Line', value: formData.line_id }] : []
+        social_channels: formData.line_id ? [{ type: 'Line', value: formData.line_id }] : [],
+        redirectTo: window.location.origin + '/reset-password',
       };
 
-      // 3. Insert into Profiles
-      const { error } = await supabase.from('profiles').insert([payload]).select();
-      if (error) throw error;
+      const res = await fetch('/api/admin/create-user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'สร้างทีมงานไม่สำเร็จ');
 
+      alert('สร้างทีมงานสำเร็จ ระบบส่งอีเมลให้ตั้งรหัสผ่านแล้ว');
       onSuccess();
     } catch (err) {
-      let msg = err.message || 'Unknown Error';
-      if (err.code === '23505') msg = 'อีเมลนี้มีอยู่ในระบบแล้ว';
-      if (err.code === '23503') msg = 'ข้อมูลอ้างอิงไม่ถูกต้อง (Foreign Key)';
-      if (err.code === '42501') msg = 'ไม่มีสิทธิ์ดำเนินการ (Permission Denied)';
-      alert('บันทึกไม่สำเร็จ: ' + msg);
+      alert('บันทึกไม่สำเร็จ: ' + (err.message || 'Unknown Error'));
     } finally {
       setLoading(false);
     }

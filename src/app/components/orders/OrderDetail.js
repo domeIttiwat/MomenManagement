@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ArrowLeft, Edit, Trash2, Printer, FileText, User, Package, Clock, MapPin, Phone, CreditCard, DollarSign, X, Eye, EyeOff, Banknote, Landmark, MessageCircle, Facebook, Instagram, History, Calendar, Send, Paperclip, Loader2, Image as ImageIcon } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/app/context/AuthContext';
 import BillPreview from './BillPreview';
 import ImageUploader from './ImageUploader';
 
 const OrderDetail = ({ order, onBack, onEdit, onDelete, showProfit, setShowProfit, onViewCustomer }) => {
+  const { can } = useAuth();
   const [showBill, setShowBill] = useState(false);
   const [lightboxImg, setLightboxImg] = useState(null);
   
@@ -208,18 +210,24 @@ const OrderDetail = ({ order, onBack, onEdit, onDelete, showProfit, setShowProfi
           <ArrowLeft size={20} /> <span className="hidden sm:inline">ย้อนกลับ</span>
         </button>
         <div className="flex flex-wrap gap-2">
-          <button onClick={() => setShowProfit(!showProfit)} className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-semibold transition-all text-sm border ${showProfit ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-white text-gray-500 border-gray-200'}`}>
-            {showProfit ? <Eye size={18}/> : <EyeOff size={18}/>} {showProfit ? 'ซ่อนกำไร' : 'แสดงกำไร'}
-          </button>
+          {can('orders', 'show_profit') && (
+            <button onClick={() => setShowProfit(!showProfit)} className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-semibold transition-all text-sm border ${showProfit ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-white text-gray-500 border-gray-200'}`}>
+              {showProfit ? <Eye size={18}/> : <EyeOff size={18}/>} {showProfit ? 'ซ่อนกำไร' : 'แสดงกำไร'}
+            </button>
+          )}
           <button onClick={() => setShowBill(true)} className="flex items-center gap-2 px-4 py-2.5 bg-indigo-50 text-indigo-700 border border-indigo-100 hover:bg-indigo-100 rounded-xl font-semibold transition-all text-sm shadow-sm">
             <Printer size={18}/> พิมพ์/ดูเอกสาร
           </button>
-          <button onClick={onEdit} className="flex items-center gap-2 px-5 py-2.5 bg-gray-900 text-white rounded-xl hover:bg-black font-medium text-sm shadow-lg shadow-gray-200 transition-all active:scale-95">
-            <Edit size={18}/> แก้ไข
-          </button>
-          <button onClick={onDelete} className="flex items-center gap-2 px-3 py-2.5 bg-white text-red-500 border border-gray-200 rounded-xl hover:bg-red-50 hover:border-red-100 font-medium text-sm transition-all active:scale-95">
-            <Trash2 size={18}/>
-          </button>
+          {can('orders', 'edit') && (
+            <button onClick={onEdit} className="flex items-center gap-2 px-5 py-2.5 bg-gray-900 text-white rounded-xl hover:bg-black font-medium text-sm shadow-lg shadow-gray-200 transition-all active:scale-95">
+              <Edit size={18}/> แก้ไข
+            </button>
+          )}
+          {can('orders', 'delete') && (
+            <button onClick={onDelete} className="flex items-center gap-2 px-3 py-2.5 bg-white text-red-500 border border-gray-200 rounded-xl hover:bg-red-50 hover:border-red-100 font-medium text-sm transition-all active:scale-95">
+              <Trash2 size={18}/>
+            </button>
+          )}
         </div>
       </div>
 
@@ -604,6 +612,19 @@ const OrderDetail = ({ order, onBack, onEdit, onDelete, showProfit, setShowProfi
       </div>
 
       {showBill && <BillPreview order={order} onClose={() => setShowBill(false)} />}
+
+      {/* Audit Footer */}
+      {(order.created_by || order.updated_by) && (
+        <div className="text-xs text-gray-400 text-center py-2 border-t border-gray-100 mt-4">
+          {order.created_by && (
+            <span>สร้างโดย <span className="font-medium text-gray-500">{order.created_by.name}</span> · {new Date(order.created_at).toLocaleDateString('th-TH')}</span>
+          )}
+          {order.created_by && order.updated_by && <span className="mx-2">|</span>}
+          {order.updated_by && (
+            <span>แก้ไขล่าสุดโดย <span className="font-medium text-gray-500">{order.updated_by.name}</span> · {new Date(order.updated_at).toLocaleDateString('th-TH')}</span>
+          )}
+        </div>
+      )}
     </div>
   );
 };

@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, Edit, Trash2, Printer, Wrench, User, Calendar, Clock, DollarSign, CreditCard, Banknote, Landmark, X, History, FileText, CheckCircle2, AlertCircle, Truck, PauseCircle, XCircle, PlayCircle, Send, Paperclip, Loader2, Image as ImageIcon, MessageCircle } from 'lucide-react';
+import { ArrowLeft, Edit, Trash2, Printer, Wrench, User, Calendar, Clock, DollarSign, CreditCard, Banknote, Landmark, X, History, FileText, CheckCircle2, AlertCircle, Truck, PauseCircle, XCircle, PlayCircle, Send, Paperclip, Loader2, Image as ImageIcon, MessageCircle, Eye, EyeOff, TrendingUp } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/app/context/AuthContext';
 import ServiceBillPreview from './ServiceBillPreview';
 
-const ServiceDetail = ({ service, onBack, onEdit, onDelete }) => {
+const ServiceDetail = ({ service, onBack, onEdit, onDelete, showProfit, setShowProfit }) => {
+  const { can } = useAuth();
   const [showBill, setShowBill] = useState(false);
   const [lightboxImg, setLightboxImg] = useState(null);
 
@@ -211,9 +213,21 @@ const ServiceDetail = ({ service, onBack, onEdit, onDelete }) => {
           <ArrowLeft size={20}/> กลับหน้ารายการ
         </button>
         <div className="flex gap-2">
+           {can('services', 'show_profit') && (
+             <button
+               onClick={() => setShowProfit && setShowProfit(!showProfit)}
+               className={`flex items-center gap-2 px-4 py-2 rounded-xl font-semibold transition-all text-sm border ${showProfit ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-white text-gray-500 border-gray-200'}`}
+             >
+               {showProfit ? <Eye size={16}/> : <EyeOff size={16}/>} {showProfit ? 'ซ่อนกำไร' : 'แสดงกำไร'}
+             </button>
+           )}
            <button onClick={() => setShowBill(true)} className="px-4 py-2 bg-indigo-50 text-indigo-700 rounded-xl flex items-center gap-2 font-bold text-sm hover:bg-indigo-100 transition-colors border border-indigo-100"><Printer size={16}/> ใบรับซ่อม/ใบเสร็จ</button>
-           <button onClick={onEdit} className="px-4 py-2 bg-gray-900 text-white rounded-xl flex items-center gap-2 text-sm hover:bg-black transition-colors shadow-lg shadow-gray-200"><Edit size={16}/> แก้ไข</button>
-           <button onClick={onDelete} className="px-4 py-2 bg-white text-red-600 border border-red-100 rounded-xl flex items-center gap-2 text-sm hover:bg-red-50 transition-colors"><Trash2 size={16}/> ลบ</button>
+           {can('services', 'edit') && (
+             <button onClick={onEdit} className="px-4 py-2 bg-gray-900 text-white rounded-xl flex items-center gap-2 text-sm hover:bg-black transition-colors shadow-lg shadow-gray-200"><Edit size={16}/> แก้ไข</button>
+           )}
+           {can('services', 'delete') && (
+             <button onClick={onDelete} className="px-4 py-2 bg-white text-red-600 border border-red-100 rounded-xl flex items-center gap-2 text-sm hover:bg-red-50 transition-colors"><Trash2 size={16}/> ลบ</button>
+           )}
         </div>
       </div>
 
@@ -290,6 +304,16 @@ const ServiceDetail = ({ service, onBack, onEdit, onDelete }) => {
                     {service.shipping_cost > 0 && <div className="flex justify-between"><span>ค่าขนส่ง</span><span>{service.shipping_cost.toLocaleString()}</span></div>}
                     {service.discount > 0 && <div className="flex justify-between text-red-500"><span>ส่วนลด</span><span>-{service.discount.toLocaleString()}</span></div>}
                     <div className="flex justify-between font-bold text-lg text-indigo-700 mt-2 pt-2 border-t border-dashed border-gray-200"><span>สุทธิ</span><span>฿{service.grand_total.toLocaleString()}</span></div>
+                    {showProfit && (() => {
+                      const totalCost = service.service_items?.reduce((sum, item) => sum + ((item.cost_price || 0) * item.quantity), 0) || 0;
+                      const profit = (service.subtotal - (service.discount || 0)) - totalCost;
+                      return (
+                        <div className="flex justify-between font-bold text-emerald-700 bg-emerald-50 px-3 py-2 rounded-lg border border-emerald-100 animate-in fade-in zoom-in-95">
+                          <span className="flex items-center gap-1"><TrendingUp size={14}/> กำไร</span>
+                          <span>{profit >= 0 ? '+' : ''}฿{profit.toLocaleString()}</span>
+                        </div>
+                      );
+                    })()}
                  </div>
               </div>
            </div>
@@ -520,6 +544,19 @@ const ServiceDetail = ({ service, onBack, onEdit, onDelete }) => {
       </div>
 
       {showBill && <ServiceBillPreview service={service} onClose={() => setShowBill(false)} />}
+
+      {/* Audit Footer */}
+      {(service.created_by || service.updated_by) && (
+        <div className="text-xs text-gray-400 text-center py-2 border-t border-gray-100 mt-4">
+          {service.created_by && (
+            <span>สร้างโดย <span className="font-medium text-gray-500">{service.created_by.name}</span> · {new Date(service.created_at).toLocaleDateString('th-TH')}</span>
+          )}
+          {service.created_by && service.updated_by && <span className="mx-2">|</span>}
+          {service.updated_by && (
+            <span>แก้ไขล่าสุดโดย <span className="font-medium text-gray-500">{service.updated_by.name}</span> · {new Date(service.updated_at).toLocaleDateString('th-TH')}</span>
+          )}
+        </div>
+      )}
     </div>
   );
 };

@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { ArrowLeft, Edit, Trash2, Eye, EyeOff, Layers, Package, Wrench, Bike, Check, Tag, Box, TrendingUp, DollarSign, ShoppingBag, Puzzle, MapPin, ChevronDown, ChevronUp, Sparkles, Image as ImageIcon, Printer, X } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/app/context/AuthContext';
 import FastenerBillPreview from './FastenerBillPreview';
 
 const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCost }) => {
+  const { can } = useAuth();
   const [variants, setVariants] = useState([]);
   const [fasteners, setFasteners] = useState([]);
   const [bundles, setBundles] = useState([]);
@@ -104,21 +106,27 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
           <ArrowLeft size={20} /> <span className="hidden sm:inline">ย้อนกลับ</span>
         </button>
         <div className="flex flex-wrap gap-2">
-          <button
-            onClick={() => setShowCost(!showCost)}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all border ${
-              showCost ? 'bg-amber-50 text-amber-700 border-amber-200 shadow-sm' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
-            }`}
-          >
-            {showCost ? <Eye size={18}/> : <EyeOff size={18}/>}
-            <span className="hidden sm:inline">{showCost ? 'ซ่อนต้นทุน/กำไร' : 'แสดงต้นทุน/กำไร'}</span>
-          </button>
-          <button onClick={onEdit} className="px-5 py-2.5 bg-gray-900 text-white rounded-xl flex items-center gap-2 hover:bg-black font-medium text-sm shadow-lg shadow-gray-200 transition-all active:scale-95">
-            <Edit size={18}/> แก้ไข
-          </button>
-          <button onClick={onDelete} className="px-3 py-2.5 bg-white text-red-500 border border-gray-200 rounded-xl flex items-center gap-2 hover:bg-red-50 hover:border-red-100 font-medium text-sm transition-all active:scale-95">
-            <Trash2 size={18}/>
-          </button>
+          {can('products', 'show_cost') && (
+            <button
+              onClick={() => setShowCost(!showCost)}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all border ${
+                showCost ? 'bg-amber-50 text-amber-700 border-amber-200 shadow-sm' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+              }`}
+            >
+              {showCost ? <Eye size={18}/> : <EyeOff size={18}/>}
+              <span className="hidden sm:inline">{showCost ? 'ซ่อนต้นทุน/กำไร' : 'แสดงต้นทุน/กำไร'}</span>
+            </button>
+          )}
+          {can('products', 'edit') && (
+            <button onClick={onEdit} className="px-5 py-2.5 bg-gray-900 text-white rounded-xl flex items-center gap-2 hover:bg-black font-medium text-sm shadow-lg shadow-gray-200 transition-all active:scale-95">
+              <Edit size={18}/> แก้ไข
+            </button>
+          )}
+          {can('products', 'delete') && (
+            <button onClick={onDelete} className="px-3 py-2.5 bg-white text-red-500 border border-gray-200 rounded-xl flex items-center gap-2 hover:bg-red-50 hover:border-red-100 font-medium text-sm transition-all active:scale-95">
+              <Trash2 size={18}/>
+            </button>
+          )}
         </div>
       </div>
 
@@ -436,6 +444,19 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
 
       {showFastenerBill && (
           <FastenerBillPreview product={product} fasteners={fasteners} onClose={() => setShowFastenerBill(false)} />
+      )}
+
+      {/* Audit Footer */}
+      {(product.created_by || product.updated_by) && (
+        <div className="text-xs text-gray-400 text-center py-2 border-t border-gray-100 mt-4">
+          {product.created_by && (
+            <span>สร้างโดย <span className="font-medium text-gray-500">{product.created_by.name}</span> · {new Date(product.created_at).toLocaleDateString('th-TH')}</span>
+          )}
+          {product.created_by && product.updated_by && <span className="mx-2">|</span>}
+          {product.updated_by && (
+            <span>แก้ไขล่าสุดโดย <span className="font-medium text-gray-500">{product.updated_by.name}</span> · {new Date(product.updated_at).toLocaleDateString('th-TH')}</span>
+          )}
+        </div>
       )}
     </div>
   );

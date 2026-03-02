@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Plus, Search, Eye, EyeOff, LayoutGrid, List as ListIcon, Loader2, ArrowUpDown, Filter, Package, Settings, CheckSquare, Square } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/app/context/AuthContext';
 import ProductList from './ProductList';
 import ProductForm from './ProductForm';
 import ProductDetail from './ProductDetail';
 import FastenerManager from './FastenerManager';
 
 const ProductMain = () => {
+  const { can } = useAuth();
   const [view, setView] = useState('list');
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -201,18 +203,20 @@ const ProductMain = () => {
            <p className="text-orange-100 mt-1 font-medium ml-1">จัดการรายการ ({filteredAndSorted.length})</p>
         </div>
         <div className="flex gap-2">
-            <button 
-              onClick={() => setView('fasteners')} 
+            <button
+              onClick={() => setView('fasteners')}
               className="bg-white/10 hover:bg-white/20 text-white px-4 py-3 rounded-xl font-medium backdrop-blur-sm transition-all text-sm border border-white/10 flex items-center gap-2"
             >
                 <Settings size={18}/> คลังน็อต & อะไหล่
             </button>
-            <button 
-                onClick={() => { setSelectedProduct(null); setView('form'); }} 
-                className="bg-white text-orange-600 hover:bg-orange-50 px-6 py-3 rounded-xl font-bold shadow-md flex items-center gap-2 transition-all active:scale-95"
-            >
-            <Plus size={24} /> เพิ่มสินค้าใหม่
-            </button>
+            {can('products', 'create') && (
+              <button
+                  onClick={() => { setSelectedProduct(null); setView('form'); }}
+                  className="bg-white text-orange-600 hover:bg-orange-50 px-6 py-3 rounded-xl font-bold shadow-md flex items-center gap-2 transition-all active:scale-95"
+              >
+                <Plus size={24} /> เพิ่มสินค้าใหม่
+              </button>
+            )}
         </div>
       </div>
 
@@ -287,13 +291,15 @@ const ProductMain = () => {
 
           <div className="w-px h-8 bg-gray-200 mx-2 hidden md:block" />
           
-          <button 
-            onClick={() => setShowCost(!showCost)} 
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all ${showCost ? 'bg-amber-50 text-amber-700 ring-1 ring-amber-200' : 'text-gray-500 hover:bg-gray-50'}`}
-          >
-            {showCost ? <Eye size={18}/> : <EyeOff size={18}/>}
-            <span className="hidden sm:inline">{showCost ? 'ซ่อนต้นทุน' : 'แสดงต้นทุน'}</span>
-          </button>
+          {can('products', 'show_cost') && (
+            <button
+              onClick={() => setShowCost(!showCost)}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all ${showCost ? 'bg-amber-50 text-amber-700 ring-1 ring-amber-200' : 'text-gray-500 hover:bg-gray-50'}`}
+            >
+              {showCost ? <Eye size={18}/> : <EyeOff size={18}/>}
+              <span className="hidden sm:inline">{showCost ? 'ซ่อนต้นทุน' : 'แสดงต้นทุน'}</span>
+            </button>
+          )}
           
           <div className="flex bg-gray-100 p-1 rounded-xl">
             <button onClick={() => setViewMode('list')} className={`p-2 rounded-lg transition-all ${viewMode === 'list' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}><ListIcon size={20}/></button>
