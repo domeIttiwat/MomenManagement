@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, Package, Users, ShoppingBag, X, LogOut, Megaphone, ShieldCheck, Wrench } from 'lucide-react';
+import { LayoutDashboard, Package, Users, ShoppingBag, X, LogOut, Megaphone, ShieldCheck, Wrench, Hammer } from 'lucide-react';
 
 const Sidebar = ({ activeTab, setActiveTab, isOpen, onClose = () => {} }) => {
   const menuItems = [
@@ -8,8 +8,9 @@ const Sidebar = ({ activeTab, setActiveTab, isOpen, onClose = () => {} }) => {
     { id: 'customers', label: 'ลูกค้า', icon: Users },
     { id: 'orders', label: 'คำสั่งซื้อ', icon: ShoppingBag },
     { id: 'services', label: 'งานบริการ/ซ่อม', icon: Wrench },
+    { id: 'assembly', label: 'งานประกอบ', icon: Hammer },
     { id: 'marketing', label: 'การตลาด', icon: Megaphone },
-    { id: 'users', label: 'จัดการทีมงาน', icon: ShieldCheck }, 
+    { id: 'users', label: 'จัดการทีมงาน', icon: ShieldCheck },
   ];
 
   return (
