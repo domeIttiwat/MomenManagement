@@ -3,7 +3,7 @@ import {
   ArrowLeft, Edit, Trash2, CheckCircle, XCircle, RotateCcw, X,
   ChevronRight, Loader2, Send, User, Clock, MessageCircle,
   Phone, MapPin, Image as ImageIcon, ZoomIn, UserCheck, Search, Eye,
-  Package, Warehouse, Plus, PackageMinus, ChevronDown,
+  Package, Warehouse, Plus, PackageMinus, ChevronDown, PackagePlus, Undo2,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
@@ -36,6 +36,8 @@ const TL_EVT = {
   reject:   { dot: 'bg-red-500',     label: 'ตีกลับ QC' },
   rework:   { dot: 'bg-orange-500',  label: 'แก้ไข' },
   qc_pass:  { dot: 'bg-emerald-500', label: 'QC ผ่าน' },
+  stock_withdraw: { dot: 'bg-green-500', label: 'เบิกวัสดุ' },
+  stock_return:   { dot: 'bg-red-400',   label: 'คืนวัสดุ' },
 };
 
 const TimelineEvent = ({ ev }) => {
@@ -102,6 +104,11 @@ const AssemblyDetail = ({ job: initialJob, onBack, onEdit, onDelete }) => {
   const [wSelectedItemId, setWSelectedItemId] = useState('');
   const [wQty, setWQty] = useState(1);
 
+  // ── Stock Return ──
+  const [returningTxId, setReturningTxId] = useState(null);
+  const [returnNote, setReturnNote] = useState('');
+  const [returnSaving, setReturnSaving] = useState(false);
+
   useEffect(() => {
     setJob(initialJob);
     setComments(initialJob?.comments || []);
@@ -137,10 +144,10 @@ const AssemblyDetail = ({ job: initialJob, onBack, onEdit, onDelete }) => {
   const fetchWithdrawals = async () => {
     const { data } = await supabase
       .from('stock_transactions')
-      .select('id, quantity, created_at, note, product:product_id(name, sku), variant:variant_id(name), location:location_id(code, name, store:store_id(name)), creator:created_by(first_name, last_name)')
+      .select('id, transaction_type, quantity, created_at, note, product_id, variant_id, location_id, store_id, product:product_id(name, sku), variant:variant_id(name), location:location_id(code, name, store:store_id(id, name)), creator:created_by(first_name, last_name)')
       .eq('reference_type', 'assembly')
       .eq('reference_id', job.id)
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: true });
     setStockWithdrawals(data || []);
   };
 
@@ -158,6 +165,54 @@ const AssemblyDetail = ({ job: initialJob, onBack, onEdit, onDelete }) => {
     setWSelectedItemId(items[0]?.id || '');
     setWQty(1);
     setWStockLoading(false);
+  };
+
+  const submitReturn = async (tx) => {
+    if (!returnNote.trim()) return alert('กรุณาระบุหมายเหตุการคืน');
+    setReturnSaving(true);
+    try {
+      const customerName = job.customer_cache
+        ? [job.customer_cache.first_name, job.customer_cache.last_name].filter(Boolean).join(' ')
+        : null;
+      const autoNote = `คืนคลัง: ${returnNote.trim()} / โปรเจ็ค "${job.title}"${customerName ? ` / ลูกค้า: ${customerName}` : ''}`;
+      let q = supabase.from('stock_items').select('id, quantity').eq('product_id', tx.product_id);
+      if (tx.variant_id) q = q.eq('variant_id', tx.variant_id); else q = q.is('variant_id', null);
+      if (tx.location_id) q = q.eq('location_id', tx.location_id); else q = q.is('location_id', null);
+      const { data: existing } = await q.maybeSingle();
+      await supabase.from('stock_transactions').insert([{
+        product_id: tx.product_id,
+        variant_id: tx.variant_id || null,
+        transaction_type: 'stock_in',
+        quantity: tx.quantity,
+        store_id: tx.store_id || null,
+        location_id: tx.location_id || null,
+        note: autoNote,
+        reference_type: 'assembly',
+        reference_id: job.id,
+        created_by: profile?.id,
+      }]);
+      if (existing) {
+        await supabase.from('stock_items').update({
+          quantity: existing.quantity + tx.quantity,
+          updated_at: new Date().toISOString(),
+        }).eq('id', existing.id);
+      } else {
+        await supabase.from('stock_items').insert([{
+          product_id: tx.product_id,
+          variant_id: tx.variant_id || null,
+          location_id: tx.location_id || null,
+          quantity: tx.quantity,
+          created_by: profile?.id,
+        }]);
+      }
+      setReturningTxId(null);
+      setReturnNote('');
+      fetchWithdrawals();
+    } catch (err) {
+      alert('เกิดข้อผิดพลาด: ' + err.message);
+    } finally {
+      setReturnSaving(false);
+    }
   };
 
   const resetWithdrawForm = () => {
@@ -918,6 +973,12 @@ const AssemblyDetail = ({ job: initialJob, onBack, onEdit, onDelete }) => {
       if (it.qc_status === 'passed' && it.qc_at)
         events.push({ type: 'qc_pass', name: it.name, at: it.qc_at, by: it.qc_by?.name });
     });
+    stockWithdrawals.forEach(tx => {
+      const type = tx.transaction_type === 'stock_out' ? 'stock_withdraw' : 'stock_return';
+      const pname = (tx.product?.name || '—') + (tx.variant?.name ? ` (${tx.variant.name})` : '') + ` ×${tx.quantity}`;
+      const by = tx.creator ? `${tx.creator.first_name} ${tx.creator.last_name}` : null;
+      events.push({ type, name: pname, at: tx.created_at, by, reason: tx.note });
+    });
     events.sort((a, b) => (a.at || '').localeCompare(b.at || ''));
     return events;
   })();
@@ -1217,9 +1278,9 @@ const AssemblyDetail = ({ job: initialJob, onBack, onEdit, onDelete }) => {
                 <div className="flex items-center gap-2">
                   <Package size={16} className="text-amber-400" />
                   <h3 className="font-bold text-white">เบิกวัสดุจากคลัง</h3>
-                  {stockWithdrawals.length > 0 && (
+                  {stockWithdrawals.filter(t => t.transaction_type === 'stock_out').length > 0 && (
                     <span className="text-[10px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30 px-1.5 py-0.5 rounded-full">
-                      {stockWithdrawals.length} รายการ
+                      เบิก {stockWithdrawals.filter(t => t.transaction_type === 'stock_out').length} รายการ
                     </span>
                   )}
                 </div>
@@ -1231,40 +1292,114 @@ const AssemblyDetail = ({ job: initialJob, onBack, onEdit, onDelete }) => {
                 )}
               </div>
 
-              {/* Existing withdrawals */}
-              {stockWithdrawals.length > 0 && (
+              {/* Section 1: Withdrawals (stock_out) */}
+              {stockWithdrawals.filter(t => t.transaction_type === 'stock_out').length > 0 && (
                 <div className="divide-y divide-slate-800/60">
-                  {stockWithdrawals.map(tx => {
+                  {stockWithdrawals.filter(t => t.transaction_type === 'stock_out').map(tx => {
                     const creator = tx.creator ? `${tx.creator.first_name} ${tx.creator.last_name}` : '—';
+                    const isReturning = returningTxId === tx.id;
                     return (
-                      <div key={tx.id} className="flex items-center gap-3 px-5 py-3">
-                        <div className="w-8 h-8 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center shrink-0">
-                          <PackageMinus size={14} className="text-red-400" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-sm font-semibold text-white">{tx.product?.name}</span>
-                            {tx.variant?.name && <span className="text-xs bg-slate-700 text-slate-300 px-1.5 py-0.5 rounded-full">{tx.variant.name}</span>}
-                            <span className="text-sm font-bold text-red-400">−{tx.quantity}</span>
+                      <div key={tx.id} className="px-5 py-3">
+                        <div className="flex items-start gap-3">
+                          <div className="w-8 h-8 rounded-xl bg-green-500/10 border border-green-500/20 flex items-center justify-center shrink-0 mt-0.5">
+                            <PackageMinus size={14} className="text-green-400" />
                           </div>
-                          <div className="flex items-center gap-3 mt-0.5 text-xs text-slate-500 flex-wrap">
-                            {tx.location && (
-                              <span className="flex items-center gap-1">
-                                <Warehouse size={10} />
-                                {tx.location.store?.name && `${tx.location.store.name} · `}{tx.location.code}
-                              </span>
-                            )}
-                            <span className="flex items-center gap-1"><Clock size={10} />{fmtTime(tx.created_at)}</span>
-                            <span className="flex items-center gap-1"><User size={10} />{creator}</span>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-sm font-semibold text-white">{tx.product?.name}</span>
+                              {tx.variant?.name && <span className="text-xs bg-slate-700 text-slate-300 px-1.5 py-0.5 rounded-full">{tx.variant.name}</span>}
+                              <span className="text-sm font-bold text-green-400">×{tx.quantity}</span>
+                            </div>
+                            <div className="flex items-center gap-3 mt-0.5 text-xs text-slate-500 flex-wrap">
+                              {tx.location && (
+                                <span className="flex items-center gap-1">
+                                  <Warehouse size={10} />
+                                  {tx.location.store?.name && `${tx.location.store.name} · `}{tx.location.code}
+                                </span>
+                              )}
+                              <span className="flex items-center gap-1"><Clock size={10} />{fmtTime(tx.created_at)}</span>
+                              <span className="flex items-center gap-1"><User size={10} />{creator}</span>
+                            </div>
                           </div>
+                          {can('stock', 'stock_in') && (
+                            <button
+                              onClick={() => { setReturningTxId(isReturning ? null : tx.id); setReturnNote(''); }}
+                              className="shrink-0 flex items-center gap-1 text-xs font-semibold text-slate-400 bg-slate-800 hover:bg-red-500/15 hover:text-red-400 hover:border-red-500/20 border border-slate-700 px-2.5 py-1.5 rounded-xl transition-colors mt-0.5">
+                              <Undo2 size={12} /> คืนคลัง
+                            </button>
+                          )}
                         </div>
+                        {/* Return note inline form */}
+                        {isReturning && (
+                          <div className="mt-3 ml-11 p-3 bg-red-500/8 border border-red-500/20 rounded-xl space-y-2">
+                            <p className="text-xs font-bold text-red-400">ระบุหมายเหตุการคืน <span className="text-red-500">*</span></p>
+                            <input
+                              className="w-full px-3 py-2 bg-slate-800 border border-slate-700 text-white placeholder:text-slate-600 rounded-xl text-sm focus:outline-none focus:border-red-500 transition-colors"
+                              placeholder="เหตุผลที่คืน เช่น เหลือจากงาน, ไม่ได้ใช้..."
+                              value={returnNote}
+                              onChange={e => setReturnNote(e.target.value)}
+                              autoFocus
+                              onKeyDown={e => { if (e.key === 'Enter') submitReturn(tx); }}
+                            />
+                            <div className="flex gap-2">
+                              <button onClick={() => { setReturningTxId(null); setReturnNote(''); }}
+                                className="px-3 py-1.5 text-xs text-slate-400 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl font-medium transition-colors">
+                                ยกเลิก
+                              </button>
+                              <button onClick={() => submitReturn(tx)} disabled={returnSaving || !returnNote.trim()}
+                                className="flex-1 py-1.5 text-xs bg-red-600 hover:bg-red-500 text-white rounded-xl font-semibold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40">
+                                {returnSaving ? <Loader2 size={12} className="animate-spin" /> : <Undo2 size={12} />}
+                                ยืนยันคืน {tx.quantity} ชิ้น
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     );
                   })}
                 </div>
               )}
 
-              {stockWithdrawals.length === 0 && !withdrawFormOpen && (
+              {/* Section 2: Returns (stock_in) */}
+              {stockWithdrawals.filter(t => t.transaction_type === 'stock_in').length > 0 && (
+                <>
+                  <div className="px-5 py-2 bg-slate-800/40 border-t border-slate-700/60 flex items-center gap-2">
+                    <Undo2 size={12} className="text-red-400" />
+                    <span className="text-[11px] font-bold text-red-400 uppercase tracking-wider">คืนคลัง</span>
+                  </div>
+                  <div className="divide-y divide-slate-800/60">
+                    {stockWithdrawals.filter(t => t.transaction_type === 'stock_in').map(tx => {
+                      const creator = tx.creator ? `${tx.creator.first_name} ${tx.creator.last_name}` : '—';
+                      return (
+                        <div key={tx.id} className="flex items-start gap-3 px-5 py-3 bg-red-500/5">
+                          <div className="w-8 h-8 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center shrink-0 mt-0.5">
+                            <PackagePlus size={14} className="text-red-400" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-sm font-semibold text-white">{tx.product?.name}</span>
+                              {tx.variant?.name && <span className="text-xs bg-slate-700 text-slate-300 px-1.5 py-0.5 rounded-full">{tx.variant.name}</span>}
+                              <span className="text-sm font-bold text-red-400">×{tx.quantity}</span>
+                            </div>
+                            <div className="flex items-center gap-3 mt-0.5 text-xs text-slate-500 flex-wrap">
+                              {tx.location && (
+                                <span className="flex items-center gap-1">
+                                  <Warehouse size={10} />
+                                  {tx.location.store?.name && `${tx.location.store.name} · `}{tx.location.code}
+                                </span>
+                              )}
+                              <span className="flex items-center gap-1"><Clock size={10} />{fmtTime(tx.created_at)}</span>
+                              <span className="flex items-center gap-1"><User size={10} />{creator}</span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+
+              {stockWithdrawals.filter(t => t.transaction_type === 'stock_out').length === 0 && !withdrawFormOpen && (
                 <p className="px-6 py-6 text-center text-slate-600 text-sm">ยังไม่มีการเบิกวัสดุ</p>
               )}
 

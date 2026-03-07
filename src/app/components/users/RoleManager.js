@@ -26,8 +26,9 @@ const ACTIONS = [
   { id: 'prepare',     label: 'เตรียมของ',    onlyFor: ['assembly'] },
   { id: 'assemble',    label: 'ประกอบ/ทำ',   onlyFor: ['assembly'] },
   { id: 'qc',          label: 'QC / ตีกลับ', onlyFor: ['assembly'] },
-  { id: 'stock_in',    label: 'รับเข้าสินค้า', onlyFor: ['stock'] },
-  { id: 'stock_out',   label: 'เบิกออกสินค้า', onlyFor: ['stock'] },
+  { id: 'stock_in',   label: 'รับเข้าสินค้า',   onlyFor: ['stock'] },
+  { id: 'stock_out',  label: 'เบิกออกสินค้า',  onlyFor: ['stock'] },
+  { id: 'delete_tx',  label: 'ลบประวัติสต๊อก', onlyFor: ['stock'] },
 ];
 
 const RoleManager = () => {

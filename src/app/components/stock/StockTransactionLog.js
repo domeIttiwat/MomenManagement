@@ -160,7 +160,7 @@ const StockTransactionLog = () => {
                       {tx.note && <span className="text-gray-500 italic">"{tx.note}"</span>}
                     </div>
                   </div>
-                  {can('stock', 'delete') && (
+                  {can('stock', 'delete_tx') && (
                     <div className="shrink-0">
                       <button
                         onClick={() => deleteTransaction(tx.id)}
