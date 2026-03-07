@@ -93,7 +93,7 @@ const StockList = ({ onStockIn, onStockOut, onNewTx }) => {
           <button onClick={fetchData} className="p-2.5 bg-white border border-gray-200 hover:bg-gray-50 rounded-xl transition-colors text-gray-500" title="รีเฟรช">
             <RefreshCw size={16} />
           </button>
-          {can('stock', 'create') && (
+          {can('stock', 'stock_in') && (
             <button onClick={onNewTx} className="bg-teal-600 hover:bg-teal-700 text-white px-4 py-2.5 rounded-xl font-semibold flex items-center gap-2 text-sm transition-colors shadow-sm">
               <Plus size={16} /> บันทึกสต๊อก
             </button>

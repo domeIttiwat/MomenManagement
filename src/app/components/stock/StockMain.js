@@ -1,6 +1,7 @@
 'use client';
 import React, { useState } from 'react';
 import { Boxes, History, Warehouse } from 'lucide-react';
+import { useAuth } from '@/app/context/AuthContext';
 import StockList from './StockList';
 import StockTransactionLog from './StockTransactionLog';
 import StoreList from './StoreList';
@@ -9,6 +10,7 @@ import StoreDetail from './StoreDetail';
 import StockTransactionForm from './StockTransactionForm';
 
 const StockMain = () => {
+  const { can } = useAuth();
   const [activeSubTab, setActiveSubTab] = useState('items');
 
   // items sub-view
@@ -46,10 +48,12 @@ const StockMain = () => {
     setItemsView('transaction_form');
   };
 
+  const canAccessStores = can('stock', 'view') || can('stock', 'edit') || can('stock', 'create');
+
   const tabs = [
     { id: 'items',  label: 'สต๊อกสินค้า',        icon: Boxes },
     { id: 'log',    label: 'ประวัติการเคลื่อนไหว', icon: History },
-    { id: 'stores', label: 'จัดการคลัง',           icon: Warehouse },
+    ...(canAccessStores ? [{ id: 'stores', label: 'จัดการคลัง', icon: Warehouse }] : []),
   ];
 
   return (
@@ -98,7 +102,7 @@ const StockMain = () => {
 
       {activeSubTab === 'log' && <StockTransactionLog />}
 
-      {activeSubTab === 'stores' && (
+      {activeSubTab === 'stores' && canAccessStores && (
         storeView === 'list'
           ? <StoreList onNew={() => openStoreForm(null)} onEdit={openStoreForm} onView={openStoreDetail} />
           : storeView === 'form'
