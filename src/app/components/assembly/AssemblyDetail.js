@@ -466,6 +466,60 @@ const AssemblyDetail = ({ job: initialJob, onBack, onEdit, onDelete }) => {
     setSaving(false);
   };
 
+  // ── Helper: find stock_out txns that have NOT been returned yet ──
+  const getActiveWithdrawals = () => {
+    const withdrawals = stockWithdrawals.filter(t => t.transaction_type === 'stock_out');
+    const returns     = stockWithdrawals.filter(t => t.transaction_type === 'stock_in');
+    const matchedIds  = new Set();
+    returns.forEach(ret => {
+      const match = withdrawals.find(w =>
+        !matchedIds.has(w.id) &&
+        w.product_id  === ret.product_id &&
+        (w.variant_id  || null) === (ret.variant_id  || null) &&
+        (w.location_id || null) === (ret.location_id || null) &&
+        w.quantity === ret.quantity
+      );
+      if (match) matchedIds.add(match.id);
+    });
+    return withdrawals.filter(w => !matchedIds.has(w.id));
+  };
+
+  // ── Delete job + auto-return all unreturned withdrawals ──
+  const handleDelete = async () => {
+    const active = getActiveWithdrawals();
+    const msg = active.length > 0
+      ? `ลบใบงานนี้? สินค้าที่เบิกไว้ ${active.length} รายการจะถูกคืนคลังอัตโนมัติ`
+      : 'ยืนยันลบใบงานนี้?';
+    if (!confirm(msg)) return;
+    for (const tx of active) {
+      let q = supabase.from('stock_items').select('id, quantity').eq('product_id', tx.product_id);
+      if (tx.variant_id)  q = q.eq('variant_id',  tx.variant_id);  else q = q.is('variant_id',  null);
+      if (tx.location_id) q = q.eq('location_id', tx.location_id); else q = q.is('location_id', null);
+      const { data: existing } = await q.maybeSingle();
+      await supabase.from('stock_transactions').insert([{
+        product_id: tx.product_id, variant_id: tx.variant_id || null,
+        transaction_type: 'stock_in', quantity: tx.quantity,
+        store_id: tx.store_id || null, location_id: tx.location_id || null,
+        note: `คืนคลังอัตโนมัติ (ลบใบงาน "${job.title}")`,
+        reference_type: 'assembly', reference_id: job.id,
+        created_by: profile?.id,
+      }]);
+      if (existing) {
+        await supabase.from('stock_items').update({
+          quantity: existing.quantity + tx.quantity,
+          updated_at: new Date().toISOString(),
+        }).eq('id', existing.id);
+      } else {
+        await supabase.from('stock_items').insert([{
+          product_id: tx.product_id, variant_id: tx.variant_id || null,
+          location_id: tx.location_id || null, quantity: tx.quantity,
+          created_by: profile?.id,
+        }]);
+      }
+    }
+    onDelete();
+  };
+
   // ── Comments ──
   const postComment = async () => {
     if (!newComment.trim()) return;
@@ -1111,7 +1165,7 @@ const AssemblyDetail = ({ job: initialJob, onBack, onEdit, onDelete }) => {
             </button>
           )}
           {can('assembly', 'delete') && (
-            <button onClick={onDelete}
+            <button onClick={handleDelete}
               className="flex items-center gap-2 px-3 py-2.5 border border-slate-700 text-red-400 hover:bg-red-500/10 rounded-xl text-sm transition-all active:scale-95">
               <Trash2 size={16} />
             </button>
@@ -1278,9 +1332,9 @@ const AssemblyDetail = ({ job: initialJob, onBack, onEdit, onDelete }) => {
                 <div className="flex items-center gap-2">
                   <Package size={16} className="text-amber-400" />
                   <h3 className="font-bold text-white">เบิกวัสดุจากคลัง</h3>
-                  {stockWithdrawals.filter(t => t.transaction_type === 'stock_out').length > 0 && (
+                  {getActiveWithdrawals().length > 0 && (
                     <span className="text-[10px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30 px-1.5 py-0.5 rounded-full">
-                      เบิก {stockWithdrawals.filter(t => t.transaction_type === 'stock_out').length} รายการ
+                      เบิก {getActiveWithdrawals().length} รายการ
                     </span>
                   )}
                 </div>
@@ -1292,10 +1346,10 @@ const AssemblyDetail = ({ job: initialJob, onBack, onEdit, onDelete }) => {
                 )}
               </div>
 
-              {/* Section 1: Withdrawals (stock_out) */}
-              {stockWithdrawals.filter(t => t.transaction_type === 'stock_out').length > 0 && (
+              {/* Section 1: Active Withdrawals (not yet returned) */}
+              {getActiveWithdrawals().length > 0 && (
                 <div className="divide-y divide-slate-800/60">
-                  {stockWithdrawals.filter(t => t.transaction_type === 'stock_out').map(tx => {
+                  {getActiveWithdrawals().map(tx => {
                     const creator = tx.creator ? `${tx.creator.first_name} ${tx.creator.last_name}` : '—';
                     const isReturning = returningTxId === tx.id;
                     return (
@@ -1399,7 +1453,7 @@ const AssemblyDetail = ({ job: initialJob, onBack, onEdit, onDelete }) => {
                 </>
               )}
 
-              {stockWithdrawals.filter(t => t.transaction_type === 'stock_out').length === 0 && !withdrawFormOpen && (
+              {getActiveWithdrawals().length === 0 && stockWithdrawals.filter(t => t.transaction_type === 'stock_in').length === 0 && !withdrawFormOpen && (
                 <p className="px-6 py-6 text-center text-slate-600 text-sm">ยังไม่มีการเบิกวัสดุ</p>
               )}
 
