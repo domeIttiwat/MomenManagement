@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
 import BillPreview from './BillPreview';
 import ImageUploader from './ImageUploader';
+import AuditLogPanel from '@/app/components/common/AuditLogPanel';
 
 const OrderDetail = ({ order, onBack, onEdit, onDelete, showProfit, setShowProfit, onViewCustomer }) => {
   const { can } = useAuth();
@@ -625,6 +626,9 @@ const OrderDetail = ({ order, onBack, onEdit, onDelete, showProfit, setShowProfi
           )}
         </div>
       )}
+
+      {/* Audit Log */}
+      <AuditLogPanel resourceType="order" resourceId={order.id} title="ประวัติการเปลี่ยนแปลง" compact />
     </div>
   );
 };

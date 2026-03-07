@@ -3,6 +3,7 @@ import { ArrowLeft, Edit, Trash2, Printer, Wrench, User, Calendar, Clock, Dollar
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
 import ServiceBillPreview from './ServiceBillPreview';
+import AuditLogPanel from '@/app/components/common/AuditLogPanel';
 
 const ServiceDetail = ({ service, onBack, onEdit, onDelete, showProfit, setShowProfit }) => {
   const { can } = useAuth();
@@ -557,6 +558,9 @@ const ServiceDetail = ({ service, onBack, onEdit, onDelete, showProfit, setShowP
           )}
         </div>
       )}
+
+      {/* Audit Log */}
+      <AuditLogPanel resourceType="service" resourceId={service.id} title="ประวัติการเปลี่ยนแปลง" compact />
     </div>
   );
 };

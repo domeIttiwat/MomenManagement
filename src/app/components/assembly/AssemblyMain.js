@@ -2,6 +2,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Plus, Search, Loader2, History, Filter, Hammer, ChevronRight } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
+import { logAction } from '@/lib/auditLog';
+import AuditLogPanel from '@/app/components/common/AuditLogPanel';
 import AssemblyForm from './AssemblyForm';
 import AssemblyDetail from './AssemblyDetail';
 
@@ -22,7 +24,8 @@ const PROGRESS_COLOR = {
 };
 
 const AssemblyMain = () => {
-  const { can } = useAuth();
+  const { can, profile } = useAuth();
+  const meRef = () => profile ? { id: profile.id, name: `${profile.first_name} ${profile.last_name}` } : null;
   const [view, setView] = useState('list');
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -45,6 +48,13 @@ const AssemblyMain = () => {
 
   const handleDelete = async (id) => {
     if (!confirm('ลบใบงานนี้?')) return;
+    const target = jobs.find(j => j.id === id);
+    await logAction({
+      resource_type: 'assembly', resource_id: id, action: 'delete',
+      resource_label: target?.title || target?.job_number,
+      old_data: target ? { job_number: target.job_number, title: target.title, stage: target.stage } : null,
+      created_by: meRef(),
+    });
     await supabase.from('assembly_jobs').delete().eq('id', id);
     fetchJobs();
     setView('list');
@@ -72,6 +82,14 @@ const AssemblyMain = () => {
     if (data) setSelectedJob(data);
   };
 
+  if (view === 'log') return (
+    <div className="max-w-[1600px] mx-auto space-y-4 animate-in fade-in">
+      <button onClick={() => setView('list')} className="flex items-center gap-2 text-gray-500 hover:text-gray-900 font-medium px-3 py-2 rounded-lg hover:bg-gray-50 transition-colors">
+        <Hammer size={16} /> กลับรายการใบงาน
+      </button>
+      <AuditLogPanel resourceType="assembly" title="Log รวม — ใบงานทั้งหมด" />
+    </div>
+  );
   if (view === 'form') return (
     <AssemblyForm
       initialData={selectedJob}
@@ -219,14 +237,22 @@ const AssemblyMain = () => {
             )}
           </p>
         </div>
-        {can('assembly', 'create') && (
+        <div className="flex gap-2">
           <button
-            onClick={() => { setSelectedJob(null); setView('form'); }}
-            className="bg-amber-600 hover:bg-amber-500 text-white px-5 py-2.5 rounded-xl font-bold shadow-lg shadow-amber-950 flex items-center gap-2 transition-all active:scale-95"
+            onClick={() => setView('log')}
+            className="bg-white/10 hover:bg-white/20 text-white px-4 py-2.5 rounded-xl font-medium text-sm border border-white/10 flex items-center gap-2 transition-all"
           >
-            <Plus size={20} /> สร้างใบงานใหม่
+            <History size={16}/> Log ทั้งหมด
           </button>
-        )}
+          {can('assembly', 'create') && (
+            <button
+              onClick={() => { setSelectedJob(null); setView('form'); }}
+              className="bg-amber-600 hover:bg-amber-500 text-white px-5 py-2.5 rounded-xl font-bold shadow-lg shadow-amber-950 flex items-center gap-2 transition-all active:scale-95"
+            >
+              <Plus size={20} /> สร้างใบงานใหม่
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Toolbar */}

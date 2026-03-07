@@ -3,6 +3,7 @@ import { ArrowLeft, Edit, Trash2, Eye, EyeOff, Layers, Package, Wrench, Bike, Ch
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
 import FastenerBillPreview from './FastenerBillPreview';
+import AuditLogPanel from '@/app/components/common/AuditLogPanel';
 
 const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCost }) => {
   const { can } = useAuth();
@@ -518,6 +519,9 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
           )}
         </div>
       )}
+
+      {/* Audit Log */}
+      <AuditLogPanel resourceType="product" resourceId={product.id} title="ประวัติการเปลี่ยนแปลง" compact />
     </div>
   );
 };

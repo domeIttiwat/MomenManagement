@@ -1,13 +1,16 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Plus, Search, LayoutGrid, List as ListIcon, Loader2, ArrowUpDown, Users } from 'lucide-react';
+import { Plus, Search, LayoutGrid, List as ListIcon, Loader2, ArrowUpDown, Users, History } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
+import { logAction } from '@/lib/auditLog';
+import AuditLogPanel from '@/app/components/common/AuditLogPanel';
 import CustomerList from './CustomerList';
 import CustomerForm from './CustomerForm';
 import CustomerDetail from './CustomerDetail';
 
 const CustomerMain = ({ initialNavData, onViewOrder }) => {
-  const { can } = useAuth();
+  const { can, profile } = useAuth();
+  const meRef = () => profile ? { id: profile.id, name: `${profile.first_name} ${profile.last_name}` } : null;
   const [view, setView] = useState('list');
   const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -38,6 +41,13 @@ const CustomerMain = ({ initialNavData, onViewOrder }) => {
 
   const handleDelete = async (id) => {
     if(!confirm('ยืนยันการลบลูกค้า?')) return;
+    const target = customers.find(c => c.id === id);
+    await logAction({
+      resource_type: 'customer', resource_id: id, action: 'delete',
+      resource_label: target ? `${target.first_name} ${target.last_name}`.trim() : null,
+      old_data: target ? { first_name: target.first_name, last_name: target.last_name, phone: target.phone, notes: target.notes } : null,
+      created_by: meRef(),
+    });
     await supabase.from('customers').delete().eq('id', id);
     fetchCustomers();
     setView('list');
@@ -65,6 +75,14 @@ const CustomerMain = ({ initialNavData, onViewOrder }) => {
   }, [customers, search, sortOption]);
 
   if (view === 'form') return <CustomerForm onCancel={() => setView('list')} onSuccess={() => { setView('list'); fetchCustomers(); }} initialData={selectedCustomer} />;
+  if (view === 'log') return (
+    <div className="max-w-[1600px] mx-auto space-y-4 animate-in fade-in">
+      <button onClick={() => setView('list')} className="flex items-center gap-2 text-gray-500 hover:text-gray-900 font-medium px-3 py-2 rounded-lg hover:bg-gray-50 transition-colors">
+        <Users size={16} /> กลับรายชื่อลูกค้า
+      </button>
+      <AuditLogPanel resourceType="customer" title="Log รวม — ลูกค้าทั้งหมด" />
+    </div>
+  );
   
   if (view === 'detail' && selectedCustomer) return (
     <CustomerDetail 
@@ -87,14 +105,22 @@ const CustomerMain = ({ initialNavData, onViewOrder }) => {
           </h1>
           <p className="text-blue-100 mt-1 font-medium ml-1">ฐานข้อมูลลูกค้าทั้งหมด ({filteredAndSorted.length})</p>
         </div>
-        {can('customers', 'create') && (
+        <div className="flex gap-2">
           <button
-              onClick={() => { setSelectedCustomer(null); setView('form'); }}
-              className="bg-white text-blue-600 hover:bg-blue-50 px-6 py-3 rounded-xl font-bold shadow-md flex items-center gap-2 transition-all active:scale-95"
+            onClick={() => setView('log')}
+            className="bg-white/10 hover:bg-white/20 text-white px-4 py-3 rounded-xl font-medium backdrop-blur-sm transition-all text-sm border border-white/10 flex items-center gap-2"
           >
-            <Plus size={24} /> เพิ่มลูกค้า
+            <History size={18}/> Log ทั้งหมด
           </button>
-        )}
+          {can('customers', 'create') && (
+            <button
+                onClick={() => { setSelectedCustomer(null); setView('form'); }}
+                className="bg-white text-blue-600 hover:bg-blue-50 px-6 py-3 rounded-xl font-bold shadow-md flex items-center gap-2 transition-all active:scale-95"
+            >
+              <Plus size={24} /> เพิ่มลูกค้า
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="bg-white p-2 rounded-2xl shadow-sm border border-gray-100 flex flex-col md:flex-row gap-3">

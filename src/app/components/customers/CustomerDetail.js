@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { ArrowLeft, Edit, Trash2, MapPin, Phone, MessageSquare, Facebook, Instagram, MessageCircle, X, ShoppingBag, TrendingUp, DollarSign, Eye, EyeOff, Package, ExternalLink, Map } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
+import AuditLogPanel from '@/app/components/common/AuditLogPanel';
 
 const CustomerDetail = ({ customer, onBack, onEdit, onDelete, onViewOrder }) => {
   const { can } = useAuth();
@@ -301,6 +302,9 @@ const CustomerDetail = ({ customer, onBack, onEdit, onDelete, onViewOrder }) => 
           )}
         </div>
       )}
+
+      {/* Audit Log */}
+      <AuditLogPanel resourceType="customer" resourceId={customer.id} title="ประวัติการเปลี่ยนแปลง" compact />
     </div>
   );
 };

@@ -3,6 +3,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { PackageCheck, PackageMinus, Sliders, Calendar, User, Warehouse, Search, RefreshCw, ChevronDown, Trash2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
+import { logAction } from '@/lib/auditLog';
 
 const TX_TYPE_CONFIG = {
   stock_in:     { label: 'รับเข้า',    color: 'bg-green-100 text-green-700', icon: PackageCheck },
@@ -13,7 +14,7 @@ const TX_TYPE_CONFIG = {
 const REF_TYPE_LABEL = { order: 'ออเดอร์', service: 'งานบริการ', manual: 'บันทึกเอง' };
 
 const StockTransactionLog = () => {
-  const { can } = useAuth();
+  const { can, profile } = useAuth();
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [total, setTotal] = useState(0);
@@ -75,6 +76,15 @@ const StockTransactionLog = () => {
 
   const deleteTransaction = async (id) => {
     if (!confirm('ยืนยันลบรายการนี้?')) return;
+    const target = transactions.find(tx => tx.id === id);
+    await logAction({
+      resource_type: 'stock',
+      resource_id: target?.product_id || null,
+      action: 'delete',
+      resource_label: target?.product?.name ? `${target.product.name} (${target.transaction_type})` : null,
+      old_data: target ? { transaction_type: target.transaction_type, quantity: target.quantity, note: target.note } : null,
+      created_by: profile ? { id: profile.id, name: `${profile.first_name} ${profile.last_name}` } : null,
+    });
     await supabase.from('stock_transactions').delete().eq('id', id);
     fetchTransactions();
   };

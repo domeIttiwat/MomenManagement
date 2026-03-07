@@ -93,7 +93,7 @@ const StockList = ({ onStockIn, onStockOut, onNewTx }) => {
           <button onClick={fetchData} className="p-2.5 bg-white border border-gray-200 hover:bg-gray-50 rounded-xl transition-colors text-gray-500" title="รีเฟรช">
             <RefreshCw size={16} />
           </button>
-          {can('stock', 'stock_in') && (
+          {can('stock', 'create') && (
             <button onClick={onNewTx} className="bg-teal-600 hover:bg-teal-700 text-white px-4 py-2.5 rounded-xl font-semibold flex items-center gap-2 text-sm transition-colors shadow-sm">
               <Plus size={16} /> บันทึกสต๊อก
             </button>
@@ -180,7 +180,12 @@ const StockList = ({ onStockIn, onStockOut, onNewTx }) => {
                         </td>
                         <td className="py-3 px-4">
                           <div className="flex items-center justify-center gap-1" onClick={e => e.stopPropagation()}>
-                            {!hasVariants && (
+                            {!hasVariants && noStock && can('stock', 'create') && (
+                              <button onClick={() => onStockIn(product, null)} className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-teal-700 bg-teal-50 hover:bg-teal-100 rounded-lg transition-colors">
+                                <Plus size={13} /> เริ่มติดตาม
+                              </button>
+                            )}
+                            {!hasVariants && !noStock && (
                               <>
                                 {can('stock', 'stock_in') && (
                                   <button onClick={() => onStockIn(product, null)} className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-green-700 bg-green-50 hover:bg-green-100 rounded-lg transition-colors">

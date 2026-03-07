@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { ArrowLeft, Save, Loader2, Plus, Trash2, Search, X, UserPlus, Phone, MapPin, MessageCircle } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/app/context/AuthContext';
+import { logAction } from '@/lib/auditLog';
 
 // หาสินค้า/บริการที่แพงที่สุดจาก order
 const getMostExpensiveOrderItem = (order) => {
@@ -29,6 +31,8 @@ const fmtDate = (iso) => iso
 const SOCIAL_ICON = { Facebook: '📘', Line: '💬', Instagram: '📷', WhatsApp: '📱' };
 
 const AssemblyForm = ({ initialData, onCancel, onSuccess }) => {
+  const { profile } = useAuth();
+  const meRef = () => profile ? { id: profile.id, name: `${profile.first_name} ${profile.last_name}` } : null;
   const [saving, setSaving] = useState(false);
 
   const [title, setTitle] = useState(initialData?.title || '');
@@ -184,15 +188,30 @@ const AssemblyForm = ({ initialData, onCancel, onSuccess }) => {
         customer_cache: customerCache || null,
         items, assignees,
       };
+      let savedId = initialData?.id;
+      let savedJobNumber = initialData?.job_number;
       if (initialData?.id) {
         const { error } = await supabase.from('assembly_jobs').update(payload).eq('id', initialData.id);
         if (error) throw new Error(error.message);
       } else {
-        const { error } = await supabase.from('assembly_jobs').insert([{
-          ...payload, job_number: await generateJobNumber(), stage: 'preparing', comments: [],
-        }]);
+        savedJobNumber = await generateJobNumber();
+        const { data, error } = await supabase.from('assembly_jobs').insert([{
+          ...payload, job_number: savedJobNumber, stage: 'preparing', comments: [],
+        }]).select().single();
         if (error) throw new Error(error.message);
+        if (data) savedId = data.id;
       }
+
+      await logAction({
+        resource_type: 'assembly',
+        resource_id: savedId,
+        action: initialData?.id ? 'update' : 'create',
+        resource_label: title || savedJobNumber,
+        old_data: initialData?.id ? { title: initialData.title, notes: initialData.notes, stage: initialData.stage } : null,
+        new_data: { title, notes, stage: initialData?.id ? initialData.stage : 'preparing', job_number: savedJobNumber },
+        created_by: meRef(),
+      });
+
       onSuccess();
     } catch (err) { alert('บันทึกไม่สำเร็จ: ' + err.message); }
     finally { setSaving(false); }

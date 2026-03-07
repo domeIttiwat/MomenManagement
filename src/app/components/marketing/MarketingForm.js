@@ -1,11 +1,15 @@
 import React, { useState } from 'react';
 import { ArrowLeft, Save, Loader2, Calendar, FileText, DollarSign } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/app/context/AuthContext';
+import { logAction } from '@/lib/auditLog';
 import ImageUploader from './ImageUploader';
 import NumericInput from './NumericInput';
 import ChannelSelector from './ChannelSelector';
 
 const MarketingForm = ({ onCancel, onSuccess, initialData }) => {
+  const { profile } = useAuth();
+  const meRef = () => profile ? { id: profile.id, name: `${profile.first_name} ${profile.last_name}` } : null;
   const [loading, setLoading] = useState(false);
   
   const getLocalDate = () => new Date().toISOString().split('T')[0];
@@ -54,11 +58,29 @@ const MarketingForm = ({ onCancel, onSuccess, initialData }) => {
         notes: formData.notes
       };
 
+      const logFields = (d) => ({
+        title: d?.title, channel_name: d?.channel_name,
+        amount: d?.amount, expense_date: d?.expense_date, notes: d?.notes,
+      });
+
+      let savedId = initialData?.id;
       if (initialData?.id) {
         await supabase.from('marketing_expenses').update(payload).eq('id', initialData.id);
       } else {
-        await supabase.from('marketing_expenses').insert([payload]);
+        const { data } = await supabase.from('marketing_expenses').insert([payload]).select().single();
+        if (data) savedId = data.id;
       }
+
+      await logAction({
+        resource_type: 'marketing',
+        resource_id: savedId,
+        action: initialData?.id ? 'update' : 'create',
+        resource_label: formData.title || formData.channel_name,
+        old_data: initialData?.id ? logFields(initialData) : null,
+        new_data: logFields(formData),
+        created_by: meRef(),
+      });
+
       onSuccess();
     } catch (err) {
       alert(err.message);

@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
+import { logAction } from '@/lib/auditLog';
 
 const TX_TYPES = [
   { id: 'stock_in',   label: 'รับเข้าสต๊อก', icon: PackageCheck, color: 'text-green-700 bg-green-50 border-green-200' },
@@ -223,6 +224,14 @@ const StockTransactionForm = ({ initialData, onCancel, onSuccess }) => {
       }]);
 
       await upsertStockItem(selectedProduct.id, variantId, locId, delta, profile?.id);
+      await logAction({
+        resource_type: 'stock',
+        resource_id: selectedProduct.id,
+        action: txType,
+        resource_label: selectedProduct.name + (selectedVariant ? ` (${selectedVariant.name})` : ''),
+        new_data: { transaction_type: txType, quantity, note: note.trim(), product_sku: selectedProduct.sku },
+        created_by: profile ? { id: profile.id, name: `${profile.first_name} ${profile.last_name}` } : null,
+      });
       onSuccess();
     } catch (err) {
       alert('เกิดข้อผิดพลาด: ' + err.message);

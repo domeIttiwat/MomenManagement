@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { ArrowLeft, Save, Loader2, Info, Wrench, Package, Layers, Sparkles } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
+import { logAction } from '@/lib/auditLog';
 import ImageUploader from './ImageUploader';
 import CategoryManager from './CategoryManager';
 import VariantManager from './VariantManager';
@@ -210,6 +211,21 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
               accessory_id: acc.accessory_id
           })));
       }
+
+      // Audit log
+      const logFields = (d) => ({
+        name: d?.name, sku: d?.sku, sell_price: d?.sell_price,
+        cost_price: d?.cost_price, has_variants: d?.has_variants, description: d?.description,
+      });
+      await logAction({
+        resource_type: 'product',
+        resource_id: productId,
+        action: initialData?.id ? 'update' : 'create',
+        resource_label: formData.name,
+        old_data: initialData?.id ? logFields(initialData) : null,
+        new_data: logFields(formData),
+        created_by: meRef(),
+      });
 
       onSuccess(resultData);
     } catch (err) {

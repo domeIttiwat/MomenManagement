@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { ArrowLeft, Edit, Trash2, Calendar, DollarSign, Megaphone, FileText, X } from 'lucide-react';
+import AuditLogPanel from '@/app/components/common/AuditLogPanel';
 
 const MarketingDetail = ({ expense, onBack, onEdit, onDelete }) => {
   const [lightbox, setLightbox] = useState(null);
@@ -57,6 +58,9 @@ const MarketingDetail = ({ expense, onBack, onEdit, onDelete }) => {
           </div>
         )}
       </div>
+
+      {/* Audit Log */}
+      <AuditLogPanel resourceType="marketing" resourceId={expense.id} title="ประวัติการเปลี่ยนแปลง" compact />
     </div>
   );
 };

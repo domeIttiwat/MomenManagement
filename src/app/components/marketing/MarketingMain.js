@@ -1,11 +1,16 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Plus, Search, Megaphone, LayoutGrid, List as ListIcon, Loader2, Calendar } from 'lucide-react';
+import { Plus, Search, Megaphone, LayoutGrid, List as ListIcon, Loader2, Calendar, History } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/app/context/AuthContext';
+import { logAction } from '@/lib/auditLog';
+import AuditLogPanel from '@/app/components/common/AuditLogPanel';
 import MarketingList from './MarketingList';
 import MarketingForm from './MarketingForm';
 import MarketingDetail from './MarketingDetail';
 
 const MarketingMain = () => {
+  const { profile } = useAuth();
+  const meRef = () => profile ? { id: profile.id, name: `${profile.first_name} ${profile.last_name}` } : null;
   const [view, setView] = useState('list');
   const [expenses, setExpenses] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -53,6 +58,13 @@ const MarketingMain = () => {
 
   const handleDelete = async (id) => {
     if(!confirm('ลบรายการนี้?')) return;
+    const target = expenses.find(e => e.id === id);
+    await logAction({
+      resource_type: 'marketing', resource_id: id, action: 'delete',
+      resource_label: target?.title || target?.channel_name,
+      old_data: target ? { title: target.title, channel_name: target.channel_name, amount: target.amount, expense_date: target.expense_date } : null,
+      created_by: meRef(),
+    });
     await supabase.from('marketing_expenses').delete().eq('id', id);
     fetchExpenses();
     setView('list');
@@ -63,6 +75,14 @@ const MarketingMain = () => {
 
   if (view === 'form') return <MarketingForm onCancel={() => setView('list')} onSuccess={() => { setView('list'); fetchExpenses(); }} initialData={selectedItem} />;
   if (view === 'detail') return <MarketingDetail expense={selectedItem} onBack={() => setView('list')} onEdit={() => setView('form')} onDelete={() => handleDelete(selectedItem.id)} />;
+  if (view === 'log') return (
+    <div className="max-w-[1600px] mx-auto space-y-4 animate-in fade-in">
+      <button onClick={() => setView('list')} className="flex items-center gap-2 text-gray-500 hover:text-gray-900 font-medium px-3 py-2 rounded-lg hover:bg-gray-50 transition-colors">
+        <Megaphone size={16} /> กลับรายการการตลาด
+      </button>
+      <AuditLogPanel resourceType="marketing" title="Log รวม — การตลาดทั้งหมด" />
+    </div>
+  );
 
   return (
     <div className="max-w-[1600px] mx-auto space-y-6 animate-in fade-in duration-500">
@@ -83,12 +103,20 @@ const MarketingMain = () => {
 
       {/* Toolbar */}
       <div className="bg-white p-2 rounded-2xl shadow-sm border border-gray-100 flex flex-col xl:flex-row gap-3 items-center">
-        <button 
-          onClick={() => { setSelectedItem(null); setView('form'); }} 
-          className="bg-gray-900 hover:bg-black text-white px-5 py-2.5 rounded-xl font-medium shadow-lg flex items-center gap-2 shrink-0"
-        >
-          <Plus size={20}/> เพิ่มรายการ
-        </button>
+        <div className="flex gap-2 shrink-0">
+          <button
+            onClick={() => setView('log')}
+            className="bg-gray-100 hover:bg-gray-200 text-gray-600 px-4 py-2.5 rounded-xl font-medium text-sm flex items-center gap-2 transition-colors"
+          >
+            <History size={16}/> Log ทั้งหมด
+          </button>
+          <button
+            onClick={() => { setSelectedItem(null); setView('form'); }}
+            className="bg-gray-900 hover:bg-black text-white px-5 py-2.5 rounded-xl font-medium shadow-lg flex items-center gap-2"
+          >
+            <Plus size={20}/> เพิ่มรายการ
+          </button>
+        </div>
 
         <div className="w-px h-8 bg-gray-200 mx-2 hidden xl:block" />
 

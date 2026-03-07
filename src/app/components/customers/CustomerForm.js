@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { ArrowLeft, Save, Loader2, User, Phone, MapPin, MessageSquare, Map, Wand2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
+import { logAction } from '@/lib/auditLog';
 import ImageUploader from './ImageUploader';
 
 const CustomerForm = ({ onCancel, onSuccess, initialData }) => {
@@ -109,7 +110,13 @@ const CustomerForm = ({ onCancel, onSuccess, initialData }) => {
         notes: formData.notes
       };
 
+      const logFields = (d) => ({
+        first_name: d?.first_name, last_name: d?.last_name,
+        nickname: d?.nickname, phone: d?.phone, notes: d?.notes,
+      });
+
       let error;
+      let savedId = initialData?.id;
       if (initialData?.id) {
         // กรณีแก้ไข: ไม่ต้องยุ่งกับ code
         const res = await supabase.from('customers').update({ ...payload, updated_by: meRef() }).eq('id', initialData.id);
@@ -120,11 +127,23 @@ const CustomerForm = ({ onCancel, onSuccess, initialData }) => {
         const code = `C-${d.getFullYear().toString().substr(-2)}${String(d.getMonth() + 1).padStart(2, '0')}-${Math.floor(1000 + Math.random() * 9000)}`;
         payload.code = code;
 
-        const res = await supabase.from('customers').insert([{ ...payload, created_by: meRef() }]);
+        const res = await supabase.from('customers').insert([{ ...payload, created_by: meRef() }]).select().single();
         error = res.error;
+        if (res.data) savedId = res.data.id;
       }
 
       if (error) throw error;
+
+      await logAction({
+        resource_type: 'customer',
+        resource_id: savedId,
+        action: initialData?.id ? 'update' : 'create',
+        resource_label: `${formData.first_name} ${formData.last_name}`.trim(),
+        old_data: initialData?.id ? logFields(initialData) : null,
+        new_data: logFields(formData),
+        created_by: meRef(),
+      });
+
       onSuccess();
     } catch (err) {
       console.error('Detailed Error:', JSON.stringify(err, null, 2));

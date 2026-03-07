@@ -2,12 +2,15 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Plus, Search, Wrench, Loader2, List as ListIcon, LayoutGrid, Filter, ArrowUpDown, History, Eye, EyeOff } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
+import { logAction } from '@/lib/auditLog';
+import AuditLogPanel from '@/app/components/common/AuditLogPanel';
 import ServiceList from './ServiceList';
 import ServiceForm from './ServiceForm';
 import ServiceDetail from './ServiceDetail';
 
 const ServiceMain = () => {
-  const { can } = useAuth();
+  const { can, profile } = useAuth();
+  const meRef = () => profile ? { id: profile.id, name: `${profile.first_name} ${profile.last_name}` } : null;
   const [view, setView] = useState('list');
   const [services, setServices] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -34,6 +37,13 @@ const ServiceMain = () => {
 
   const handleDelete = async (id) => {
     if(!confirm('ลบรายการซ่อมนี้?')) return;
+    const target = services.find(s => s.id === id);
+    await logAction({
+      resource_type: 'service', resource_id: id, action: 'delete',
+      resource_label: target?.service_number,
+      old_data: target ? { service_number: target.service_number, status: target.status, grand_total: target.grand_total } : null,
+      created_by: meRef(),
+    });
     await supabase.from('services').delete().eq('id', id);
     fetchServices();
     setView('list');
@@ -71,6 +81,14 @@ const ServiceMain = () => {
 
   if (view === 'form') return <ServiceForm onCancel={() => setView('list')} onSuccess={() => { setView('list'); fetchServices(); }} initialData={selectedService} />;
   if (view === 'detail') return <ServiceDetail service={selectedService} onBack={() => setView('list')} onEdit={() => setView('form')} onDelete={() => handleDelete(selectedService.id)} showProfit={showProfit} setShowProfit={setShowProfit} />;
+  if (view === 'log') return (
+    <div className="max-w-[1600px] mx-auto space-y-4 animate-in fade-in">
+      <button onClick={() => setView('list')} className="flex items-center gap-2 text-gray-500 hover:text-gray-900 font-medium px-3 py-2 rounded-lg hover:bg-gray-50 transition-colors">
+        <Wrench size={16} /> กลับรายการงานซ่อม
+      </button>
+      <AuditLogPanel resourceType="service" title="Log รวม — งานซ่อมทั้งหมด" />
+    </div>
+  );
 
   return (
     <div className="max-w-[1600px] mx-auto space-y-6 animate-in fade-in duration-500 pb-20">
@@ -86,14 +104,22 @@ const ServiceMain = () => {
             {!showHistory && <span className="text-xs bg-white/20 px-2 py-0.5 rounded ml-2 text-white">ซ่อนรายการเสร็จสิ้น</span>}
           </p>
         </div>
-        {can('services', 'create') && (
+        <div className="flex gap-2">
           <button
-            onClick={() => { setSelectedService(null); setView('form'); }}
-            className="bg-white text-orange-600 hover:bg-orange-50 px-6 py-3 rounded-xl font-bold shadow-md flex items-center gap-2 transition-all active:scale-95"
+            onClick={() => setView('log')}
+            className="bg-white/10 hover:bg-white/20 text-white px-4 py-3 rounded-xl font-medium backdrop-blur-sm transition-all text-sm border border-white/10 flex items-center gap-2"
           >
-            <Plus size={24}/> เปิดใบงานใหม่
+            <History size={18}/> Log ทั้งหมด
           </button>
-        )}
+          {can('services', 'create') && (
+            <button
+              onClick={() => { setSelectedService(null); setView('form'); }}
+              className="bg-white text-orange-600 hover:bg-orange-50 px-6 py-3 rounded-xl font-bold shadow-md flex items-center gap-2 transition-all active:scale-95"
+            >
+              <Plus size={24}/> เปิดใบงานใหม่
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Toolbar */}

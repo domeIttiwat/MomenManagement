@@ -7,6 +7,8 @@ import {
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
+import { logAction } from '@/lib/auditLog';
+import AuditLogPanel from '@/app/components/common/AuditLogPanel';
 
 const STAGES = ['preparing', 'in_progress', 'qc', 'completed'];
 
@@ -463,6 +465,12 @@ const AssemblyDetail = ({ job: initialJob, onBack, onEdit, onDelete }) => {
       } catch (e) { console.error(e); }
     }
     await updateJobInDB(updates);
+    await logAction({
+      resource_type: 'assembly', resource_id: job.id, action: 'stage_change',
+      resource_label: job.title || job.job_number,
+      metadata: { from_stage: job.stage, to_stage: next },
+      created_by: profile ? { id: profile.id, name: `${profile.first_name} ${profile.last_name}` } : null,
+    });
     setSaving(false);
   };
 
@@ -1762,6 +1770,11 @@ const AssemblyDetail = ({ job: initialJob, onBack, onEdit, onDelete }) => {
             <TimelineWidget events={timelineEvents} />
           )}
         </div>
+      </div>
+
+      {/* Audit Log */}
+      <div className="mt-6">
+        <AuditLogPanel resourceType="assembly" resourceId={job.id} title="ประวัติการเปลี่ยนแปลง" compact />
       </div>
     </div>
   );

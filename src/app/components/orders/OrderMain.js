@@ -2,13 +2,16 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Plus, Search, LayoutGrid, List as ListIcon, Loader2, ArrowUpDown, Filter, Eye, EyeOff, History, ShoppingBag, FileText } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
+import { logAction } from '@/lib/auditLog';
+import AuditLogPanel from '@/app/components/common/AuditLogPanel';
 import OrderList from './OrderList';
 import OrderForm from './OrderForm';
 import OrderDetail from './OrderDetail';
 import OrderCard from './OrderCard';
 
 const OrderMain = ({ initialNavData, onViewCustomer }) => {
-  const { can } = useAuth();
+  const { can, profile } = useAuth();
+  const meRef = () => profile ? { id: profile.id, name: `${profile.first_name} ${profile.last_name}` } : null;
   const [view, setView] = useState('list');
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -44,6 +47,13 @@ const OrderMain = ({ initialNavData, onViewCustomer }) => {
 
   const handleDelete = async (id) => {
     if(!confirm('ลบออเดอร์นี้?')) return;
+    const target = orders.find(o => o.id === id);
+    await logAction({
+      resource_type: 'order', resource_id: id, action: 'delete',
+      resource_label: target?.order_number,
+      old_data: target ? { order_number: target.order_number, status: target.status, grand_total: target.grand_total } : null,
+      created_by: meRef(),
+    });
     await supabase.from('orders').delete().eq('id', id);
     fetchOrders();
     setView('list');
@@ -84,6 +94,14 @@ const OrderMain = ({ initialNavData, onViewCustomer }) => {
   }, [orders, search, filterStatus, sortOption, showHistory, showQuotation]);
 
   if (view === 'form') return <OrderForm onCancel={() => setView('list')} onSuccess={() => { setView('list'); fetchOrders(); }} initialData={selectedOrder} />;
+  if (view === 'log') return (
+    <div className="max-w-[1600px] mx-auto space-y-4 animate-in fade-in">
+      <button onClick={() => setView('list')} className="flex items-center gap-2 text-gray-500 hover:text-gray-900 font-medium px-3 py-2 rounded-lg hover:bg-gray-50 transition-colors">
+        <ShoppingBag size={16} /> กลับรายการออเดอร์
+      </button>
+      <AuditLogPanel resourceType="order" title="Log รวม — ออเดอร์ทั้งหมด" />
+    </div>
+  );
   
   if (view === 'detail') return (
     <OrderDetail 
@@ -111,14 +129,22 @@ const OrderMain = ({ initialNavData, onViewCustomer }) => {
              {!showHistory && <span className="text-xs bg-white/20 px-2 py-0.5 rounded ml-2 text-white">ซ่อนรายการเสร็จสิ้น</span>}
            </p>
         </div>
-        {can('orders', 'create') && (
+        <div className="flex gap-2">
           <button
-            onClick={() => { setSelectedOrder(null); setView('form'); }}
-            className="bg-white text-emerald-600 hover:bg-emerald-50 px-6 py-3 rounded-xl font-bold shadow-md flex items-center gap-2 transition-all active:scale-95"
+            onClick={() => setView('log')}
+            className="bg-white/10 hover:bg-white/20 text-white px-4 py-3 rounded-xl font-medium backdrop-blur-sm transition-all text-sm border border-white/10 flex items-center gap-2"
           >
-            <Plus size={24}/> สร้างออเดอร์ใหม่
+            <History size={18}/> Log ทั้งหมด
           </button>
-        )}
+          {can('orders', 'create') && (
+            <button
+              onClick={() => { setSelectedOrder(null); setView('form'); }}
+              className="bg-white text-emerald-600 hover:bg-emerald-50 px-6 py-3 rounded-xl font-bold shadow-md flex items-center gap-2 transition-all active:scale-95"
+            >
+              <Plus size={24}/> สร้างออเดอร์ใหม่
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="bg-white p-2 rounded-2xl shadow-sm border border-gray-100 flex flex-col xl:flex-row gap-3">

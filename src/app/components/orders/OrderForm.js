@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { ArrowLeft, Save, Loader2, Trash2, Receipt, Truck, Printer, PackagePlus, DollarSign, Calculator, History, Sparkles } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
+import { logAction } from '@/lib/auditLog';
 import CustomerSelector from './CustomerSelector';
 import ProductSelector from './ProductSelector';
 import PaymentManager from './PaymentManager';
@@ -371,6 +372,22 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
         }));
         await supabase.from('order_payments').insert(paymentsPayload);
       }
+
+      const logFields = (d, total) => ({
+        order_number: d?.order_number, status: d?.status,
+        customer_name: d?.customer ? `${d.customer.first_name || ''} ${d.customer.last_name || ''}`.trim() : (d?.customer_cache ? `${d.customer_cache.first_name || ''} ${d.customer_cache.last_name || ''}`.trim() : null),
+        grand_total: total ?? d?.grand_total,
+        order_date: d?.order_date, notes: d?.notes,
+      });
+      await logAction({
+        resource_type: 'order',
+        resource_id: orderId,
+        action: initialData?.id ? 'update' : 'create',
+        resource_label: formData.order_number,
+        old_data: initialData?.id ? logFields(initialData, initialData.grand_total) : null,
+        new_data: logFields(formData, grandTotal),
+        created_by: meRef(),
+      });
 
       onSuccess();
     } catch (error) {

@@ -1,14 +1,17 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Plus, Search, Eye, EyeOff, LayoutGrid, List as ListIcon, Loader2, ArrowUpDown, Filter, Package, Settings, CheckSquare, Square } from 'lucide-react';
+import { Plus, Search, Eye, EyeOff, LayoutGrid, List as ListIcon, Loader2, ArrowUpDown, Filter, Package, Settings, CheckSquare, Square, History } from 'lucide-react';
+import AuditLogPanel from '@/app/components/common/AuditLogPanel';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
+import { logAction } from '@/lib/auditLog';
 import ProductList from './ProductList';
 import ProductForm from './ProductForm';
 import ProductDetail from './ProductDetail';
 import FastenerManager from './FastenerManager';
 
 const ProductMain = () => {
-  const { can } = useAuth();
+  const { can, profile } = useAuth();
+  const meRef = () => profile ? { id: profile.id, name: `${profile.first_name} ${profile.last_name}` } : null;
   const [view, setView] = useState('list');
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -179,6 +182,14 @@ const ProductMain = () => {
 
   if (view === 'fasteners') return <FastenerManager onBack={() => setView('list')} />;
   if (view === 'form') return <ProductForm onCancel={() => setView('list')} onSuccess={() => { setView('list'); fetchAllData(); }} initialData={selectedProduct} />;
+  if (view === 'log') return (
+    <div className="max-w-[1600px] mx-auto space-y-4 animate-in fade-in">
+      <button onClick={() => setView('list')} className="flex items-center gap-2 text-gray-500 hover:text-gray-900 font-medium px-3 py-2 rounded-lg hover:bg-gray-50 transition-colors">
+        <Package size={16} /> กลับรายการสินค้า
+      </button>
+      <AuditLogPanel resourceType="product" title="Log รวม — สินค้าทั้งหมด" />
+    </div>
+  );
   
   if (view === 'detail' && selectedProduct) return (
     <ProductDetail 
@@ -187,7 +198,17 @@ const ProductMain = () => {
       onEdit={() => setView('form')} 
       showCost={showCost} 
       setShowCost={setShowCost} 
-      onDelete={() => { fetchAllData(); setView('list'); }} 
+      onDelete={async () => {
+        if (!confirm('ยืนยันลบสินค้า "' + selectedProduct?.name + '"?')) return;
+        await logAction({
+          resource_type: 'product', resource_id: selectedProduct?.id, action: 'delete',
+          resource_label: selectedProduct?.name,
+          old_data: selectedProduct ? { name: selectedProduct.name, sku: selectedProduct.sku, sell_price: selectedProduct.sell_price } : null,
+          created_by: meRef(),
+        });
+        await supabase.from('products').delete().eq('id', selectedProduct.id);
+        fetchAllData(); setView('list');
+      }}
     />
   );
 
@@ -203,6 +224,12 @@ const ProductMain = () => {
            <p className="text-orange-100 mt-1 font-medium ml-1">จัดการรายการ ({filteredAndSorted.length})</p>
         </div>
         <div className="flex gap-2">
+            <button
+              onClick={() => setView('log')}
+              className="bg-white/10 hover:bg-white/20 text-white px-4 py-3 rounded-xl font-medium backdrop-blur-sm transition-all text-sm border border-white/10 flex items-center gap-2"
+            >
+                <History size={18}/> Log ทั้งหมด
+            </button>
             <button
               onClick={() => setView('fasteners')}
               className="bg-white/10 hover:bg-white/20 text-white px-4 py-3 rounded-xl font-medium backdrop-blur-sm transition-all text-sm border border-white/10 flex items-center gap-2"
