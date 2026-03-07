@@ -14,9 +14,10 @@ import UserMain from './components/users/UserMain';
 import Login from './login/page';
 import ServiceMain from './components/services/ServiceMain';
 import AssemblyMain from './components/assembly/AssemblyMain';
+import StockMain from './components/stock/StockMain';
 
 // สร้าง Wrapper Component
-const ALL_TABS = ['dashboard', 'products', 'customers', 'orders', 'services', 'assembly', 'marketing', 'users'];
+const ALL_TABS = ['dashboard', 'products', 'stock', 'customers', 'orders', 'services', 'assembly', 'marketing', 'users'];
 
 const AppContent = () => {
   const { user, loading, profile, canView, permissions, isImpersonating, stopImpersonating, role } = useAuth();
@@ -97,6 +98,7 @@ const AppContent = () => {
         <div className="max-w-[1600px] mx-auto animate-in fade-in duration-500">
           {activeTab === 'dashboard' && (canView('dashboard') ? <DashboardMain /> : <AccessDenied />)}
           {activeTab === 'products' && (canView('products') ? <ProductMain /> : <AccessDenied />)}
+          {activeTab === 'stock' && (canView('stock') ? <StockMain /> : <AccessDenied />)}
           {activeTab === 'customers' && (canView('customers') ? (
             <CustomerMain
               initialNavData={navData?.target === 'customer' ? navData : null}

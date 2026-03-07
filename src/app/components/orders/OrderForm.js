@@ -17,7 +17,8 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
   const meRef = () => profile ? { id: profile.id, name: `${profile.first_name} ${profile.last_name}` } : null;
   const [loading, setLoading] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
-  
+  const [deductStock, setDeductStock] = useState(true);
+
   // State for Suggestion Modal
   const [suggestionProduct, setSuggestionProduct] = useState(null);
   
@@ -312,6 +313,35 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
       }));
       await supabase.from('order_items').insert(itemsPayload);
 
+      // ตัดสต๊อกอัตโนมัติ (เฉพาะออเดอร์ใหม่ หรือสร้างครั้งแรก)
+      if (deductStock && !initialData?.id) {
+        for (const item of formData.items) {
+          if (!item.product_id || item.is_custom) continue;
+          // Find variant_id from variant_name match if possible
+          await supabase.from('stock_transactions').insert([{
+            product_id: item.product_id,
+            variant_id: item.variant_id || null,
+            transaction_type: 'stock_out',
+            quantity: item.quantity,
+            note: `ออเดอร์ ${formData.order_number}`,
+            reference_type: 'order',
+            reference_id: orderId,
+            created_by: meRef()?.id || profile?.id,
+          }]);
+          // Update stock_items
+          let q = supabase.from('stock_items').select('id, quantity').eq('product_id', item.product_id);
+          if (item.variant_id) q = q.eq('variant_id', item.variant_id);
+          else q = q.is('variant_id', null);
+          const { data: si } = await q.single();
+          if (si) {
+            await supabase.from('stock_items').update({
+              quantity: Math.max(0, si.quantity - item.quantity),
+              updated_at: new Date().toISOString(),
+            }).eq('id', si.id);
+          }
+        }
+      }
+
       if (processedUpdates.length > 0) {
         await supabase.from('order_updates').insert(processedUpdates.map(u => ({
             order_id: orderId,
@@ -415,6 +445,16 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
                 <input type="checkbox" id="showTax" className="w-4 h-4 accent-indigo-600 rounded" checked={formData.show_tax_id} onChange={e => setFormData({...formData, show_tax_id: e.target.checked})}/>
                 <label htmlFor="showTax" className="text-sm font-medium text-gray-700 cursor-pointer">แสดงเลขผู้เสียภาษีลูกค้าในบิล</label>
               </div>
+              {!initialData?.id && (
+                <div className="flex items-center gap-3 p-3 bg-teal-50 rounded-xl border border-teal-100">
+                  <div className={`relative w-10 h-5 rounded-full cursor-pointer transition-colors ${deductStock ? 'bg-teal-500' : 'bg-gray-300'}`} onClick={() => setDeductStock(v => !v)}>
+                    <div className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${deductStock ? 'translate-x-5' : 'translate-x-0'}`} />
+                  </div>
+                  <label className="text-sm font-medium text-teal-800 cursor-pointer" onClick={() => setDeductStock(v => !v)}>
+                    ตัดสต๊อกอัตโนมัติเมื่อบันทึก
+                  </label>
+                </div>
+              )}
             </div>
 
             <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 min-h-[300px]">

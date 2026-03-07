@@ -240,74 +240,75 @@ const RoleManager = () => {
             </div>
 
             <div className="flex-1 overflow-auto p-6 bg-gray-50/30">
-               <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-                 <table className="w-full text-sm">
-                   <thead>
-                     <tr className="bg-gray-50 text-gray-500 border-b border-gray-200 text-xs uppercase tracking-wider">
-                       <th className="px-6 py-4 text-left font-bold w-48">ระบบงาน (Module)</th>
-                       {ACTIONS.map(act => {
-                         const isSpecial  = ['show_cost', 'show_profit'].includes(act.id);
-                         const isAssembly = ['prepare', 'assemble', 'qc'].includes(act.id);
-                         return (
-                           <th key={act.id} className={`px-4 py-4 text-center font-bold ${
-                             isAssembly || isSpecial ? 'bg-amber-50 text-amber-700' : ''
-                           }`}>
-                             {act.label}
-                           </th>
-                         );
-                       })}
-                     </tr>
-                   </thead>
-                   <tbody className="divide-y divide-gray-100">
-                     {RESOURCES.map(res => (
-                       <tr key={res.id} className="hover:bg-gray-50 transition-colors">
-                         <td className="px-6 py-4 font-bold text-gray-800">{res.label}</td>
-                         {ACTIONS.map(act => {
-                           const isSpecial  = ['show_cost', 'show_profit'].includes(act.id);
-                           const isAssembly = ['prepare', 'assemble', 'qc'].includes(act.id);
-                           const isHidden   = act.onlyFor && !act.onlyFor.includes(res.id);
+              <div className="space-y-3">
+                {RESOURCES.map(res => {
+                  const mainActions = ACTIONS.filter(a => !a.onlyFor);
+                  const subActions  = ACTIONS.filter(a => a.onlyFor?.includes(res.id));
+                  return (
+                    <div key={res.id} className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+                      {/* Resource header */}
+                      <div className="px-5 py-3 bg-gray-50 border-b border-gray-100">
+                        <span className="font-bold text-gray-800 text-sm">{res.label}</span>
+                      </div>
 
-                           return (
-                             <td key={act.id} className={`px-4 py-4 text-center ${
-                               isAssembly ? 'bg-amber-50/20' :
-                               isSpecial  ? 'bg-amber-50/30' : ''
-                             }`}>
-                               {isHidden ? (
-                                 <span className="text-gray-200 select-none">—</span>
-                               ) : (
-                                 <label className={`relative inline-flex items-center justify-center group ${loading ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}>
-                                   <input
-                                     type="checkbox"
-                                     className="peer sr-only"
-                                     checked={permissions[res.id]?.[act.id] || false}
-                                     onChange={() => !loading && togglePermission(res.id, act.id)}
-                                     disabled={loading}
-                                   />
-                                   <div className={`w-5 h-5 border-2 rounded transition-all flex items-center justify-center ${
-                                     permissions[res.id]?.[act.id]
-                                       ? (isSpecial || isAssembly ? 'bg-amber-500 border-amber-500' : 'bg-indigo-600 border-indigo-600')
-                                       : `border-gray-300 bg-white ${!loading ? 'group-hover:border-indigo-400' : ''}`
-                                   }`}>
-                                     {permissions[res.id]?.[act.id] && <CheckCircle size={14} className="text-white" strokeWidth={3} />}
-                                   </div>
-                                 </label>
-                               )}
-                             </td>
-                           );
-                         })}
-                       </tr>
-                     ))}
-                   </tbody>
-                 </table>
-               </div>
-               
-               <div className="mt-6 flex gap-3 p-4 bg-blue-50 rounded-xl border border-blue-100 text-blue-800 text-sm">
-                 <AlertCircle size={20} className="shrink-0"/>
-                 <p>
-                   <b>คำแนะนำ:</b> สิทธิ์การ "เห็นราคาทุน/กำไร" เป็นข้อมูลความลับ ควรระมัดระวังในการให้สิทธิ์ 
-                   ส่วนสิทธิ์ "ลบ" ควรจำกัดเฉพาะ Admin หรือ Supervisor เท่านั้น
-                 </p>
-               </div>
+                      {/* Main actions */}
+                      <div className="px-5 py-3 flex flex-wrap gap-4">
+                        {mainActions.map(act => {
+                          const checked = permissions[res.id]?.[act.id] || false;
+                          return (
+                            <label key={act.id} className={`flex items-center gap-2 text-sm ${loading ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'} group`}>
+                              <div
+                                onClick={() => !loading && togglePermission(res.id, act.id)}
+                                className={`w-5 h-5 border-2 rounded transition-all flex items-center justify-center shrink-0 ${
+                                  checked
+                                    ? 'bg-indigo-600 border-indigo-600'
+                                    : `border-gray-300 bg-white ${!loading ? 'group-hover:border-indigo-400' : ''}`
+                                }`}
+                              >
+                                {checked && <CheckCircle size={14} className="text-white" strokeWidth={3} />}
+                              </div>
+                              <span className="text-gray-700 select-none">{act.label}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+
+                      {/* Sub-actions (resource-specific) */}
+                      {subActions.length > 0 && (
+                        <div className="px-5 py-3 border-t border-dashed border-gray-100 bg-amber-50/40 flex flex-wrap gap-4">
+                          <span className="text-xs text-amber-600 font-semibold w-full -mb-1">สิทธิ์เฉพาะ</span>
+                          {subActions.map(act => {
+                            const checked = permissions[res.id]?.[act.id] || false;
+                            return (
+                              <label key={act.id} className={`flex items-center gap-2 text-sm ${loading ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'} group`}>
+                                <div
+                                  onClick={() => !loading && togglePermission(res.id, act.id)}
+                                  className={`w-5 h-5 border-2 rounded transition-all flex items-center justify-center shrink-0 ${
+                                    checked
+                                      ? 'bg-amber-500 border-amber-500'
+                                      : `border-amber-300 bg-white ${!loading ? 'group-hover:border-amber-400' : ''}`
+                                  }`}
+                                >
+                                  {checked && <CheckCircle size={14} className="text-white" strokeWidth={3} />}
+                                </div>
+                                <span className="text-gray-700 select-none">{act.label}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="mt-4 flex gap-3 p-4 bg-blue-50 rounded-xl border border-blue-100 text-blue-800 text-sm">
+                <AlertCircle size={20} className="shrink-0"/>
+                <p>
+                  <b>คำแนะนำ:</b> สิทธิ์การ "เห็นราคาทุน/กำไร" เป็นข้อมูลความลับ ควรระมัดระวังในการให้สิทธิ์
+                  ส่วนสิทธิ์ "ลบ" ควรจำกัดเฉพาะ Admin หรือ Supervisor เท่านั้น
+                </p>
+              </div>
             </div>
           </>
         ) : (

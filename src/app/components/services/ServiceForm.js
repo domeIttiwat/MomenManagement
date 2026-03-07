@@ -16,6 +16,7 @@ const ServiceForm = ({ onCancel, onSuccess, initialData }) => {
   const meRef = () => profile ? { id: profile.id, name: `${profile.first_name} ${profile.last_name}` } : null;
   const [loading, setLoading] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  const [deductStock, setDeductStock] = useState(true);
   
   const getLocalDate = () => new Date().toISOString().split('T')[0];
 
@@ -185,8 +186,35 @@ const ServiceForm = ({ onCancel, onSuccess, initialData }) => {
           cost_price: i.cost_price,
           sell_price: i.sell_price,
           quantity: i.quantity,
-          sub_items: i.sub_items 
+          sub_items: i.sub_items
         })));
+      }
+
+      // ตัดสต๊อกอัตโนมัติ (เฉพาะงานใหม่ที่มี product_id)
+      if (deductStock && !initialData?.id) {
+        for (const item of formData.items) {
+          if (!item.product_id) continue;
+          await supabase.from('stock_transactions').insert([{
+            product_id: item.product_id,
+            variant_id: item.variant_id || null,
+            transaction_type: 'stock_out',
+            quantity: item.quantity || 1,
+            note: `งานซ่อม ${formData.service_number}`,
+            reference_type: 'service',
+            reference_id: serviceId,
+            created_by: meRef()?.id || profile?.id,
+          }]);
+          let q = supabase.from('stock_items').select('id, quantity').eq('product_id', item.product_id);
+          if (item.variant_id) q = q.eq('variant_id', item.variant_id);
+          else q = q.is('variant_id', null);
+          const { data: si } = await q.single();
+          if (si) {
+            await supabase.from('stock_items').update({
+              quantity: Math.max(0, si.quantity - (item.quantity || 1)),
+              updated_at: new Date().toISOString(),
+            }).eq('id', si.id);
+          }
+        }
       }
 
       if (processedUpdates.length > 0) {
@@ -329,6 +357,16 @@ const ServiceForm = ({ onCancel, onSuccess, initialData }) => {
               <input type="checkbox" id="showTax" className="w-4 h-4 accent-indigo-600 rounded" checked={formData.show_tax_id} onChange={e => setFormData({...formData, show_tax_id: e.target.checked})}/>
               <label htmlFor="showTax" className="text-sm font-medium text-gray-700 cursor-pointer">แสดงเลขผู้เสียภาษีลูกค้าในบิล</label>
             </div>
+            {!initialData?.id && (
+              <div className="flex items-center gap-3 p-3 bg-teal-50 rounded-xl border border-teal-100">
+                <div className={`relative w-10 h-5 rounded-full cursor-pointer transition-colors ${deductStock ? 'bg-teal-500' : 'bg-gray-300'}`} onClick={() => setDeductStock(v => !v)}>
+                  <div className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${deductStock ? 'translate-x-5' : 'translate-x-0'}`} />
+                </div>
+                <label className="text-sm font-medium text-teal-800 cursor-pointer" onClick={() => setDeductStock(v => !v)}>
+                  ตัดสต๊อกอัตโนมัติเมื่อบันทึก
+                </label>
+              </div>
+            )}
           </div>
 
           <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 min-h-[300px]">

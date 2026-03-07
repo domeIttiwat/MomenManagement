@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowLeft, Edit, Trash2, Eye, EyeOff, Layers, Package, Wrench, Bike, Check, Tag, Box, TrendingUp, DollarSign, ShoppingBag, Puzzle, MapPin, ChevronDown, ChevronUp, Sparkles, Image as ImageIcon, Printer, X } from 'lucide-react';
+import { ArrowLeft, Edit, Trash2, Eye, EyeOff, Layers, Package, Wrench, Bike, Check, Tag, Box, TrendingUp, DollarSign, ShoppingBag, Puzzle, MapPin, ChevronDown, ChevronUp, Sparkles, Image as ImageIcon, Printer, X, Warehouse } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
 import FastenerBillPreview from './FastenerBillPreview';
@@ -13,6 +13,7 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
   const [selectedImg, setSelectedImg] = useState(null);
   const [lightboxImg, setLightboxImg] = useState(null);
   
+  const [stockLocations, setStockLocations] = useState([]);
   const [expandedVariants, setExpandedVariants] = useState({});
   const [showLocationImages, setShowLocationImages] = useState(true);
   const [showFastenerBill, setShowFastenerBill] = useState(false);
@@ -58,6 +59,13 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
         // 4. Fetch Accessories
         const { data: accData } = await supabase.from('product_compatible_accessories').select('*, product:accessory_id(id, name, sku, sell_price, cost_price, images)').eq('product_id', product.id);
         if (accData) setAccessories(accData);
+
+        // 5. Fetch stock locations
+        const { data: stockData } = await supabase
+          .from('stock_items')
+          .select('quantity, min_quantity, location_id, location:location_id(id, code, name, warehouse:store_id(id, name)), variant:variant_id(id, name)')
+          .eq('product_id', product.id);
+        if (stockData) setStockLocations(stockData);
       };
       
       fetchData();
@@ -437,6 +445,58 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
                     ))}
                 </div>
              </div>
+          )}
+
+          {/* 6. Stock Locations */}
+          {stockLocations.length > 0 && (
+            <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
+              <h3 className="text-sm font-bold text-gray-900 mb-4 flex items-center gap-2 uppercase tracking-wider">
+                <MapPin size={16} className="text-teal-500" /> ตำแหน่งที่เก็บสต๊อก
+              </h3>
+              <div className="space-y-2">
+                {stockLocations.map((item, i) => (
+                  <div key={i} className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl border border-gray-100">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {item.location?.warehouse?.name && (
+                          <span className="text-xs font-medium text-gray-600 flex items-center gap-1">
+                            <Warehouse size={11} /> {item.location.warehouse.name}
+                          </span>
+                        )}
+                        {item.location ? (
+                          <span className="font-mono font-bold text-teal-700 bg-teal-50 border border-teal-100 px-2 py-0.5 rounded-md text-xs">
+                            {item.location.code}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-gray-400 italic">ไม่ระบุชั้นวาง</span>
+                        )}
+                        {item.location?.name && (
+                          <span className="text-xs text-gray-500">{item.location.name}</span>
+                        )}
+                        {item.variant && (
+                          <span className="text-xs text-gray-500 bg-white border border-gray-200 px-1.5 py-0.5 rounded">
+                            {item.variant.name}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <span className={`font-bold text-lg shrink-0 px-3 py-1 rounded-xl ${
+                      item.quantity === 0 ? 'text-gray-400 bg-gray-100' : 'text-teal-700 bg-teal-50'
+                    }`}>
+                      {item.quantity} ชิ้น
+                    </span>
+                  </div>
+                ))}
+                {stockLocations.length > 1 && (
+                  <div className="pt-2 mt-1 border-t border-gray-100 flex items-center justify-between">
+                    <span className="text-sm text-gray-500 font-medium">รวมสต๊อกทั้งหมด</span>
+                    <span className="text-lg font-black text-gray-800">
+                      {stockLocations.reduce((sum, i) => sum + (i.quantity || 0), 0)} ชิ้น
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
           )}
 
         </div>
