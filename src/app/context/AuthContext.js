@@ -93,10 +93,11 @@ export const AuthProvider = ({ children }) => {
 
   // ตรวจสอบว่า role ปัจจุบันมีสิทธิ์ action นี้สำหรับ resource นี้หรือเปล่า
   // ถ้าไม่มี record เลย (role ใหม่ยังไม่ได้ตั้ง) → อนุญาตไว้ก่อน (true)
+  // ถ้ามี record แต่ไม่พบ resource นี้ → ปฏิเสธ (false) เพื่อความปลอดภัย
   const can = (resource, action) => {
     if (!permissions || permissions.length === 0) return true;
     const perm = permissions.find(p => p.resource === resource);
-    if (!perm) return true;
+    if (!perm) return false;
     return perm.actions?.[action] === true;
   };
   const canView = (resource) => can(resource, 'view');

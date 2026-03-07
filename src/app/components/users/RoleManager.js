@@ -61,21 +61,38 @@ const RoleManager = () => {
   const fetchPermissions = async (roleId) => {
     // ดึง Permission เดิมของ Role นี้
     const { data } = await supabase.from('role_permissions').select('*').eq('role_id', roleId);
-    
-    // แปลงข้อมูล DB (Array) -> Object เพื่อใช้ง่ายใน UI
+
+    // Init default false for all resources + actions
     const permObj = {};
-    // Init default false
     RESOURCES.forEach(r => {
       permObj[r.id] = {};
-      ACTIONS.forEach(a => permObj[r.id][a.id] = false);
+      ACTIONS.forEach(a => { permObj[r.id][a.id] = false; });
     });
 
-    // Fill data
+    // Fill existing data
     if (data) {
       data.forEach(p => {
-        permObj[p.resource] = { ...permObj[p.resource], ...p.actions };
+        if (permObj[p.resource]) {
+          permObj[p.resource] = { ...permObj[p.resource], ...p.actions };
+        }
       });
     }
+
+    // ถ้ามีข้อมูลแต่ไม่ครบทุก resource (เช่น resource ใหม่ถูกเพิ่มทีหลัง)
+    // ให้บันทึก record ที่ขาดหายเพื่อให้ can() ทำงานถูกต้อง
+    if (data && data.length > 0) {
+      const savedResources = new Set(data.map(p => p.resource));
+      const missingResources = RESOURCES.filter(r => !savedResources.has(r.id));
+      if (missingResources.length > 0) {
+        const insertData = missingResources.map(res => ({
+          role_id: roleId,
+          resource: res.id,
+          actions: permObj[res.id],
+        }));
+        await supabase.from('role_permissions').insert(insertData);
+      }
+    }
+
     setPermissions(permObj);
   };
 
