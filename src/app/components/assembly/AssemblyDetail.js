@@ -3,6 +3,7 @@ import {
   ArrowLeft, Edit, Trash2, CheckCircle, XCircle, RotateCcw, X,
   ChevronRight, Loader2, Send, User, Clock, MessageCircle,
   Phone, MapPin, Image as ImageIcon, ZoomIn, UserCheck, Search, Eye,
+  Package, Warehouse, Plus, PackageMinus, ChevronDown,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
@@ -86,6 +87,21 @@ const AssemblyDetail = ({ job: initialJob, onBack, onEdit, onDelete }) => {
   const [assembleImages, setAssembleImages] = useState([]);   // [{ url, file }]
   const [uploadingImages, setUploadingImages] = useState(false);
 
+  // ── Stock Withdrawal ──
+  const [stockWithdrawals, setStockWithdrawals] = useState([]);
+  const [withdrawFormOpen, setWithdrawFormOpen] = useState(false);
+  const [withdrawSaving, setWithdrawSaving] = useState(false);
+  const [wProductSearch, setWProductSearch] = useState('');
+  const [wProductResults, setWProductResults] = useState([]);
+  const [wShowDropdown, setWShowDropdown] = useState(false);
+  const [wProduct, setWProduct] = useState(null);
+  const [wVariant, setWVariant] = useState(null);
+  const [wVariants, setWVariants] = useState([]);
+  const [wStockItems, setWStockItems] = useState([]);
+  const [wStockLoading, setWStockLoading] = useState(false);
+  const [wSelectedItemId, setWSelectedItemId] = useState('');
+  const [wQty, setWQty] = useState(1);
+
   useEffect(() => {
     setJob(initialJob);
     setComments(initialJob?.comments || []);
@@ -101,6 +117,8 @@ const AssemblyDetail = ({ job: initialJob, onBack, onEdit, onDelete }) => {
     if (job?.ref_type && job?.ref_id) fetchTimelineImages();
   }, [job?.ref_type, job?.ref_id]);
 
+  useEffect(() => { fetchWithdrawals(); }, [job?.id]);
+
   const fetchTimelineImages = async () => {
     const table = job.ref_type === 'order' ? 'order_updates' : 'service_updates';
     const fk    = job.ref_type === 'order' ? 'order_id'     : 'service_id';
@@ -113,6 +131,74 @@ const AssemblyDetail = ({ job: initialJob, onBack, onEdit, onDelete }) => {
         (u.images || []).filter(Boolean).map(url => ({ url, description: u.description, created_at: u.created_at }))
       );
       setTimelineImages(imgs);
+    }
+  };
+
+  const fetchWithdrawals = async () => {
+    const { data } = await supabase
+      .from('stock_transactions')
+      .select('id, quantity, created_at, note, product:product_id(name, sku), variant:variant_id(name), location:location_id(code, name, store:store_id(name)), creator:created_by(first_name, last_name)')
+      .eq('reference_type', 'assembly')
+      .eq('reference_id', job.id)
+      .order('created_at', { ascending: false });
+    setStockWithdrawals(data || []);
+  };
+
+  const loadWStockItems = async (product, variant) => {
+    if (!product?.id) { setWStockItems([]); return; }
+    setWStockLoading(true);
+    let q = supabase.from('stock_items')
+      .select('id, quantity, location_id, location:location_id(id, code, name, store:store_id(id, name))')
+      .eq('product_id', product.id).gt('quantity', 0);
+    if (variant?.id) q = q.eq('variant_id', variant.id);
+    else q = q.is('variant_id', null);
+    const { data } = await q;
+    const items = data || [];
+    setWStockItems(items);
+    setWSelectedItemId(items[0]?.id || '');
+    setWQty(1);
+    setWStockLoading(false);
+  };
+
+  const resetWithdrawForm = () => {
+    setWProduct(null); setWProductSearch(''); setWVariant(null);
+    setWVariants([]); setWStockItems([]); setWSelectedItemId(''); setWQty(1);
+    setWithdrawFormOpen(false);
+  };
+
+  const submitWithdrawal = async () => {
+    if (!wProduct || !wSelectedItemId || wQty < 1) return alert('กรุณาเลือกสินค้าและที่เก็บ');
+    const item = wStockItems.find(i => i.id === wSelectedItemId);
+    if (!item) return;
+    if (wQty > item.quantity) return alert(`สต๊อกไม่พอ — มีแค่ ${item.quantity} ชิ้น`);
+    setWithdrawSaving(true);
+    try {
+      const customerName = job.customer_cache
+        ? [job.customer_cache.first_name, job.customer_cache.last_name].filter(Boolean).join(' ')
+        : null;
+      const autoNote = `เบิกใช้งานโปรเจ็ค "${job.title}"${customerName ? ` / ลูกค้า: ${customerName}` : ''}`;
+      await supabase.from('stock_transactions').insert([{
+        product_id: wProduct.id,
+        variant_id: wVariant?.id || null,
+        transaction_type: 'stock_out',
+        quantity: wQty,
+        store_id: item.location?.store?.id || null,
+        location_id: item.location_id || null,
+        note: autoNote,
+        reference_type: 'assembly',
+        reference_id: job.id,
+        created_by: profile?.id,
+      }]);
+      await supabase.from('stock_items').update({
+        quantity: item.quantity - wQty,
+        updated_at: new Date().toISOString(),
+      }).eq('id', item.id);
+      resetWithdrawForm();
+      fetchWithdrawals();
+    } catch (err) {
+      alert('เกิดข้อผิดพลาด: ' + err.message);
+    } finally {
+      setWithdrawSaving(false);
     }
   };
 
@@ -1120,6 +1206,217 @@ const AssemblyDetail = ({ job: initialJob, onBack, onEdit, onDelete }) => {
                 <p className="text-slate-500 text-xs mt-2">
                   {job.ref_type === 'order' ? '🛒 Order อัปเดตเป็น Shipping' : '🔧 Service อัปเดตเป็น Tested'}
                 </p>
+              )}
+            </div>
+          )}
+
+          {/* ── Stock Withdrawal Section ── */}
+          {can('stock', 'stock_out') && (
+            <div className={cardCls}>
+              <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Package size={16} className="text-amber-400" />
+                  <h3 className="font-bold text-white">เบิกวัสดุจากคลัง</h3>
+                  {stockWithdrawals.length > 0 && (
+                    <span className="text-[10px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30 px-1.5 py-0.5 rounded-full">
+                      {stockWithdrawals.length} รายการ
+                    </span>
+                  )}
+                </div>
+                {!withdrawFormOpen && (
+                  <button onClick={() => setWithdrawFormOpen(true)}
+                    className="flex items-center gap-1.5 text-xs font-semibold text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 px-3 py-1.5 rounded-xl transition-colors">
+                    <Plus size={13} /> เบิกเพิ่ม
+                  </button>
+                )}
+              </div>
+
+              {/* Existing withdrawals */}
+              {stockWithdrawals.length > 0 && (
+                <div className="divide-y divide-slate-800/60">
+                  {stockWithdrawals.map(tx => {
+                    const creator = tx.creator ? `${tx.creator.first_name} ${tx.creator.last_name}` : '—';
+                    return (
+                      <div key={tx.id} className="flex items-center gap-3 px-5 py-3">
+                        <div className="w-8 h-8 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center shrink-0">
+                          <PackageMinus size={14} className="text-red-400" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-sm font-semibold text-white">{tx.product?.name}</span>
+                            {tx.variant?.name && <span className="text-xs bg-slate-700 text-slate-300 px-1.5 py-0.5 rounded-full">{tx.variant.name}</span>}
+                            <span className="text-sm font-bold text-red-400">−{tx.quantity}</span>
+                          </div>
+                          <div className="flex items-center gap-3 mt-0.5 text-xs text-slate-500 flex-wrap">
+                            {tx.location && (
+                              <span className="flex items-center gap-1">
+                                <Warehouse size={10} />
+                                {tx.location.store?.name && `${tx.location.store.name} · `}{tx.location.code}
+                              </span>
+                            )}
+                            <span className="flex items-center gap-1"><Clock size={10} />{fmtTime(tx.created_at)}</span>
+                            <span className="flex items-center gap-1"><User size={10} />{creator}</span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {stockWithdrawals.length === 0 && !withdrawFormOpen && (
+                <p className="px-6 py-6 text-center text-slate-600 text-sm">ยังไม่มีการเบิกวัสดุ</p>
+              )}
+
+              {/* Withdraw Form */}
+              {withdrawFormOpen && (
+                <div className="p-5 border-t border-slate-800 space-y-4">
+                  {/* Product search */}
+                  <div>
+                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">สินค้าที่จะเบิก</p>
+                    <div className="relative">
+                      <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                      <input
+                        className="w-full pl-8 pr-3 py-2.5 bg-slate-800 border border-slate-700 text-white placeholder:text-slate-600 rounded-xl text-sm focus:outline-none focus:border-amber-500 transition-colors"
+                        placeholder="ค้นหาสินค้าหรือ SKU..."
+                        value={wProductSearch}
+                        onChange={async e => {
+                          setWProductSearch(e.target.value);
+                          setWShowDropdown(true);
+                          if (!e.target.value.trim()) { setWProductResults([]); return; }
+                          const { data } = await supabase.from('products')
+                            .select('id, name, sku, has_variants').or(`name.ilike.%${e.target.value}%,sku.ilike.%${e.target.value}%`).limit(8);
+                          setWProductResults(data || []);
+                        }}
+                        onFocus={() => setWShowDropdown(true)}
+                        onBlur={() => setTimeout(() => setWShowDropdown(false), 150)}
+                      />
+                      {wShowDropdown && wProductResults.length > 0 && (
+                        <div className="absolute top-full left-0 right-0 mt-1 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl z-30 overflow-hidden">
+                          {wProductResults.map(p => (
+                            <button key={p.id} type="button" onMouseDown={async () => {
+                              setWProduct(p); setWProductSearch(p.name); setWShowDropdown(false);
+                              setWVariant(null);
+                              if (p.has_variants) {
+                                const { data } = await supabase.from('product_variants').select('*').eq('product_id', p.id);
+                                setWVariants(data || []);
+                                setWStockItems([]);
+                              } else {
+                                setWVariants([]);
+                                loadWStockItems(p, null);
+                              }
+                            }}
+                              className="w-full text-left px-4 py-2.5 hover:bg-slate-700 text-sm border-b border-slate-700/50 last:border-0 transition-colors">
+                              <span className="text-white font-medium">{p.name}</span>
+                              <span className="ml-2 text-xs text-slate-500 font-mono">{p.sku}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    {wProduct && (
+                      <div className="mt-2 flex items-center justify-between bg-amber-500/10 border border-amber-500/20 px-3 py-2 rounded-xl">
+                        <span className="text-sm font-semibold text-amber-300">{wProduct.name}</span>
+                        <button onClick={() => { setWProduct(null); setWProductSearch(''); setWVariant(null); setWVariants([]); setWStockItems([]); setWSelectedItemId(''); }}
+                          className="text-slate-600 hover:text-red-400 transition-colors"><X size={14} /></button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Variant */}
+                  {wProduct?.has_variants && wVariants.length > 0 && (
+                    <div>
+                      <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">ตัวเลือก (Variant)</p>
+                      <div className="relative">
+                        <select
+                          className="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 text-white rounded-xl text-sm focus:outline-none focus:border-amber-500 appearance-none pr-8"
+                          value={wVariant?.id || ''}
+                          onChange={e => {
+                            const v = wVariants.find(x => x.id === e.target.value) || null;
+                            setWVariant(v);
+                            loadWStockItems(wProduct, v);
+                          }}>
+                          <option value="">-- เลือก Variant --</option>
+                          {wVariants.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+                        </select>
+                        <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Stock location picker */}
+                  {wProduct && (!wProduct.has_variants || wVariant) && (
+                    <div>
+                      <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">เบิกจากที่เก็บ</p>
+                      {wStockLoading ? (
+                        <p className="text-sm text-slate-500 text-center py-3"><Loader2 size={14} className="animate-spin inline mr-1" />กำลังโหลด...</p>
+                      ) : wStockItems.length === 0 ? (
+                        <p className="text-sm text-slate-600 text-center py-3">ไม่มีสต๊อกสินค้านี้ในคลังใด</p>
+                      ) : (
+                        <div className="space-y-2">
+                          {wStockItems.map(item => {
+                            const isSelected = wSelectedItemId === item.id;
+                            return (
+                              <div key={item.id} onClick={() => { setWSelectedItemId(item.id); setWQty(q => Math.min(q, item.quantity)); }}
+                                className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all ${isSelected ? 'border-amber-500/50 bg-amber-500/10' : 'border-slate-700 hover:border-slate-600'}`}>
+                                <div className={`w-4 h-4 rounded-full border-2 shrink-0 flex items-center justify-center ${isSelected ? 'border-amber-400 bg-amber-400' : 'border-slate-600'}`}>
+                                  {isSelected && <div className="w-1.5 h-1.5 rounded-full bg-slate-900" />}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  {item.location ? (
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span className="font-mono font-bold text-amber-400 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded text-xs">{item.location.code}</span>
+                                      {item.location.name && <span className="text-xs text-slate-300">{item.location.name}</span>}
+                                      {item.location.store?.name && <span className="text-xs text-slate-500 flex items-center gap-0.5"><Warehouse size={9} />{item.location.store.name}</span>}
+                                    </div>
+                                  ) : (
+                                    <span className="text-xs text-slate-500">ไม่ระบุที่เก็บ</span>
+                                  )}
+                                </div>
+                                <span className="text-xs font-bold text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-1 rounded-lg shrink-0">มี {item.quantity}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Quantity */}
+                  {wSelectedItemId && (
+                    <div>
+                      <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">จำนวนที่เบิก</p>
+                      <input type="number" min={1} max={wStockItems.find(i => i.id === wSelectedItemId)?.quantity || 1}
+                        value={wQty} onChange={e => setWQty(Math.max(1, parseInt(e.target.value) || 1))}
+                        className="w-32 px-3 py-2 bg-slate-800 border border-slate-700 text-white rounded-xl text-sm focus:outline-none focus:border-amber-500 text-center font-bold" />
+                    </div>
+                  )}
+
+                  {/* Auto note preview */}
+                  {wProduct && (
+                    <div className="bg-slate-800/60 border border-slate-700/60 rounded-xl px-3 py-2.5">
+                      <p className="text-[10px] text-slate-500 mb-1">หมายเหตุอัตโนมัติ</p>
+                      <p className="text-xs text-slate-300 italic">
+                        เบิกใช้งานโปรเจ็ค "{job.title}"
+                        {job.customer_cache && ` / ลูกค้า: ${[job.customer_cache.first_name, job.customer_cache.last_name].filter(Boolean).join(' ')}`}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Actions */}
+                  <div className="flex gap-2 pt-1">
+                    <button onClick={resetWithdrawForm}
+                      className="px-4 py-2 text-sm text-slate-400 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl font-medium transition-colors">
+                      ยกเลิก
+                    </button>
+                    <button onClick={submitWithdrawal}
+                      disabled={withdrawSaving || !wSelectedItemId || wQty < 1}
+                      className="flex-1 py-2 text-sm bg-amber-600 hover:bg-amber-500 text-white rounded-xl font-semibold flex items-center justify-center gap-2 transition-colors disabled:opacity-40">
+                      {withdrawSaving ? <Loader2 size={15} className="animate-spin" /> : <PackageMinus size={15} />}
+                      ยืนยันเบิก {wQty > 0 && wSelectedItemId ? `(${wQty} ชิ้น)` : ''}
+                    </button>
+                  </div>
+                </div>
               )}
             </div>
           )}
