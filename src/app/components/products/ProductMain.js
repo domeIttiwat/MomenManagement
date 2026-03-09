@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Plus, Search, Eye, EyeOff, LayoutGrid, List as ListIcon, Loader2, ArrowUpDown, Filter, Package, Settings, CheckSquare, Square, History } from 'lucide-react';
+import { Plus, Search, Eye, EyeOff, LayoutGrid, List as ListIcon, Loader2, ArrowUpDown, Filter, Package, Settings, CheckSquare, Square, History, Tag } from 'lucide-react';
 import AuditLogPanel from '@/app/components/common/AuditLogPanel';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
@@ -8,6 +8,7 @@ import ProductList from './ProductList';
 import ProductForm from './ProductForm';
 import ProductDetail from './ProductDetail';
 import FastenerManager from './FastenerManager';
+import CategoryManagerPage from './CategoryManagerPage';
 
 const ProductMain = () => {
   const { can, profile } = useAuth();
@@ -180,6 +181,7 @@ const ProductMain = () => {
     return result;
   }, [products, search, selectedCategories, sortOption]);
 
+  if (view === 'categories') return <CategoryManagerPage onBack={() => { setView('list'); fetchCategories(); }} />;
   if (view === 'fasteners') return <FastenerManager onBack={() => setView('list')} />;
   if (view === 'form') return <ProductForm onCancel={() => setView('list')} onSuccess={() => { setView('list'); fetchAllData(); }} initialData={selectedProduct} />;
   if (view === 'log') return (
@@ -230,6 +232,12 @@ const ProductMain = () => {
             >
                 <History size={18}/> Log ทั้งหมด
             </button>
+            <button
+                onClick={() => setView('categories')}
+                className="bg-white/10 hover:bg-white/20 text-white px-4 py-3 rounded-xl font-medium backdrop-blur-sm transition-all text-sm border border-white/10 flex items-center gap-2"
+              >
+                <Tag size={18}/> หมวดหมู่
+              </button>
             <button
               onClick={() => setView('fasteners')}
               className="bg-white/10 hover:bg-white/20 text-white px-4 py-3 rounded-xl font-medium backdrop-blur-sm transition-all text-sm border border-white/10 flex items-center gap-2"

@@ -7,6 +7,7 @@ import { useAuth } from '@/app/context/AuthContext';
 const RESOURCES = [
   { id: 'dashboard', label: 'ภาพรวม (Dashboard)' },
   { id: 'products', label: 'สินค้า (Products)' },
+  { id: 'categories', label: 'หมวดหมู่สินค้า (Categories)' },
   { id: 'orders', label: 'คำสั่งซื้อ (Orders)' },
   { id: 'customers', label: 'ลูกค้า (Customers)' },
   { id: 'services', label: 'งานบริการ/ซ่อม (Services)' },
@@ -32,7 +33,7 @@ const ACTIONS = [
 ];
 
 const RoleManager = () => {
-  const { realRole, impersonate, isImpersonating, stopImpersonating, role: currentRole } = useAuth();
+  const { realRole, impersonate, isImpersonating, stopImpersonating, role: currentRole, refreshPermissions } = useAuth();
   const canSimulate = realRole?.name === 'Supervisor' || realRole?.name === 'Admin';
 
   const [roles, setRoles] = useState([]);
@@ -147,6 +148,7 @@ const RoleManager = () => {
       await supabase.from('role_permissions').delete().eq('role_id', selectedRole.id);
       const { error } = await supabase.from('role_permissions').insert(upsertData);
       if (error) throw error;
+      await refreshPermissions();
       setSavedMsg(true);
       setTimeout(() => setSavedMsg(false), 2000);
     } catch (err) {
