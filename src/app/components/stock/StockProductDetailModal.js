@@ -46,32 +46,52 @@ const StockProductDetailModal = ({ product, onClose, onStockIn, onStockOut }) =>
   const fetchAll = useCallback(async () => {
     if (!product?.id) return;
     setLoading(true);
-    const [itemsRes, txRes] = await Promise.all([
-      supabase
-        .from('stock_items')
-        .select('id, quantity, min_quantity, variant_id, location_id, location:location_id(id, code, name, store:store_id(id, name)), variant:variant_id(name)')
-        .eq('product_id', product.id),
+    const [itemsRes, txRes, locRes, storeRes, variantRes] = await Promise.all([
+      supabase.from('stock_items').select('id, quantity, min_quantity, variant_id, location_id').eq('product_id', product.id),
       supabase
         .from('stock_transactions')
-        .select('id, transaction_type, quantity, created_at, note, location:location_id(code, name, store:store_id(name)), variant:variant_id(name), creator:created_by(first_name, last_name)')
+        .select('id, transaction_type, quantity, created_at, note, location_id, variant_id, creator:created_by(first_name, last_name)')
         .eq('product_id', product.id)
         .in('transaction_type', ['stock_in', 'stock_out'])
         .order('created_at', { ascending: false })
         .limit(60),
+      supabase.from('storage_locations').select('id, code, name, store_id'),
+      supabase.from('stores').select('id, name'),
+      supabase.from('product_variants').select('id, name').eq('product_id', product.id),
     ]);
-    setStockItems(itemsRes.data || []);
-    const txAll = txRes.data || [];
+
+    // Build manual lookup maps
+    const sm = {};
+    (storeRes.data || []).forEach(s => { sm[s.id] = s; });
+    const lm = {};
+    (locRes.data || []).forEach(l => { lm[l.id] = { ...l, store: sm[l.store_id] || null }; });
+    const vm = {};
+    (variantRes.data || []).forEach(v => { vm[v.id] = v; });
+
+    setStockItems((itemsRes.data || []).map(item => ({
+      ...item,
+      location: item.location_id ? lm[item.location_id] || null : null,
+      variant: item.variant_id ? vm[item.variant_id] || null : null,
+    })));
+
+    const txAll = (txRes.data || []).map(tx => ({
+      ...tx,
+      location: tx.location_id ? lm[tx.location_id] || null : null,
+      variant: tx.variant_id ? vm[tx.variant_id] || null : null,
+    }));
     setTxIn(txAll.filter(t => t.transaction_type === 'stock_in'));
     setTxOut(txAll.filter(t => t.transaction_type === 'stock_out'));
     setLoading(false);
   }, [product?.id]);
 
   const loadLocations = useCallback(async () => {
-    const { data } = await supabase
-      .from('storage_locations')
-      .select('id, code, name, store:store_id(id, name)')
-      .order('code');
-    setAllLocations(data || []);
+    const [{ data: locs }, { data: strs }] = await Promise.all([
+      supabase.from('storage_locations').select('id, code, name, store_id').order('code'),
+      supabase.from('stores').select('id, name'),
+    ]);
+    const sm = {};
+    (strs || []).forEach(s => { sm[s.id] = s; });
+    setAllLocations((locs || []).map(l => ({ ...l, store: sm[l.store_id] || null })));
   }, []);
 
   useEffect(() => {

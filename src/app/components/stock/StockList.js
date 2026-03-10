@@ -18,15 +18,25 @@ const StockList = ({ onStockIn, onStockOut, onNewTx }) => {
 
   const fetchData = useCallback(async () => {
     setLoading(true);
-    const [prodRes, stockRes, catRes] = await Promise.all([
+    const [prodRes, stockRes, catRes, locRes, storeRes] = await Promise.all([
       supabase.from('products').select(`*, product_variants(*), product_categories(category_id, category:category_id(name))`).order('name'),
-      supabase.from('stock_items').select('id, product_id, variant_id, location_id, quantity, min_quantity, location:location_id(id, code, name, store:store_id(id, name))'),
+      supabase.from('stock_items').select('id, product_id, variant_id, location_id, quantity, min_quantity'),
       supabase.from('categories').select('id, name').order('name'),
+      supabase.from('storage_locations').select('id, code, name, store_id'),
+      supabase.from('stores').select('id, name'),
     ]);
 
     const prods = prodRes.data || [];
     const stocks = stockRes.data || [];
     const cats = catRes.data || [];
+
+    // Build location lookup map (manual join — no FK dependency)
+    const storeMap = {};
+    (storeRes.data || []).forEach(s => { storeMap[s.id] = s; });
+    const locMap = {};
+    (locRes.data || []).forEach(l => {
+      locMap[l.id] = { ...l, store: storeMap[l.store_id] || null };
+    });
 
     // Build stock map — aggregate quantities across all locations per product+variant
     const map = {};
@@ -35,7 +45,7 @@ const StockList = ({ onStockIn, onStockOut, onNewTx }) => {
       if (!map[key]) map[key] = { quantity: 0, min_quantity: s.min_quantity || 0, locations: [] };
       map[key].quantity += s.quantity || 0;
       if ((s.min_quantity || 0) > map[key].min_quantity) map[key].min_quantity = s.min_quantity;
-      if (s.location_id && s.location) map[key].locations.push(s.location);
+      if (s.location_id && locMap[s.location_id]) map[key].locations.push(locMap[s.location_id]);
     });
 
     setProducts(prods);

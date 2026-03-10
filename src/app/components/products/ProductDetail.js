@@ -61,12 +61,26 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
         const { data: accData } = await supabase.from('product_compatible_accessories').select('*, product:accessory_id(id, name, sku, sell_price, cost_price, images)').eq('product_id', product.id);
         if (accData) setAccessories(accData);
 
-        // 5. Fetch stock locations
-        const { data: stockData } = await supabase
-          .from('stock_items')
-          .select('quantity, min_quantity, location_id, location:location_id(id, code, name, warehouse:store_id(id, name)), variant:variant_id(id, name)')
-          .eq('product_id', product.id);
-        if (stockData) setStockLocations(stockData);
+        // 5. Fetch stock locations (manual join — no FK dependency)
+        const [stockItemsRes, locRes2, storeRes2, variantRes] = await Promise.all([
+          supabase.from('stock_items').select('quantity, min_quantity, location_id, variant_id').eq('product_id', product.id),
+          supabase.from('storage_locations').select('id, code, name, store_id'),
+          supabase.from('stores').select('id, name'),
+          supabase.from('product_variants').select('id, name').eq('product_id', product.id),
+        ]);
+        if (stockItemsRes.data) {
+          const sm2 = {};
+          (storeRes2.data || []).forEach(s => { sm2[s.id] = s; });
+          const lm2 = {};
+          (locRes2.data || []).forEach(l => { lm2[l.id] = { ...l, warehouse: sm2[l.store_id] || null }; });
+          const vm2 = {};
+          (variantRes.data || []).forEach(v => { vm2[v.id] = v; });
+          setStockLocations(stockItemsRes.data.map(item => ({
+            ...item,
+            location: item.location_id ? lm2[item.location_id] || null : null,
+            variant: item.variant_id ? vm2[item.variant_id] || null : null,
+          })));
+        }
       };
       
       fetchData();

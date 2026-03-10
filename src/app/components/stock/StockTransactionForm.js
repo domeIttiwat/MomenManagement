@@ -97,13 +97,23 @@ const StockTransactionForm = ({ initialData, onCancel, onSuccess }) => {
     if (!selectedProduct?.id) { setProductStockItems([]); return; }
     setStockItemsLoading(true);
     let q = supabase.from('stock_items')
-      .select('id, quantity, location_id, location:location_id(id, code, name, store:store_id(id, name))')
+      .select('id, quantity, location_id')
       .eq('product_id', selectedProduct.id);
     if (selectedVariant?.id) q = q.eq('variant_id', selectedVariant.id);
     else q = q.is('variant_id', null);
-    const { data } = await q;
-    const items = data || [];
-    setProductStockItems(items);
+    const [{ data }, { data: locData }, { data: storeData }] = await Promise.all([
+      q,
+      supabase.from('storage_locations').select('id, code, name, store_id'),
+      supabase.from('stores').select('id, name'),
+    ]);
+    const sm = {};
+    (storeData || []).forEach(s => { sm[s.id] = s; });
+    const lm = {};
+    (locData || []).forEach(l => { lm[l.id] = { ...l, store: sm[l.store_id] || null }; });
+    const items = (data || []).map(item => ({
+      ...item,
+      location: item.location_id ? lm[item.location_id] || null : null,
+    }));
     setItemsToRemove(new Set());
     // auto-select first existing for stock_in, first with qty for stock_out, first for adjustment
     setSelectedInItemId(items.length > 0 ? items[0].id : 'new');
