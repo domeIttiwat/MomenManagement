@@ -65,6 +65,10 @@ const StockTransactionForm = ({ initialData, onCancel, onSuccess }) => {
   const [newStoreId, setNewStoreId] = useState(initialData?.prefilledStore?.id || '');
   const [newLocationId, setNewLocationId] = useState(initialData?.prefilledLocation?.id || '');
 
+  // Adjustment
+  const [adjustSign, setAdjustSign] = useState(+1); // +1 = เพิ่ม, -1 = ลด
+  const [selectedAdjItemId, setSelectedAdjItemId] = useState('new');
+
   // Images (stock_in only)
   const [imageFiles, setImageFiles] = useState([]);
   const [imagePreviews, setImagePreviews] = useState([]);
@@ -101,9 +105,10 @@ const StockTransactionForm = ({ initialData, onCancel, onSuccess }) => {
     const items = data || [];
     setProductStockItems(items);
     setItemsToRemove(new Set());
-    // auto-select first existing for stock_in, first with qty for stock_out
+    // auto-select first existing for stock_in, first with qty for stock_out, first for adjustment
     setSelectedInItemId(items.length > 0 ? items[0].id : 'new');
     setSelectedOutItemId(items.find(i => i.quantity > 0)?.id || '');
+    setSelectedAdjItemId(items.length > 0 ? items[0].id : 'new');
     setStockItemsLoading(false);
   }, [selectedProduct?.id, selectedVariant?.id]);
 
@@ -206,13 +211,21 @@ const StockTransactionForm = ({ initialData, onCancel, onSuccess }) => {
         locId = item.location_id || null;
         stId = item.location?.store?.id || null;
 
-      } else {
-        locId = newLocationId || null;
-        stId = newStoreId || null;
+      } else { // adjustment
+        if (selectedAdjItemId !== 'new') {
+          const item = productStockItems.find(i => i.id === selectedAdjItemId);
+          locId = item?.location_id || null;
+          stId = item?.location?.store?.id || null;
+        } else {
+          locId = newLocationId || null;
+          stId = newStoreId || null;
+        }
       }
 
       const imageData = txType === 'stock_in' ? await uploadImages() : [];
-      const delta = txType === 'stock_out' ? -quantity : +quantity;
+      const delta = txType === 'stock_out' ? -quantity
+                  : txType === 'adjustment' ? (adjustSign * quantity)
+                  : +quantity;
 
       await supabase.from('stock_transactions').insert([{
         product_id: selectedProduct.id, variant_id: variantId,
@@ -243,6 +256,10 @@ const StockTransactionForm = ({ initialData, onCancel, onSuccess }) => {
   const inputClass = "w-full px-4 py-3 bg-gray-50 border border-transparent focus:bg-white focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 rounded-xl transition-all outline-none text-gray-700 font-medium";
   const labelClass = "block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5 ml-1";
   const selectedOutItem = productStockItems.find(i => i.id === selectedOutItemId);
+  const selectedAdjItem = txType === 'adjustment' && selectedAdjItemId !== 'new'
+    ? productStockItems.find(i => i.id === selectedAdjItemId) : null;
+  const adjPreviewQty = selectedAdjItem != null
+    ? Math.max(0, selectedAdjItem.quantity + (adjustSign * quantity)) : null;
 
   return (
     <form onSubmit={handleSubmit} className="max-w-xl mx-auto pb-20 animate-in slide-in-from-bottom-4 fade-in duration-500">
@@ -498,48 +515,143 @@ const StockTransactionForm = ({ initialData, onCancel, onSuccess }) => {
         )}
 
         {/* ── LOCATION: Adjustment ── */}
-        {txType === 'adjustment' && (
-          <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 space-y-4">
-            <div className="flex items-center gap-2">
+        {selectedProduct && txType === 'adjustment' && (
+          <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 space-y-3">
+            <div className="flex items-center gap-2 mb-1">
               <MapPin size={15} className="text-blue-600" />
-              <p className="font-bold text-gray-700 text-sm">ตำแหน่งที่จัดเก็บ</p>
+              <p className="font-bold text-gray-700 text-sm">ปรับสต๊อกที่ไหน</p>
             </div>
-            <div>
-              <label className={labelClass}>คลังสินค้า</label>
-              <div className="relative">
-                <select className={inputClass + ' appearance-none pr-10'} value={newStoreId}
-                  onChange={e => { setNewStoreId(e.target.value); setNewLocationId(''); }}>
-                  <option value="">-- ไม่ระบุคลัง --</option>
-                  {stores.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </select>
-                <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+
+            {stockItemsLoading ? (
+              <div className="text-center text-gray-400 text-sm py-6">
+                <Loader2 size={16} className="animate-spin inline mr-2" />กำลังโหลด...
               </div>
-            </div>
-            {newStoreId && locations.length > 0 && (
-              <div>
-                <label className={labelClass}>ชั้นวาง / พื้นที่</label>
-                <div className="relative">
-                  <select className={inputClass + ' appearance-none pr-10'} value={newLocationId}
-                    onChange={e => setNewLocationId(e.target.value)}>
-                    <option value="">-- ไม่ระบุชั้นวาง --</option>
-                    {locations.map(l => <option key={l.id} value={l.id}>{l.code}{l.name ? ` — ${l.name}` : ''}</option>)}
-                  </select>
-                  <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+            ) : (
+              <>
+                {productStockItems.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-xs text-gray-400 font-medium ml-1">ที่เก็บปัจจุบัน — เลือกที่จะปรับ</p>
+                    {productStockItems.map(item => {
+                      const isSelected = selectedAdjItemId === item.id;
+                      return (
+                        <div key={item.id}
+                          onClick={() => setSelectedAdjItemId(item.id)}
+                          className={`flex items-center gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${isSelected ? 'border-blue-400 bg-blue-50' : 'border-gray-100 hover:border-blue-200'}`}
+                        >
+                          <div className={`w-5 h-5 rounded-full border-2 shrink-0 flex items-center justify-center transition-all ${isSelected ? 'border-blue-500 bg-blue-500' : 'border-gray-300'}`}>
+                            {isSelected && <div className="w-2 h-2 rounded-full bg-white" />}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            {item.location ? (
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="font-mono font-bold text-teal-700 bg-teal-50 border border-teal-200 px-1.5 py-0.5 rounded text-xs">{item.location.code}</span>
+                                {item.location.name && <span className="text-sm text-gray-700">{item.location.name}</span>}
+                                {item.location.store?.name && (
+                                  <span className="text-xs text-gray-400 flex items-center gap-0.5"><Warehouse size={10} />{item.location.store.name}</span>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-gray-400 text-xs">ไม่ระบุที่เก็บ</span>
+                            )}
+                          </div>
+                          <span className={`text-xs font-bold px-2.5 py-1 rounded-lg shrink-0 ${item.quantity === 0 ? 'bg-gray-100 text-gray-400' : 'bg-blue-50 text-blue-700'}`}>
+                            {item.quantity} ชิ้น
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Option: new location */}
+                <div
+                  onClick={() => setSelectedAdjItemId('new')}
+                  className={`flex items-center gap-3 p-3 rounded-xl border-2 cursor-pointer transition-all ${selectedAdjItemId === 'new' ? 'border-blue-400 bg-blue-50' : 'border-dashed border-gray-200 hover:border-blue-300'}`}
+                >
+                  <div className={`w-5 h-5 rounded-full border-2 shrink-0 flex items-center justify-center transition-all ${selectedAdjItemId === 'new' ? 'border-blue-500 bg-blue-500' : 'border-gray-300'}`}>
+                    {selectedAdjItemId === 'new' ? <div className="w-2 h-2 rounded-full bg-white" /> : <Plus size={11} className="text-gray-400" />}
+                  </div>
+                  <span className="text-sm font-semibold text-blue-700">ระบุที่เก็บใหม่</span>
                 </div>
-              </div>
+
+                {selectedAdjItemId === 'new' && (
+                  <div className="pl-8 space-y-3 pt-1">
+                    <div>
+                      <label className={labelClass}>คลังสินค้า</label>
+                      <div className="relative">
+                        <select className={inputClass + ' appearance-none pr-10'} value={newStoreId}
+                          onChange={e => { setNewStoreId(e.target.value); setNewLocationId(''); }}>
+                          <option value="">-- ไม่ระบุคลัง --</option>
+                          {stores.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                        </select>
+                        <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                      </div>
+                    </div>
+                    {newStoreId && locations.length > 0 && (
+                      <div>
+                        <label className={labelClass}>ชั้นวาง / พื้นที่</label>
+                        <div className="relative">
+                          <select className={inputClass + ' appearance-none pr-10'} value={newLocationId}
+                            onChange={e => setNewLocationId(e.target.value)}>
+                            <option value="">-- ไม่ระบุชั้นวาง --</option>
+                            {locations.map(l => <option key={l.id} value={l.id}>{l.code}{l.name ? ` — ${l.name}` : ''}</option>)}
+                          </select>
+                          <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
             )}
           </div>
         )}
 
         {/* Quantity */}
-        <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+        <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 space-y-3">
           <label className={labelClass}>จำนวน <span className="text-red-400">*</span></label>
+
+          {/* +/- toggle for adjustment */}
+          {txType === 'adjustment' && (
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setAdjustSign(+1)}
+                className={`flex-1 py-2 rounded-xl text-sm font-bold border-2 transition-all ${adjustSign > 0 ? 'border-green-500 bg-green-50 text-green-700' : 'border-gray-100 text-gray-400 hover:border-gray-200'}`}>
+                + เพิ่มขึ้น
+              </button>
+              <button type="button" onClick={() => setAdjustSign(-1)}
+                className={`flex-1 py-2 rounded-xl text-sm font-bold border-2 transition-all ${adjustSign < 0 ? 'border-red-500 bg-red-50 text-red-700' : 'border-gray-100 text-gray-400 hover:border-gray-200'}`}>
+                − ลดลง
+              </button>
+            </div>
+          )}
+
           <input type="number" min="1"
             max={txType === 'stock_out' && selectedOutItem ? selectedOutItem.quantity : undefined}
             required className={inputClass} value={quantity}
             onChange={e => setQuantity(Math.max(1, parseInt(e.target.value) || 1))} />
+
           {txType === 'stock_out' && selectedOutItem && (
-            <p className="text-xs text-gray-400 mt-1.5 ml-1">สต๊อกที่มีในที่เก็บนี้: <span className="font-bold text-gray-600">{selectedOutItem.quantity} ชิ้น</span></p>
+            <p className="text-xs text-gray-400 ml-1">สต๊อกที่มีในที่เก็บนี้: <span className="font-bold text-gray-600">{selectedOutItem.quantity} ชิ้น</span></p>
+          )}
+
+          {/* Adjustment preview */}
+          {txType === 'adjustment' && adjPreviewQty !== null && selectedAdjItem && (
+            <div className="flex items-center gap-3 p-3 bg-blue-50 rounded-xl border border-blue-100 justify-center">
+              <div className="text-center">
+                <p className="text-[10px] text-gray-400 mb-0.5">ปัจจุบัน</p>
+                <p className="font-bold text-gray-700 text-xl">{selectedAdjItem.quantity}</p>
+              </div>
+              <span className={`text-2xl font-black ${adjustSign > 0 ? 'text-green-600' : 'text-red-500'}`}>
+                {adjustSign > 0 ? '+' : '−'}{quantity}
+              </span>
+              <span className="text-gray-400 text-xl font-bold">=</span>
+              <div className="text-center">
+                <p className="text-[10px] text-gray-400 mb-0.5">หลังปรับ</p>
+                <p className={`font-bold text-xl ${adjPreviewQty < selectedAdjItem.quantity ? 'text-red-600' : adjPreviewQty > selectedAdjItem.quantity ? 'text-green-600' : 'text-gray-700'}`}>
+                  {adjPreviewQty}
+                </p>
+              </div>
+            </div>
           )}
         </div>
 

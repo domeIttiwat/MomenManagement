@@ -20,7 +20,7 @@ const StockList = ({ onStockIn, onStockOut, onNewTx }) => {
     setLoading(true);
     const [prodRes, stockRes, catRes] = await Promise.all([
       supabase.from('products').select(`*, product_variants(*), product_categories(category_id, category:category_id(name))`).order('name'),
-      supabase.from('stock_items').select('*, location:location_id(id, code, name)'),
+      supabase.from('stock_items').select('id, product_id, variant_id, location_id, quantity, min_quantity, location:location_id(id, code, name, store:store_id(id, name))'),
       supabase.from('categories').select('id, name').order('name'),
     ]);
 
@@ -35,7 +35,7 @@ const StockList = ({ onStockIn, onStockOut, onNewTx }) => {
       if (!map[key]) map[key] = { quantity: 0, min_quantity: s.min_quantity || 0, locations: [] };
       map[key].quantity += s.quantity || 0;
       if ((s.min_quantity || 0) > map[key].min_quantity) map[key].min_quantity = s.min_quantity;
-      if (s.location_id) map[key].locations.push(s.location);
+      if (s.location_id && s.location) map[key].locations.push(s.location);
     });
 
     setProducts(prods);
@@ -271,8 +271,9 @@ const StockList = ({ onStockIn, onStockOut, onNewTx }) => {
       {popupProduct && (
         <StockProductDetailModal
           product={popupProduct}
-          stockInfo={getStockForProduct(popupProduct)}
           onClose={() => setPopupProduct(null)}
+          onStockIn={can('stock', 'stock_in') ? () => { setPopupProduct(null); onStockIn(popupProduct, null); } : null}
+          onStockOut={can('stock', 'stock_out') ? () => { setPopupProduct(null); onStockOut(popupProduct, null); } : null}
         />
       )}
     </div>

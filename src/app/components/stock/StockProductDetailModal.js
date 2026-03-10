@@ -23,7 +23,7 @@ const TABS = [
   { id: 'out',      label: 'เบิกออก',  icon: PackageMinus },
 ];
 
-const StockProductDetailModal = ({ product, onClose }) => {
+const StockProductDetailModal = ({ product, onClose, onStockIn, onStockOut }) => {
   const { can, profile } = useAuth();
 
   const [tab, setTab]           = useState('location');
@@ -305,7 +305,29 @@ const StockProductDetailModal = ({ product, onClose }) => {
             })}
           </div>
 
-          {/* ── Tab body ── */}
+          {/* ── Action bar (stock in / out) ── */}
+        {(onStockIn || onStockOut) && (
+          <div className="flex gap-2 px-4 py-3 border-b border-gray-100 bg-white shrink-0">
+            {onStockIn && (
+              <button
+                onClick={onStockIn}
+                className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-xl text-sm font-semibold transition-colors shadow-sm"
+              >
+                <PackageCheck size={15} /> รับเข้าสต๊อก
+              </button>
+            )}
+            {onStockOut && (
+              <button
+                onClick={onStockOut}
+                className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold transition-colors shadow-sm"
+              >
+                <PackageMinus size={15} /> เบิกออก
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* ── Tab body ── */}
           {loading ? (
             <div className="py-16 text-center text-gray-400 text-sm">กำลังโหลด...</div>
 
