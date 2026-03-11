@@ -232,7 +232,7 @@ const ProductSelector = ({ onAddProduct }) => {
                           <p className="text-[10px] text-gray-400 font-mono">{p.sku}</p>
                         </div>
                       </div>
-                      <span className="text-sm font-bold text-indigo-600">฿{p.sell_price.toLocaleString()}</span>
+                      <span className="text-sm font-bold text-indigo-600">฿{(p.sell_price ?? 0).toLocaleString()}</span>
                     </div>
                   )}
                 </div>
