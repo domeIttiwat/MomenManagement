@@ -1,6 +1,6 @@
 'use client';
 import React, { useState, useEffect, useCallback } from 'react';
-import { Plus, Warehouse, MapPin, Edit2, Eye, Search, ToggleLeft, ToggleRight, ImageOff } from 'lucide-react';
+import { Plus, Warehouse, MapPin, Edit2, Eye, Search, ToggleLeft, ToggleRight, ImageOff, Trash2, AlertTriangle } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
 
@@ -9,6 +9,13 @@ const StoreList = ({ onNew, onEdit, onView }) => {
   const [stores, setStores] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+
+  // Delete store states
+  const [deletingStore, setDeletingStore] = useState(null);
+  const [deleteStoreNote, setDeleteStoreNote] = useState('');
+  const [deleteStoreItems, setDeleteStoreItems] = useState([]);
+  const [deleteStoreStats, setDeleteStoreStats] = useState({ locCount: 0, itemCount: 0, totalQty: 0 });
+  const [deleteStoreLoading, setDeleteStoreLoading] = useState(false);
 
   const fetchStores = useCallback(async () => {
     setLoading(true);
@@ -23,8 +30,59 @@ const StoreList = ({ onNew, onEdit, onView }) => {
   useEffect(() => { fetchStores(); }, [fetchStores]);
 
   const toggleActive = async (store) => {
-    await supabase.from('stores').update({ is_active: !store.is_active, updated_at: new Date().toISOString() }).eq('id', store.id);
+    const newActive = !store.is_active;
+    // Cascade to storage_locations
+    await supabase.from('storage_locations').update({ is_active: newActive }).eq('store_id', store.id);
+    await supabase.from('stores').update({ is_active: newActive, updated_at: new Date().toISOString() }).eq('id', store.id);
     fetchStores();
+  };
+
+  const handleDeleteStoreClick = async (e, store) => {
+    e.stopPropagation();
+    const { data: locs } = await supabase.from('storage_locations').select('id').eq('store_id', store.id);
+    const locIds = (locs || []).map(l => l.id);
+    let items = [];
+    if (locIds.length > 0) {
+      const { data } = await supabase
+        .from('stock_items')
+        .select('id, quantity, product:product_id(name), variant:variant_id(name)')
+        .in('location_id', locIds)
+        .gt('quantity', 0);
+      items = data || [];
+    }
+    const totalQty = items.reduce((sum, i) => sum + (i.quantity || 0), 0);
+    setDeleteStoreStats({ locCount: locIds.length, itemCount: items.length, totalQty });
+    setDeleteStoreItems(items);
+    setDeletingStore(store);
+    setDeleteStoreNote('');
+  };
+
+  const closeDeleteStoreDialog = () => {
+    setDeletingStore(null);
+    setDeleteStoreNote('');
+    setDeleteStoreItems([]);
+    setDeleteStoreStats({ locCount: 0, itemCount: 0, totalQty: 0 });
+  };
+
+  const confirmDeleteStore = async () => {
+    if (!deleteStoreNote.trim()) return alert('กรุณาระบุหมายเหตุการลบ');
+    setDeleteStoreLoading(true);
+    try {
+      // 1. Move all stock_items in this store's locations to "ไม่ระบุที่เก็บ"
+      const { data: locs } = await supabase.from('storage_locations').select('id').eq('store_id', deletingStore.id);
+      const locIds = (locs || []).map(l => l.id);
+      if (locIds.length > 0) {
+        await supabase.from('stock_items').update({ location_id: null }).in('location_id', locIds);
+      }
+      // 2. Delete store (CASCADE deletes storage_locations)
+      await supabase.from('stores').delete().eq('id', deletingStore.id);
+      closeDeleteStoreDialog();
+      fetchStores();
+    } catch (err) {
+      alert('เกิดข้อผิดพลาด: ' + err.message);
+    } finally {
+      setDeleteStoreLoading(false);
+    }
   };
 
   const filtered = stores.filter(s =>
@@ -104,11 +162,67 @@ const StoreList = ({ onNew, onEdit, onView }) => {
                         {store.is_active ? <ToggleRight size={18} className="text-teal-500" /> : <ToggleLeft size={18} />}
                       </button>
                     )}
+                    {can('stock', 'delete') && (
+                      <button onClick={e => handleDeleteStoreClick(e, store)} className="p-2 text-gray-400 hover:text-red-500 bg-gray-50 hover:bg-red-50 rounded-xl transition-colors" title="ลบถาวร">
+                        <Trash2 size={16} />
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
             );
           })}
+        </div>
+      )}
+      {/* Delete Store Modal */}
+      {deletingStore && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-6 animate-in zoom-in-95 duration-200">
+            <div className="flex items-center gap-2 mb-4">
+              <div className="w-10 h-10 rounded-2xl bg-red-100 flex items-center justify-center shrink-0">
+                <AlertTriangle size={20} className="text-red-600" />
+              </div>
+              <div>
+                <h3 className="font-bold text-gray-900">ลบคลัง "{deletingStore.name}"</h3>
+                <p className="text-xs text-gray-500">การลบถาวรไม่สามารถย้อนกลับได้</p>
+              </div>
+            </div>
+
+            {deleteStoreItems.length > 0 && (
+              <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-2xl text-sm">
+                <p className="font-semibold text-amber-800 mb-1">⚠ คลังนี้มีสินค้าอยู่</p>
+                <ul className="text-amber-700 space-y-0.5">
+                  <li>• {deleteStoreStats.locCount} ชั้นวาง</li>
+                  <li>• {deleteStoreStats.itemCount} รายการสินค้า</li>
+                  <li>• รวม {deleteStoreStats.totalQty} ชิ้น</li>
+                </ul>
+                <p className="text-xs text-amber-600 mt-2">สินค้าทั้งหมดจะถูกย้ายไปที่ "ไม่ระบุที่เก็บ"</p>
+              </div>
+            )}
+
+            <input
+              className="w-full px-3 py-2.5 bg-gray-50 border border-gray-200 focus:border-red-400 focus:ring-2 focus:ring-red-400/20 rounded-xl outline-none text-gray-700 text-sm mb-4"
+              placeholder="หมายเหตุการลบ (บังคับ)..."
+              value={deleteStoreNote}
+              onChange={e => setDeleteStoreNote(e.target.value)}
+              autoFocus
+            />
+
+            <div className="flex gap-2 justify-end">
+              <button type="button" onClick={closeDeleteStoreDialog}
+                className="px-4 py-2 text-sm text-gray-600 bg-white border border-gray-200 hover:bg-gray-50 rounded-xl font-medium transition-colors">
+                ยกเลิก
+              </button>
+              <button type="button" onClick={confirmDeleteStore} disabled={deleteStoreLoading || !deleteStoreNote.trim()}
+                className="px-4 py-2 text-sm bg-red-600 hover:bg-red-700 text-white rounded-xl font-medium flex items-center gap-2 transition-colors disabled:opacity-50">
+                {deleteStoreLoading ? '...' : (
+                  deleteStoreItems.length > 0
+                    ? <><Trash2 size={13} /> ย้ายสินค้าไปไม่ระบุที่เก็บ แล้วลบคลัง</>
+                    : <><Trash2 size={13} /> ยืนยันลบคลัง</>
+                )}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
 import StockProductDetailModal from './StockProductDetailModal';
 
-const StockList = ({ onStockIn, onStockOut, onNewTx }) => {
+const StockList = ({ onStockIn, onStockOut, onAdjust, onNewTx }) => {
   const { profile, can } = useAuth();
   const [popupProduct, setPopupProduct] = useState(null);
   const [products, setProducts] = useState([]);
@@ -42,10 +42,14 @@ const StockList = ({ onStockIn, onStockOut, onNewTx }) => {
     const map = {};
     stocks.forEach(s => {
       const key = s.variant_id ? `${s.product_id}__${s.variant_id}` : `${s.product_id}__null`;
-      if (!map[key]) map[key] = { quantity: 0, min_quantity: s.min_quantity || 0, locations: [] };
+      if (!map[key]) map[key] = { quantity: 0, min_quantity: s.min_quantity || 0, locations: [], unlocatedQty: 0 };
       map[key].quantity += s.quantity || 0;
       if ((s.min_quantity || 0) > map[key].min_quantity) map[key].min_quantity = s.min_quantity;
-      if (s.location_id && locMap[s.location_id]) map[key].locations.push(locMap[s.location_id]);
+      if (s.location_id && locMap[s.location_id]) {
+        map[key].locations.push(locMap[s.location_id]);
+      } else if (!s.location_id) {
+        map[key].unlocatedQty += s.quantity || 0;
+      }
     });
 
     setProducts(prods);
@@ -171,7 +175,7 @@ const StockList = ({ onStockIn, onStockOut, onNewTx }) => {
                               <span className={`inline-block font-bold text-base px-3 py-1 rounded-xl ${isLow ? 'bg-red-100 text-red-700' : 'bg-teal-50 text-teal-700'}`}>
                                 {stockInfo.quantity}
                               </span>
-                              {stockInfo.locations?.length > 0 ? (
+                              {stockInfo.locations?.length > 0 && (
                                 <div className="flex flex-wrap gap-1 justify-center max-w-[130px]">
                                   {stockInfo.locations.slice(0, 2).map((loc, i) => (
                                     <span key={i} className="text-[10px] font-mono text-teal-600 bg-teal-50 border border-teal-200 px-1.5 py-0.5 rounded">
@@ -182,7 +186,13 @@ const StockList = ({ onStockIn, onStockOut, onNewTx }) => {
                                     <span className="text-[10px] text-gray-400">+{stockInfo.locations.length - 2}</span>
                                   )}
                                 </div>
-                              ) : (
+                              )}
+                              {stockInfo.unlocatedQty > 0 && (
+                                <span className="text-[10px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-md whitespace-nowrap">
+                                  ไม่ระบุ: {stockInfo.unlocatedQty} ชิ้น
+                                </span>
+                              )}
+                              {stockInfo.locations?.length === 0 && !stockInfo.unlocatedQty && (
                                 <span className="text-[10px] text-gray-400">ไม่ระบุที่จัดเก็บ</span>
                               )}
                             </div>
@@ -237,7 +247,7 @@ const StockList = ({ onStockIn, onStockOut, onNewTx }) => {
                                   <span className={`inline-block font-bold px-3 py-0.5 rounded-lg text-sm ${vLow ? 'bg-red-100 text-red-700' : 'bg-teal-50 text-teal-700'}`}>
                                     {vs.quantity}
                                   </span>
-                                  {vs.locations?.length > 0 ? (
+                                  {vs.locations?.length > 0 && (
                                     <div className="flex flex-wrap gap-1 justify-center">
                                       {vs.locations.slice(0, 2).map((loc, i) => (
                                         <span key={i} className="text-[10px] font-mono text-teal-600 bg-teal-50 border border-teal-200 px-1.5 py-0.5 rounded">
@@ -246,7 +256,13 @@ const StockList = ({ onStockIn, onStockOut, onNewTx }) => {
                                       ))}
                                       {vs.locations.length > 2 && <span className="text-[10px] text-gray-400">+{vs.locations.length - 2}</span>}
                                     </div>
-                                  ) : (
+                                  )}
+                                  {vs.unlocatedQty > 0 && (
+                                    <span className="text-[10px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-md whitespace-nowrap">
+                                      ไม่ระบุ: {vs.unlocatedQty} ชิ้น
+                                    </span>
+                                  )}
+                                  {vs.locations?.length === 0 && !vs.unlocatedQty && (
                                     <span className="text-[10px] text-gray-400">ไม่ระบุ</span>
                                   )}
                                 </div>
@@ -284,6 +300,7 @@ const StockList = ({ onStockIn, onStockOut, onNewTx }) => {
           onClose={() => setPopupProduct(null)}
           onStockIn={can('stock', 'stock_in') ? () => { setPopupProduct(null); onStockIn(popupProduct, null); } : null}
           onStockOut={can('stock', 'stock_out') ? () => { setPopupProduct(null); onStockOut(popupProduct, null); } : null}
+          onAdjust={can('stock', 'create') ? () => { setPopupProduct(null); onAdjust(popupProduct, null); } : null}
         />
       )}
     </div>

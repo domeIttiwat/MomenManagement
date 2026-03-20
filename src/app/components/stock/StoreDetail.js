@@ -32,6 +32,7 @@ const StoreDetail = ({ store, onBack, onEdit, onAddToLocation }) => {
   const [deletingLoc, setDeletingLoc] = useState(null); // location object
   const [deleteNote, setDeleteNote] = useState('');
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [deleteLocItems, setDeleteLocItems] = useState([]); // stock_items with qty > 0
 
   const fetchLocations = useCallback(async () => {
     if (!store?.id) return;
@@ -86,11 +87,28 @@ const StoreDetail = ({ store, onBack, onEdit, onAddToLocation }) => {
     fetchLocationLogs();
   }, [fetchLocations, fetchTx, fetchLocationLogs]);
 
+  const handleDeleteLocClick = async (e, loc) => {
+    e.stopPropagation();
+    const { data } = await supabase
+      .from('stock_items')
+      .select('id, quantity, product:product_id(id, name), variant:variant_id(id, name)')
+      .eq('location_id', loc.id)
+      .gt('quantity', 0);
+    setDeleteLocItems(data || []);
+    setDeletingLoc(loc);
+    setDeleteNote('');
+  };
+
+  const closeDeleteLocDialog = () => {
+    setDeletingLoc(null);
+    setDeleteNote('');
+    setDeleteLocItems([]);
+  };
+
   const confirmDeleteLocation = async () => {
     if (!deleteNote.trim()) return alert('กรุณาระบุหมายเหตุการลบ');
     setDeleteLoading(true);
     try {
-      // Log deletion first (before the row is deleted)
       await supabase.from('storage_location_logs').insert([{
         location_id: deletingLoc.id,
         store_id: store.id,
@@ -100,8 +118,34 @@ const StoreDetail = ({ store, onBack, onEdit, onAddToLocation }) => {
         created_by: profile?.id,
       }]);
       await supabase.from('storage_locations').delete().eq('id', deletingLoc.id);
-      setDeletingLoc(null);
-      setDeleteNote('');
+      closeDeleteLocDialog();
+      fetchLocations();
+      fetchLocationLogs();
+    } catch (err) {
+      alert('เกิดข้อผิดพลาด: ' + err.message);
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
+
+  const confirmDeleteLocationWithMove = async () => {
+    if (!deleteNote.trim()) return alert('กรุณาระบุหมายเหตุการลบ');
+    setDeleteLoading(true);
+    try {
+      // 1. Move all items to "ไม่ระบุที่เก็บ"
+      await supabase.from('stock_items').update({ location_id: null }).eq('location_id', deletingLoc.id);
+      // 2. Log deletion
+      await supabase.from('storage_location_logs').insert([{
+        location_id: deletingLoc.id,
+        store_id: store.id,
+        location_code: deletingLoc.code,
+        action: 'delete',
+        note: deleteNote.trim(),
+        created_by: profile?.id,
+      }]);
+      // 3. Delete location
+      await supabase.from('storage_locations').delete().eq('id', deletingLoc.id);
+      closeDeleteLocDialog();
       fetchLocations();
       fetchLocationLogs();
     } catch (err) {
@@ -187,29 +231,63 @@ const StoreDetail = ({ store, onBack, onEdit, onAddToLocation }) => {
         {/* Delete confirmation inline form */}
         {deletingLoc && (
           <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-2xl animate-in slide-in-from-top-2 duration-200">
-            <p className="text-sm font-bold text-red-700 mb-2 flex items-center gap-1.5">
-              <AlertTriangle size={14} /> ยืนยันลบชั้นวาง "{deletingLoc.code}"
-              {(locationItems[deletingLoc.id] || []).length > 0 && (
-                <span className="text-xs font-normal">· มีสินค้าอยู่ {(locationItems[deletingLoc.id] || []).length} รายการ</span>
-              )}
-            </p>
-            <input
-              className="w-full px-3 py-2.5 bg-white border border-red-200 focus:border-red-400 focus:ring-2 focus:ring-red-400/20 rounded-xl outline-none text-gray-700 text-sm mb-3"
-              placeholder="หมายเหตุการลบ (บังคับ)..."
-              value={deleteNote}
-              onChange={e => setDeleteNote(e.target.value)}
-              autoFocus
-            />
-            <div className="flex gap-2 justify-end">
-              <button type="button" onClick={() => { setDeletingLoc(null); setDeleteNote(''); }}
-                className="px-4 py-2 text-sm text-gray-600 bg-white border border-gray-200 hover:bg-gray-50 rounded-xl font-medium transition-colors">
-                ยกเลิก
-              </button>
-              <button type="button" onClick={confirmDeleteLocation} disabled={deleteLoading || !deleteNote.trim()}
-                className="px-4 py-2 text-sm bg-red-600 hover:bg-red-700 text-white rounded-xl font-medium flex items-center gap-2 transition-colors disabled:opacity-50">
-                {deleteLoading ? '...' : <><Trash2 size={13} /> ยืนยันลบ</>}
-              </button>
-            </div>
+            {deleteLocItems.length > 0 ? (
+              <>
+                <p className="text-sm font-bold text-red-700 mb-3 flex items-center gap-1.5">
+                  <AlertTriangle size={14} /> ชั้นวาง "{deletingLoc.code}" มีสินค้าอยู่
+                </p>
+                <div className="space-y-1.5 mb-3 max-h-40 overflow-y-auto">
+                  {deleteLocItems.map(item => (
+                    <div key={item.id} className="flex items-center justify-between px-3 py-2 bg-white border border-red-100 rounded-xl text-sm">
+                      <span className="text-gray-700 font-medium">
+                        {item.product?.name}{item.variant ? ` · ${item.variant.name}` : ''}
+                      </span>
+                      <span className="font-bold text-red-600">{item.quantity} ชิ้น</span>
+                    </div>
+                  ))}
+                </div>
+                <input
+                  className="w-full px-3 py-2.5 bg-white border border-red-200 focus:border-red-400 focus:ring-2 focus:ring-red-400/20 rounded-xl outline-none text-gray-700 text-sm mb-3"
+                  placeholder="หมายเหตุการลบ (บังคับ)..."
+                  value={deleteNote}
+                  onChange={e => setDeleteNote(e.target.value)}
+                  autoFocus
+                />
+                <div className="flex gap-2 justify-end">
+                  <button type="button" onClick={closeDeleteLocDialog}
+                    className="px-4 py-2 text-sm text-gray-600 bg-white border border-gray-200 hover:bg-gray-50 rounded-xl font-medium transition-colors">
+                    ยกเลิก
+                  </button>
+                  <button type="button" onClick={confirmDeleteLocationWithMove} disabled={deleteLoading || !deleteNote.trim()}
+                    className="px-4 py-2 text-sm bg-red-600 hover:bg-red-700 text-white rounded-xl font-medium flex items-center gap-2 transition-colors disabled:opacity-50">
+                    {deleteLoading ? '...' : <><Trash2 size={13} /> ย้ายไปไม่ระบุที่เก็บ แล้วลบชั้นนี้</>}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-sm font-bold text-red-700 mb-2 flex items-center gap-1.5">
+                  <AlertTriangle size={14} /> ยืนยันลบชั้นวาง "{deletingLoc.code}"
+                </p>
+                <input
+                  className="w-full px-3 py-2.5 bg-white border border-red-200 focus:border-red-400 focus:ring-2 focus:ring-red-400/20 rounded-xl outline-none text-gray-700 text-sm mb-3"
+                  placeholder="หมายเหตุการลบ (บังคับ)..."
+                  value={deleteNote}
+                  onChange={e => setDeleteNote(e.target.value)}
+                  autoFocus
+                />
+                <div className="flex gap-2 justify-end">
+                  <button type="button" onClick={closeDeleteLocDialog}
+                    className="px-4 py-2 text-sm text-gray-600 bg-white border border-gray-200 hover:bg-gray-50 rounded-xl font-medium transition-colors">
+                    ยกเลิก
+                  </button>
+                  <button type="button" onClick={confirmDeleteLocation} disabled={deleteLoading || !deleteNote.trim()}
+                    className="px-4 py-2 text-sm bg-red-600 hover:bg-red-700 text-white rounded-xl font-medium flex items-center gap-2 transition-colors disabled:opacity-50">
+                    {deleteLoading ? '...' : <><Trash2 size={13} /> ยืนยันลบ</>}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         )}
 
@@ -253,7 +331,7 @@ const StoreDetail = ({ store, onBack, onEdit, onAddToLocation }) => {
                         </button>
                       )}
                       {can('stock', 'delete') && (
-                        <button onClick={e => { e.stopPropagation(); setDeletingLoc(loc); setDeleteNote(''); }}
+                        <button onClick={e => handleDeleteLocClick(e, loc)}
                           className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors" title="ลบ">
                           <Trash2 size={13} />
                         </button>
