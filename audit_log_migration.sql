@@ -32,7 +32,7 @@ CREATE POLICY "auth_insert_audit_logs" ON audit_logs
   FOR INSERT TO authenticated WITH CHECK (true);
 
 -- Authenticated users สามารถ select ได้
-CREATE POLICY "auth_select_audit_logs" ON audit_logs
+CREATE POLICY "auth_select_audit_logs" ON audit_logs 
   FOR SELECT TO authenticated USING (true);
 
 -- ไม่อนุญาต update/delete (log ควร immutable)

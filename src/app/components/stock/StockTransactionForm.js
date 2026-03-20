@@ -114,6 +114,7 @@ const StockTransactionForm = ({ initialData, onCancel, onSuccess }) => {
       ...item,
       location: item.location_id ? lm[item.location_id] || null : null,
     }));
+    setProductStockItems(items);
     setItemsToRemove(new Set());
     // auto-select first existing for stock_in, first with qty for stock_out, first for adjustment
     setSelectedInItemId(items.length > 0 ? items[0].id : 'new');

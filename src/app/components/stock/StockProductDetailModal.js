@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import {
   X, Package, MapPin, Warehouse, Layers,
-  PackageCheck, PackageMinus, User, Calendar, Clock,
+  PackageCheck, PackageMinus, Sliders, User, Calendar, Clock,
   ImageOff, ChevronLeft, ChevronRight, ArrowRightLeft,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
@@ -23,7 +23,7 @@ const TABS = [
   { id: 'out',      label: 'เบิกออก',  icon: PackageMinus },
 ];
 
-const StockProductDetailModal = ({ product, onClose, onStockIn, onStockOut }) => {
+const StockProductDetailModal = ({ product, onClose, onStockIn, onStockOut, onAdjust }) => {
   const { can, profile } = useAuth();
 
   const [tab, setTab]           = useState('location');
@@ -325,15 +325,15 @@ const StockProductDetailModal = ({ product, onClose, onStockIn, onStockOut }) =>
             })}
           </div>
 
-          {/* ── Action bar (stock in / out) ── */}
-        {(onStockIn || onStockOut) && (
+          {/* ── Action bar (stock in / out / adjust) ── */}
+        {(onStockIn || onStockOut || onAdjust) && (
           <div className="flex gap-2 px-4 py-3 border-b border-gray-100 bg-white shrink-0">
             {onStockIn && (
               <button
                 onClick={onStockIn}
                 className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-xl text-sm font-semibold transition-colors shadow-sm"
               >
-                <PackageCheck size={15} /> รับเข้าสต๊อก
+                <PackageCheck size={15} /> รับเข้า
               </button>
             )}
             {onStockOut && (
@@ -342,6 +342,14 @@ const StockProductDetailModal = ({ product, onClose, onStockIn, onStockOut }) =>
                 className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold transition-colors shadow-sm"
               >
                 <PackageMinus size={15} /> เบิกออก
+              </button>
+            )}
+            {onAdjust && (
+              <button
+                onClick={onAdjust}
+                className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-semibold transition-colors shadow-sm"
+              >
+                <Sliders size={15} /> ปรับสต๊อก
               </button>
             )}
           </div>
