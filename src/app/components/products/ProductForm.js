@@ -149,16 +149,20 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
 
       // Variants
       if (formData.has_variants) {
-        if (initialData?.id) await supabase.from('product_variants').delete().eq('product_id', productId);
+        if (initialData?.id) {
+          const { error: delErr } = await supabase.from('product_variants').delete().eq('product_id', productId);
+          if (delErr) throw delErr;
+        }
         if (variants.length > 0) {
-          await supabase.from('product_variants').insert(variants.map(v => ({
+          const { error: varErr } = await supabase.from('product_variants').insert(variants.map(v => ({
             product_id: productId,
-            name: v.name, 
-            sku: v.sku || `${formData.sku}-${v.name.replace(/\s+/g, '')}`, 
+            name: v.name,
+            sku: v.sku || `${formData.sku}-${v.name.replace(/\s+/g, '')}`,
             options: v.options,
-            cost_price: Number(v.cost_price), 
+            cost_price: Number(v.cost_price),
             sell_price: Number(v.sell_price)
           })));
+          if (varErr) throw varErr;
         }
       }
 
