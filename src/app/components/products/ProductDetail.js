@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
 import FastenerBillPreview from './FastenerBillPreview';
 import AuditLogPanel from '@/app/components/common/AuditLogPanel';
+import ProductFilesView from './ProductFilesView';
 
 const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCost }) => {
   const { can } = useAuth();
@@ -462,7 +463,10 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
              </div>
           )}
 
-          {/* 6. Stock Locations */}
+          {/* 6. Files */}
+          <ProductFilesView productId={product.id} />
+
+          {/* 7. Stock Locations */}
           {stockLocations.length > 0 && (
             <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
               <h3 className="text-sm font-bold text-gray-900 mb-4 flex items-center gap-2 uppercase tracking-wider">

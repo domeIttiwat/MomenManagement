@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Save, Loader2, Info, Wrench, Package, Layers, Sparkles } from 'lucide-react';
+import { ArrowLeft, Save, Loader2, Info, Wrench, Package, Layers, Sparkles, FolderOpen } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
 import { logAction } from '@/lib/auditLog';
@@ -10,6 +10,7 @@ import ProductFastenerSelector from './ProductFastenerSelector';
 import ProductBundleSelector from './ProductBundleSelector';
 import ProductAccessorySelector from './ProductAccessorySelector';
 import NumericInput from './NumericInput';
+import ProductFilesManager from './ProductFilesManager';
 
 const ProductForm = ({ onCancel, onSuccess, initialData }) => {
   const { profile } = useAuth();
@@ -277,6 +278,10 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
                  <button type="button" onClick={() => setActiveTab('fasteners')} className={`w-full text-left px-4 py-3 rounded-xl font-bold text-sm flex items-center gap-3 transition-all ${activeTab === 'fasteners' ? 'bg-orange-50 text-orange-600' : 'text-gray-500 hover:bg-gray-50'}`}>
                     <Wrench size={18}/> จุดยึดและน็อต
                  </button>
+
+                 <button type="button" onClick={() => setActiveTab('files')} className={`w-full text-left px-4 py-3 rounded-xl font-bold text-sm flex items-center gap-3 transition-all ${activeTab === 'files' ? 'bg-indigo-50 text-indigo-600' : 'text-gray-500 hover:bg-gray-50'}`}>
+                    <FolderOpen size={18}/> ไฟล์เอกสาร
+                 </button>
               </div>
            </div>
 
@@ -359,6 +364,20 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
                   <p className="text-gray-400 text-sm mt-1">ระบุตำแหน่งและสเปคน็อตที่ใช้สำหรับสินค้านี้</p>
                 </div>
                 <ProductFastenerSelector locations={fasteners} onChange={setFasteners} variants={variants} />
+             </div>
+           )}
+
+           {activeTab === 'files' && (
+             <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100 animate-in fade-in">
+               {initialData?.id ? (
+                 <ProductFilesManager productId={initialData.id} />
+               ) : (
+                 <div className="text-center py-12 text-gray-400">
+                   <FolderOpen size={40} className="mx-auto mb-3 opacity-30" />
+                   <p className="font-medium text-gray-500">บันทึกสินค้าก่อนเพิ่มไฟล์</p>
+                   <p className="text-sm mt-1">กรุณากดปุ่ม "บันทึกข้อมูล" ด้านบน แล้วกลับมาที่แท็บนี้</p>
+                 </div>
+               )}
              </div>
            )}
 
