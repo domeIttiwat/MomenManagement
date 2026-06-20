@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Plus, Search, LayoutGrid, List as ListIcon, Loader2, ArrowUpDown, Filter, Eye, EyeOff, History, ShoppingBag, FileText } from 'lucide-react';
+import { Plus, Search, LayoutGrid, List as ListIcon, Loader2, ArrowUpDown, Filter, Eye, EyeOff, History, ShoppingBag, FileText, ListChecks } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
 import { logAction } from '@/lib/auditLog';
@@ -8,6 +8,7 @@ import OrderList from './OrderList';
 import OrderForm from './OrderForm';
 import OrderDetail from './OrderDetail';
 import OrderCard from './OrderCard';
+import OrderPrepCard from './OrderPrepCard';
 
 const OrderMain = ({ initialNavData, onViewCustomer }) => {
   const { can, profile } = useAuth();
@@ -24,6 +25,9 @@ const OrderMain = ({ initialNavData, onViewCustomer }) => {
   const [showProfit, setShowProfit] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showQuotation, setShowQuotation] = useState(false);
+  const [detailScrollTo, setDetailScrollTo] = useState(null);
+
+  const openOrder = (o, scrollTo = null) => { setSelectedOrder(o); setDetailScrollTo(scrollTo); setView('detail'); };
 
   const fetchOrders = async () => {
     setLoading(true);
@@ -32,12 +36,12 @@ const OrderMain = ({ initialNavData, onViewCustomer }) => {
       .select('*, order_items(*), order_payments(*), order_updates(*), order_assignees(user_id, job_role, user:user_id(first_name, last_name, avatar_url))')
       .order('created_at', { ascending: false });
     let list = data || [];
-    // แนบสถานะการเตรียมของ (เฉพาะออเดอร์ที่กดเริ่มเตรียมแล้ว) → ใช้โชว์บาร์ในหน้ารวม
+    // แนบสถานะการเตรียมของ (เฉพาะออเดอร์ที่กดเริ่มเตรียมแล้ว) → ใช้โชว์บาร์ในหน้ารวม + โหมด "ตามการจัดเตรียม"
     try {
-      const { data: preps } = await supabase.from('order_preps').select('id, order_id');
+      const { data: preps } = await supabase.from('order_preps').select('id, order_id, status, updated_at');
       if (preps && preps.length) {
         const { data: pitems } = await supabase.from('order_prep_items')
-          .select('prep_id, id, kind, parent_item_id, status').in('prep_id', preps.map((p) => p.id));
+          .select('prep_id, id, kind, parent_item_id, status, source, title').in('prep_id', preps.map((p) => p.id));
         const byPrep = {};
         (pitems || []).forEach((it) => { (byPrep[it.prep_id] = byPrep[it.prep_id] || []).push(it); });
         const prepByOrder = {};
@@ -47,7 +51,29 @@ const OrderMain = ({ initialNavData, onViewCustomer }) => {
           const leaves = its.filter((x) => x.kind !== 'product' || !parents.has(x.id));
           const total = leaves.length;
           const done = leaves.filter((x) => x.status === 'done').length;
-          prepByOrder[p.order_id] = { total, done, progress: total ? Math.round((done / total) * 100) : 0 };
+          // รายการที่ยังค้าง (กำลังทำมาก่อน แล้วค่อยรอ) → ใช้โชว์ตัวอย่างในการ์ด
+          const pending = leaves
+            .filter((x) => x.status !== 'done')
+            .sort((a, b) => (b.status === 'in_progress' ? 1 : 0) - (a.status === 'in_progress' ? 1 : 0))
+            .map((x) => ({ title: x.title, status: x.status }));
+          // นับแยกตามแหล่งของ
+          const source = { stock: 0, buy: 0, none: 0 };
+          leaves.forEach((x) => {
+            if (x.source === 'stock') source.stock += 1;
+            else if (x.source === 'buy') source.buy += 1;
+            else source.none += 1;
+          });
+          // รายชิ้นทั้งหมด (เรียง: ยังไม่เตรียม → กำลังทำ → เตรียมแล้ว) → ใช้แยกแถบในการ์ด
+          const items = leaves.map((x) => ({ title: x.title, status: x.status, source: x.source }));
+          prepByOrder[p.order_id] = {
+            total, done,
+            progress: total ? Math.round((done / total) * 100) : 0,
+            status: p.status,
+            updated_at: p.updated_at,
+            pending,
+            items,
+            source,
+          };
         });
         list = list.map((o) => ({ ...o, _prep: prepByOrder[o.id] || null }));
       }
@@ -114,6 +140,35 @@ const OrderMain = ({ initialNavData, onViewCustomer }) => {
     return result;
   }, [orders, search, filterStatus, sortOption, showHistory, showQuotation]);
 
+  // โหมด "ตามการจัดเตรียม": เฉพาะออเดอร์ที่เริ่มเตรียมแล้ว และยังไม่ถึงสถานะเตรียมส่ง/เสร็จสิ้น/ยกเลิก
+  // เรียงจากคืบหน้าน้อย → มาก (ตัวที่ค้างเยอะลอยขึ้นบน) ถ้าเท่ากันให้ตัวที่รอนานกว่าขึ้นก่อน
+  const prepOrders = useMemo(() => {
+    let result = orders.filter(o =>
+      o._prep &&
+      o.status !== 'Completed' &&
+      o.status !== 'Shipping' &&
+      o.status !== 'Cancelled'
+    );
+
+    if (search) {
+      const s = search.toLowerCase();
+      result = result.filter(o =>
+        o.order_number.toLowerCase().includes(s) ||
+        o.customer_cache?.first_name?.toLowerCase().includes(s) ||
+        o.customer_cache?.nickname?.toLowerCase().includes(s)
+      );
+    }
+
+    if (filterStatus !== 'All') {
+      result = result.filter(o => o.status === filterStatus);
+    }
+
+    return result.sort((a, b) =>
+      (a._prep.progress - b._prep.progress) ||
+      (new Date(a.order_date) - new Date(b.order_date))
+    );
+  }, [orders, search, filterStatus]);
+
   if (view === 'form') return <OrderForm onCancel={() => setView('list')} onSuccess={() => { setView('list'); fetchOrders(); }} initialData={selectedOrder} />;
   if (view === 'log') return (
     <div className="max-w-[1600px] mx-auto space-y-4 animate-in fade-in">
@@ -125,14 +180,15 @@ const OrderMain = ({ initialNavData, onViewCustomer }) => {
   );
   
   if (view === 'detail') return (
-    <OrderDetail 
-      order={selectedOrder} 
-      onBack={() => setView('list')} 
-      onEdit={() => setView('form')} 
-      onDelete={() => handleDelete(selectedOrder.id)} 
+    <OrderDetail
+      order={selectedOrder}
+      onBack={() => setView('list')}
+      onEdit={() => setView('form')}
+      onDelete={() => handleDelete(selectedOrder.id)}
       showProfit={showProfit}
       setShowProfit={setShowProfit}
-      onViewCustomer={onViewCustomer} 
+      onViewCustomer={onViewCustomer}
+      scrollTo={detailScrollTo}
     />
   );
 
@@ -146,8 +202,11 @@ const OrderMain = ({ initialNavData, onViewCustomer }) => {
              <ShoppingBag size={32} className="text-emerald-100" /> คำสั่งซื้อ
            </h1>
            <p className="text-emerald-100 mt-1 font-medium ml-1">
-             รายการขายทั้งหมด ({filteredAndSorted.length}) 
-             {!showHistory && <span className="text-xs bg-white/20 px-2 py-0.5 rounded ml-2 text-white">ซ่อนรายการเสร็จสิ้น</span>}
+             {viewMode === 'prep' ? (
+               <>กำลังจัดเตรียม ({prepOrders.length}) <span className="text-xs bg-white/20 px-2 py-0.5 rounded ml-2 text-white">ซ่อนเตรียมส่ง/เสร็จสิ้น</span></>
+             ) : (
+               <>รายการขายทั้งหมด ({filteredAndSorted.length}) {!showHistory && <span className="text-xs bg-white/20 px-2 py-0.5 rounded ml-2 text-white">ซ่อนรายการเสร็จสิ้น</span>}</>
+             )}
            </p>
         </div>
         <div className="flex gap-2">
@@ -245,19 +304,32 @@ const OrderMain = ({ initialNavData, onViewCustomer }) => {
           )}
 
           <div className="flex bg-gray-100 p-1 rounded-xl">
-            <button onClick={() => setViewMode('list')} className={`p-2 rounded-lg transition-all ${viewMode === 'list' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}><ListIcon size={20}/></button>
-            <button onClick={() => setViewMode('card')} className={`p-2 rounded-lg transition-all ${viewMode === 'card' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}><LayoutGrid size={20}/></button>
+            <button onClick={() => setViewMode('list')} title="แบบลิสต์" className={`p-2 rounded-lg transition-all ${viewMode === 'list' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}><ListIcon size={20}/></button>
+            <button onClick={() => setViewMode('card')} title="แบบการ์ด" className={`p-2 rounded-lg transition-all ${viewMode === 'card' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}><LayoutGrid size={20}/></button>
+            <button onClick={() => setViewMode('prep')} title="ตามการจัดเตรียม" className={`p-2 rounded-lg transition-all ${viewMode === 'prep' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}><ListChecks size={20}/></button>
           </div>
         </div>
       </div>
 
-      {loading ? <div className="text-center py-20"><Loader2 className="animate-spin inline text-indigo-600"/></div> : 
+      {loading ? <div className="text-center py-20"><Loader2 className="animate-spin inline text-indigo-600"/></div> :
         viewMode === 'list' ? (
-          <OrderList orders={filteredAndSorted} showProfit={showProfit} onSelect={o => { setSelectedOrder(o); setView('detail'); }} />
-        ) : (
+          <OrderList orders={filteredAndSorted} showProfit={showProfit} onSelect={o => openOrder(o)} />
+        ) : viewMode === 'card' ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 pb-20">
-             {filteredAndSorted.map(o => <OrderCard key={o.id} order={o} showProfit={showProfit} onClick={() => { setSelectedOrder(o); setView('detail'); }} />)}
+             {filteredAndSorted.map(o => <OrderCard key={o.id} order={o} showProfit={showProfit} onClick={() => openOrder(o)} />)}
           </div>
+        ) : (
+          prepOrders.length === 0 ? (
+            <div className="text-center py-20 text-gray-400">
+              <ListChecks size={40} className="mx-auto mb-3 text-gray-300" />
+              <p className="font-medium">ยังไม่มีออเดอร์ที่กำลังจัดเตรียม</p>
+              <p className="text-sm mt-1">รายการจะแสดงที่นี่เมื่อกด “เริ่มจัดเตรียม” ในออเดอร์</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-5 pb-20">
+               {prepOrders.map(o => <OrderPrepCard key={o.id} order={o} onClick={() => openOrder(o, 'prep')} />)}
+            </div>
+          )
         )
       }
     </div>

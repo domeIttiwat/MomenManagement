@@ -7,8 +7,9 @@ import ImageUploader from './ImageUploader';
 import AuditLogPanel from '@/app/components/common/AuditLogPanel';
 import OrderPrep from './OrderPrep';
 
-const OrderDetail = ({ order, onBack, onEdit, onDelete, showProfit, setShowProfit, onViewCustomer }) => {
+const OrderDetail = ({ order, onBack, onEdit, onDelete, showProfit, setShowProfit, onViewCustomer, scrollTo }) => {
   const { can, profile } = useAuth();
+  const prepSectionRef = useRef(null);
   const author = () => (profile ? { id: profile.id, name: `${profile.first_name || ''} ${profile.last_name || ''}`.trim(), avatar_url: profile.avatar_url || null } : null);
   const [showBill, setShowBill] = useState(false);
   const [lightboxImg, setLightboxImg] = useState(null);
@@ -24,6 +25,16 @@ const OrderDetail = ({ order, onBack, onEdit, onDelete, showProfit, setShowProfi
   useEffect(() => {
     if (order?.id) fetchUpdates();
   }, [order?.id]);
+
+  // มาจากโหมด "ตามการจัดเตรียม" → เลื่อนไปยังส่วนจัดเตรียมของ
+  useEffect(() => {
+    if (scrollTo === 'prep') {
+      const t = setTimeout(() => {
+        prepSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 300);
+      return () => clearTimeout(t);
+    }
+  }, [scrollTo, order?.id]);
 
   const fetchUpdates = async () => {
     const { data } = await supabase.from('order_updates').select('*').eq('order_id', order.id).order('created_at', { ascending: true });
@@ -355,7 +366,9 @@ const OrderDetail = ({ order, onBack, onEdit, onDelete, showProfit, setShowProfi
           </div>
 
           {/* การจัดเตรียมของ (BOM → checklist) */}
-          <OrderPrep order={order} />
+          <div ref={prepSectionRef} className="scroll-mt-24">
+            <OrderPrep order={order} />
+          </div>
 
         </div>
 
