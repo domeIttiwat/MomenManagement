@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { X, Download, Share2, Printer, Loader2, FileText, MessageCircle, Tag, Facebook, Instagram, Phone, Globe } from 'lucide-react';
-import html2canvas from 'html2canvas';
+import html2canvas from 'html2canvas-pro';
 
 const BillPreview = ({ order, onClose }) => {
   const [mode, setMode] = useState('official'); // 'official' | 'chat' | 'tag' (S1)
@@ -19,10 +19,16 @@ const BillPreview = ({ order, onClose }) => {
     
     win.document.write(`
       <style>
-        @page { size: A4; margin: 0; } 
-        body { margin: 0; padding: 0; background-color: white; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-        .print-wrapper { width: 210mm; min-height: 297mm; margin: 0 auto; background: white; position: relative; }
+        @page { size: A4; margin: 0; }
+        html, body { margin: 0; padding: 0; background-color: white; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+        .print-wrapper { width: 210mm; margin: 0 auto; background: white; position: relative; }
         * { box-sizing: border-box; }
+        /* ไม่บังคับความสูงเต็มหน้า + ซ่อนแถวเติมว่าง → รายการน้อยอยู่หน้าเดียว ไม่หลุดไปหน้า 2 */
+        [class*="min-h-"] { min-height: 0 !important; }
+        .bill-filler { display: none !important; }
+        /* multi-page: หัวตารางซ้ำทุกหน้า, แถวไม่ถูกตัดครึ่ง, บล็อกยอดรวม/เซ็นไม่ขาดหน้า */
+        thead { display: table-header-group; }
+        tr, .bill-keep { break-inside: avoid; page-break-inside: avoid; }
         table { border-collapse: collapse; width: 100%; }
       </style>
     `);
@@ -46,39 +52,12 @@ const BillPreview = ({ order, onClose }) => {
     setDownloading(true);
     try {
       const el = contentRef.current;
-      const allEls = [el, ...Array.from(el.querySelectorAll('*'))];
-      const styleMap = allEls.map(orig => {
-        const s = window.getComputedStyle(orig);
-        return {
-          color: s.color,
-          backgroundColor: s.backgroundColor,
-          borderTopColor: s.borderTopColor,
-          borderRightColor: s.borderRightColor,
-          borderBottomColor: s.borderBottomColor,
-          borderLeftColor: s.borderLeftColor,
-        };
-      });
+      // html2canvas-pro รองรับสี oklch/lab/lch ของ Tailwind v4 ได้เอง ไม่ต้อง patch
       const canvas = await html2canvas(el, {
         scale: 2,
         useCORS: true,
         backgroundColor: '#ffffff',
         logging: false,
-        removeContainer: true,
-        onclone: (clonedDoc, clonedEl) => {
-          // Patch style tags — replace oklch/lab/lch so html2canvas parser doesn't crash
-          clonedDoc.querySelectorAll('style').forEach(styleTag => {
-            styleTag.textContent = styleTag.textContent
-              .replace(/oklch\([^)]*\)/g, 'transparent')
-              .replace(/\blab\([^)]*\)/g, 'transparent')
-              .replace(/\blch\([^)]*\)/g, 'transparent');
-          });
-          // Apply pre-computed rgb inline styles to override the transparent fallbacks
-          const clonedEls = [clonedEl, ...Array.from(clonedEl.querySelectorAll('*'))];
-          clonedEls.forEach((cel, i) => {
-            if (!styleMap[i]) return;
-            Object.assign(cel.style, styleMap[i]);
-          });
-        }
       });
       const image = canvas.toDataURL("image/png");
       const link = document.createElement("a");
@@ -262,7 +241,7 @@ const BillPreview = ({ order, onClose }) => {
                             ))}
                             {/* Filler */}
                             {Array.from({length: Math.max(0, 15 - (order.order_items?.length||0))}).map((_,i) => (
-                                <tr key={`fill-${i}`} className="border-b border-gray-100 h-8">
+                                <tr key={`fill-${i}`} className="bill-filler border-b border-gray-100 h-8">
                                     <td className="border-r border-gray-200"></td><td className="border-r border-gray-200"></td><td className="border-r border-gray-200"></td><td className="border-r border-gray-200"></td><td></td>
                                 </tr>
                             ))}
@@ -270,7 +249,7 @@ const BillPreview = ({ order, onClose }) => {
                     </table>
 
                     {/* Footer */}
-                    <div className="flex justify-end mt-auto">
+                    <div className="bill-keep flex justify-end mt-auto">
                         <div className="w-[45%] text-[11px]">
                             <div className="flex justify-between py-1 border-b border-gray-200">
                                 <span className="font-bold text-gray-600">
@@ -310,7 +289,7 @@ const BillPreview = ({ order, onClose }) => {
                     {order.notes && <div className="mt-4 border border-dashed border-gray-300 p-3 rounded bg-gray-50 text-[10px]"><span className="font-bold text-gray-700">หมายเหตุ:</span> {order.notes}</div>}
 
                     {/* Signature */}
-                    <div className="flex justify-between items-end mt-8 pt-6 border-t border-gray-200">
+                    <div className="bill-keep flex justify-between items-end mt-8 pt-6 border-t border-gray-200">
                         <div className="text-center w-1/3"><div className="border-b border-black mb-2 h-8"></div><p className="text-xs">ลายเซ็นลูกค้า / Customer Signature</p></div>
                         <div className="text-center w-1/3"><div className="border-b border-black mb-2 h-8"></div><p className="text-xs">ผู้รับเงิน / Receiver Signature</p></div>
                     </div>

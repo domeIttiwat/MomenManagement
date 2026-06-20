@@ -31,7 +31,28 @@ const OrderMain = ({ initialNavData, onViewCustomer }) => {
       // --- FIX: เพิ่ม user_id ใน order_assignees ---
       .select('*, order_items(*), order_payments(*), order_updates(*), order_assignees(user_id, job_role, user:user_id(first_name, last_name, avatar_url))')
       .order('created_at', { ascending: false });
-    if (data) setOrders(data);
+    let list = data || [];
+    // แนบสถานะการเตรียมของ (เฉพาะออเดอร์ที่กดเริ่มเตรียมแล้ว) → ใช้โชว์บาร์ในหน้ารวม
+    try {
+      const { data: preps } = await supabase.from('order_preps').select('id, order_id');
+      if (preps && preps.length) {
+        const { data: pitems } = await supabase.from('order_prep_items')
+          .select('prep_id, id, kind, parent_item_id, status').in('prep_id', preps.map((p) => p.id));
+        const byPrep = {};
+        (pitems || []).forEach((it) => { (byPrep[it.prep_id] = byPrep[it.prep_id] || []).push(it); });
+        const prepByOrder = {};
+        preps.forEach((p) => {
+          const its = byPrep[p.id] || [];
+          const parents = new Set(its.filter((x) => x.parent_item_id).map((x) => x.parent_item_id));
+          const leaves = its.filter((x) => x.kind !== 'product' || !parents.has(x.id));
+          const total = leaves.length;
+          const done = leaves.filter((x) => x.status === 'done').length;
+          prepByOrder[p.order_id] = { total, done, progress: total ? Math.round((done / total) * 100) : 0 };
+        });
+        list = list.map((o) => ({ ...o, _prep: prepByOrder[o.id] || null }));
+      }
+    } catch { /* ไม่ให้กระทบการโหลดออเดอร์ */ }
+    setOrders(list);
     setLoading(false);
   };
 

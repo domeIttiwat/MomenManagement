@@ -59,13 +59,15 @@ const OrderListItem = ({ order, showProfit, onClick }) => {
 
   // Social info
   const social = order.customer_cache?.social_channels?.[0];
+  const custImg = order.customer_cache?.images?.[0];
+  const custImgUrl = typeof custImg === 'string' ? custImg : custImg?.url;
 
   return (
     <tr onClick={onClick} className="hover:bg-indigo-50/30 transition-colors cursor-pointer border-b border-gray-50 last:border-none group">
       <td className="px-6 py-4 align-top">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center text-gray-400 shrink-0">
-            <User size={18} />
+          <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center text-gray-400 shrink-0 overflow-hidden">
+            {custImgUrl ? <img src={custImgUrl} alt="" className="w-full h-full object-cover" /> : <User size={18} />}
           </div>
           <div>
             <div className="font-bold text-gray-900 group-hover:text-indigo-600 transition-colors">
@@ -105,6 +107,14 @@ const OrderListItem = ({ order, showProfit, onClick }) => {
         <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide ${getStatusColor(order.status)}`}>
           {order.status}
         </span>
+        {order._prep && (
+          <div className="mt-1.5 w-24 mx-auto">
+            <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+              <div className={`h-full ${order._prep.progress === 100 ? 'bg-emerald-500' : 'bg-indigo-500'}`} style={{ width: `${order._prep.progress}%` }} />
+            </div>
+            <span className="text-[9px] text-gray-400">เตรียม {order._prep.progress}%</span>
+          </div>
+        )}
       </td>
       <td className="px-6 py-4 text-right align-top">
         <span className="font-bold text-gray-900">฿{order.grand_total.toLocaleString()}</span>

@@ -8,7 +8,8 @@ import AuditLogPanel from '@/app/components/common/AuditLogPanel';
 import OrderPrep from './OrderPrep';
 
 const OrderDetail = ({ order, onBack, onEdit, onDelete, showProfit, setShowProfit, onViewCustomer }) => {
-  const { can } = useAuth();
+  const { can, profile } = useAuth();
+  const author = () => (profile ? { id: profile.id, name: `${profile.first_name || ''} ${profile.last_name || ''}`.trim(), avatar_url: profile.avatar_url || null } : null);
   const [showBill, setShowBill] = useState(false);
   const [lightboxImg, setLightboxImg] = useState(null);
   
@@ -72,7 +73,8 @@ const OrderDetail = ({ order, onBack, onEdit, onDelete, showProfit, setShowProfi
         order_id: order.id,
         description: newUpdate.description,
         update_date: newUpdate.date,
-        images: uploadedImages
+        images: uploadedImages,
+        created_by: author()
       }]);
 
       setNewUpdate({ description: '', date: new Date().toISOString().split('T')[0], images: [] });
@@ -443,8 +445,10 @@ const OrderDetail = ({ order, onBack, onEdit, onDelete, showProfit, setShowProfi
               ) : updates.map((update) => (
                 <div key={update.id} className="group flex gap-3">
                   {/* Avatar */}
-                  <div className="w-9 h-9 rounded-full bg-gradient-to-br from-indigo-400 to-indigo-600 flex items-center justify-center text-white shrink-0 shadow-sm mt-0.5">
-                    <User size={16}/>
+                  <div className="w-9 h-9 rounded-full overflow-hidden flex items-center justify-center text-white shrink-0 shadow-sm mt-0.5 bg-gradient-to-br from-indigo-400 to-indigo-600">
+                    {update.created_by?.avatar_url
+                      ? <img src={update.created_by.avatar_url} alt="" className="w-full h-full object-cover"/>
+                      : (update.created_by?.name ? <span className="text-xs font-bold">{update.created_by.name[0]}</span> : <User size={16}/>)}
                   </div>
 
                   <div className="flex-1 min-w-0">
@@ -482,7 +486,7 @@ const OrderDetail = ({ order, onBack, onEdit, onDelete, showProfit, setShowProfi
                         {/* Meta row */}
                         <div className="flex items-center justify-between mb-2">
                           <div className="flex items-center gap-2">
-                            <span className="text-xs font-bold text-gray-700">อัปเดต</span>
+                            <span className="text-xs font-bold text-gray-700">{update.created_by?.name || 'อัปเดต'}</span>
                             <span className="text-[11px] text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full font-semibold">
                               {new Date(update.update_date).toLocaleDateString('th-TH', {day:'numeric', month:'short', year:'numeric'})}
                             </span>
@@ -545,8 +549,8 @@ const OrderDetail = ({ order, onBack, onEdit, onDelete, showProfit, setShowProfi
 
               <div className="flex gap-3 items-end">
                 {/* Avatar */}
-                <div className="w-9 h-9 rounded-full bg-gradient-to-br from-indigo-400 to-indigo-600 flex items-center justify-center text-white shrink-0 shadow-sm">
-                  <User size={16}/>
+                <div className="w-9 h-9 rounded-full overflow-hidden flex items-center justify-center text-white shrink-0 shadow-sm bg-gradient-to-br from-indigo-400 to-indigo-600">
+                  {profile?.avatar_url ? <img src={profile.avatar_url} alt="" className="w-full h-full object-cover"/> : <User size={16}/>}
                 </div>
 
                 {/* Input area */}

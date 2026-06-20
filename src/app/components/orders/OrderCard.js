@@ -61,6 +61,8 @@ const OrderCard = ({ order, showProfit, onClick }) => {
   };
 
   const social = order.customer_cache?.social_channels?.[0];
+  const custImg = order.customer_cache?.images?.[0];
+  const custImgUrl = typeof custImg === 'string' ? custImg : custImg?.url;
 
   return (
     <div onClick={onClick} className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 hover:shadow-md hover:border-indigo-200 transition-all cursor-pointer group flex flex-col h-full">
@@ -109,7 +111,7 @@ const OrderCard = ({ order, showProfit, onClick }) => {
         </div>
 
         <div className="flex items-center gap-2 mb-3 bg-gray-50 p-2 rounded-lg mt-2">
-          <div className="w-6 h-6 rounded-full bg-white flex items-center justify-center text-gray-400 shadow-sm"><User size={12}/></div>
+          <div className="w-6 h-6 rounded-full bg-white flex items-center justify-center text-gray-400 shadow-sm overflow-hidden shrink-0">{custImgUrl ? <img src={custImgUrl} alt="" className="w-full h-full object-cover"/> : <User size={12}/>}</div>
           <div className="min-w-0">
              <p className="text-xs font-medium text-gray-700 truncate">{order.customer_cache?.first_name} {order.customer_cache?.last_name}</p>
              {social && (
@@ -127,6 +129,18 @@ const OrderCard = ({ order, showProfit, onClick }) => {
             {order.order_items?.length > 1 && <span className="text-[10px] bg-gray-100 px-1 rounded">+{order.order_items.length-1}</span>}
           </div>
         </div>
+
+        {order._prep && (
+          <div className="mt-2">
+            <div className="flex items-center justify-between text-[10px] mb-0.5">
+              <span className="text-gray-400">จัดเตรียมของ</span>
+              <span className={`font-bold ${order._prep.progress === 100 ? 'text-emerald-600' : 'text-indigo-600'}`}>{order._prep.progress}%</span>
+            </div>
+            <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+              <div className={`h-full ${order._prep.progress === 100 ? 'bg-emerald-500' : 'bg-indigo-500'}`} style={{ width: `${order._prep.progress}%` }} />
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
