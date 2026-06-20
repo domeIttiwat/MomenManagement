@@ -13,8 +13,9 @@ import NumericInput from './NumericInput';
 import ProductFilesManager from './ProductFilesManager';
 
 const ProductForm = ({ onCancel, onSuccess, initialData }) => {
-  const { profile } = useAuth();
+  const { profile, can } = useAuth();
   const meRef = () => profile ? { id: profile.id, name: `${profile.first_name} ${profile.last_name}` } : null;
+  const canEditBom = can('products', 'bom'); // สิทธิ์จัดการสูตร BOM (ตั้งค่าใน RoleManager → สินค้า → จัดการสูตร BOM)
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('info'); 
   const [currentCategoryNames, setCurrentCategoryNames] = useState([]);
@@ -148,36 +149,64 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
           await supabase.from('product_categories').insert(formData.category_ids.map(cId => ({ product_id: productId, category_id: cId })));
       }
 
-      // Variants
+      // Variants — ลบ+สร้างใหม่ทำให้ id เปลี่ยน จึงต้องเก็บ map old->new ไว้ remap ให้ BOM
+      const variantIdMap = {}; // { oldVariantId: newVariantId } (จับคู่ด้วยชื่อ variant)
       if (formData.has_variants) {
         if (initialData?.id) {
           const { error: delErr } = await supabase.from('product_variants').delete().eq('product_id', productId);
           if (delErr) throw delErr;
         }
         if (variants.length > 0) {
-          const { error: varErr } = await supabase.from('product_variants').insert(variants.map(v => ({
+          const { data: newVariants, error: varErr } = await supabase.from('product_variants').insert(variants.map(v => ({
             product_id: productId,
             name: v.name,
             sku: v.sku || `${formData.sku}-${v.name.replace(/\s+/g, '')}`,
             options: v.options,
             cost_price: Number(v.cost_price),
             sell_price: Number(v.sell_price)
-          })));
+          }))).select();
           if (varErr) throw varErr;
+          const newIdByName = {};
+          (newVariants || []).forEach(nv => { newIdByName[nv.name] = nv.id; });
+          variants.forEach(v => {
+            if (v.id != null && newIdByName[v.name] != null) variantIdMap[v.id] = newIdByName[v.name];
+          });
         }
       }
 
-      // Bundles
-      if (!isSparePart) {
+      // Bundles / BOM — แก้เฉพาะผู้มีสิทธิ์ 'จัดการสูตร BOM' (กันผู้ไม่มีสิทธิ์เผลอลบสูตร)
+      if (!isSparePart && canEditBom) {
         if (initialData?.id) await supabase.from('product_bundles').delete().eq('parent_product_id', productId);
-        if (bundles.length > 0) {
-            await supabase.from('product_bundles').insert(bundles.map(b => ({
-                parent_product_id: productId,
-                child_product_id: b.child_product_id,
-                quantity: b.quantity,
-                parent_variant_id: b.parent_variant_id
-            })));
+        const newVariantIds = new Set(Object.values(variantIdMap));
+        const bundleRows = bundles
+          .map(b => {
+            const origPv = b.parent_variant_id ?? null;
+            const pvid = origPv == null ? null : (variantIdMap[origPv] ?? null); // remap old->new
+            return { origPv, row: {
+              parent_product_id: productId,
+              child_product_id: b.child_product_id ?? null,
+              component_name: b.component_name ?? null,
+              quantity: b.quantity,
+              note: b.note ?? null,
+              parent_variant_id: pvid,
+            } };
+          })
+          // base (origPv=null) เก็บเสมอ; variant ต้อง remap เจอ id ใหม่จริง (กัน FK ล้มทั้งชุด)
+          .filter(x => x.origPv == null || (x.row.parent_variant_id != null && newVariantIds.has(x.row.parent_variant_id)))
+          .map(x => x.row);
+        if (bundleRows.length > 0) {
+          const { error: bErr } = await supabase.from('product_bundles').insert(bundleRows);
+          if (bErr) throw bErr; // เดิมไม่เช็ค error → ล้มเงียบ ตอนนี้แจ้งแล้ว
         }
+        // Audit log เฉพาะการแก้ BOM
+        await logAction({
+          resource_type: 'product',
+          resource_id: productId,
+          action: 'bom_update',
+          resource_label: formData.name,
+          metadata: { component_count: bundles.length },
+          created_by: meRef(),
+        });
       }
 
       // Fasteners (FIX: Upload & Save Images)
@@ -265,7 +294,7 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
                  
                  {!isSparePart && (
                     <button type="button" onClick={() => setActiveTab('bundles')} className={`w-full text-left px-4 py-3 rounded-xl font-bold text-sm flex items-center gap-3 transition-all ${activeTab === 'bundles' ? 'bg-purple-50 text-purple-600' : 'text-gray-500 hover:bg-gray-50'}`}>
-                        <Layers size={18}/> ส่วนประกอบ (Bundles)
+                        <Layers size={18}/> สูตรประกอบ (BOM)
                     </button>
                  )}
 
@@ -340,10 +369,15 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
            {activeTab === 'bundles' && !isSparePart && (
              <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100 animate-in fade-in">
                 <div className="mb-6">
-                  <h3 className="font-bold text-gray-800 text-lg">ส่วนประกอบสินค้า (Bundles / BOM)</h3>
-                  <p className="text-gray-400 text-sm mt-1">เลือกอะไหล่หรือสินค้าลูกที่ใช้ประกอบเป็นสินค้านี้</p>
+                  <h3 className="font-bold text-gray-800 text-lg">สูตรประกอบ (BOM)</h3>
+                  <p className="text-gray-400 text-sm mt-1">ระบุว่าสินค้า/รถรุ่นนี้ประกอบด้วยอะไรบ้าง (อะไหล่พื้นฐานใช้ทุกรุ่น + ส่วนต่างของแต่ละรุ่นย่อย) — เป็นสูตรกลาง ไม่ตัดสต๊อก</p>
                 </div>
-                <ProductBundleSelector bundles={bundles} onChange={setBundles} variants={variants} />
+                {!canEditBom && (
+                  <div className="mb-4 flex items-center gap-2 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-100 px-3 py-2 rounded-lg">
+                    <Info size={14}/> โหมดดูอย่างเดียว — คุณไม่มีสิทธิ์ “จัดการสูตร BOM” (ตั้งค่าได้ใน จัดการทีมงาน → สิทธิ์)
+                  </div>
+                )}
+                <ProductBundleSelector bundles={bundles} onChange={setBundles} variants={variants} canEdit={canEditBom} productSku={formData.sku} productName={formData.name} />
              </div>
            )}
 

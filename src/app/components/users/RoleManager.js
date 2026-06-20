@@ -30,6 +30,7 @@ const ACTIONS = [
   { id: 'stock_in',   label: 'รับเข้าสินค้า',   onlyFor: ['stock'] },
   { id: 'stock_out',  label: 'เบิกออกสินค้า',  onlyFor: ['stock'] },
   { id: 'delete_tx',  label: 'ลบประวัติสต๊อก', onlyFor: ['stock'] },
+  { id: 'bom',        label: 'จัดการสูตร BOM', onlyFor: ['products'] },
 ];
 
 const RoleManager = () => {

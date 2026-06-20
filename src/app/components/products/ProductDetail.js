@@ -185,6 +185,57 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
               </div>
             )}
           </div>
+
+          {/* สูตรประกอบ (BOM) — แสดงใต้รูป แยกของหลัก/รุ่นย่อย */}
+          {bundles.length > 0 && (
+            <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm">
+              <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2 mb-3 uppercase tracking-wider">
+                <Layers size={16} className="text-indigo-500" /> สูตรประกอบ (BOM)
+              </h3>
+
+              {/* ของหลัก (ใช้ทุกรุ่น) */}
+              <div className="mb-3">
+                <p className="text-[11px] font-bold text-blue-700 bg-blue-50 px-2 py-1 rounded-md inline-block mb-2">ของหลัก (ใช้ทุกรุ่น)</p>
+                {commonBundles.length > 0 ? (
+                  <div className="space-y-1">
+                    {commonBundles.map((b, i) => (
+                      <div key={i} className="flex items-start justify-between gap-2 bg-gray-50 rounded-lg px-2.5 py-1.5">
+                        <div className="min-w-0">
+                          <p className="text-sm text-gray-800 break-words">{b.product?.name || b.component_name}</p>
+                          {b.note && <p className="text-[11px] text-gray-400 break-words">{b.note}</p>}
+                        </div>
+                        <span className="text-xs font-bold text-gray-600 bg-white border border-gray-200 rounded px-1.5 py-0.5 shrink-0">x{b.quantity}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : <p className="text-xs text-gray-400">— ไม่มี —</p>}
+              </div>
+
+              {/* ต่อรุ่นย่อย (เฉพาะที่มีของ) */}
+              {variants.map((v) => {
+                const vb = variantBundles[v.id] || [];
+                if (vb.length === 0) return null;
+                return (
+                  <div key={v.id} className="mb-3">
+                    <p className="text-[11px] font-bold text-indigo-700 bg-indigo-50 px-2 py-1 rounded-md inline-flex items-center gap-1 mb-2">
+                      <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full"></span> รุ่นย่อย: {v.name}
+                    </p>
+                    <div className="space-y-1">
+                      {vb.map((b, i) => (
+                        <div key={i} className="flex items-start justify-between gap-2 bg-gray-50 rounded-lg px-2.5 py-1.5">
+                          <div className="min-w-0">
+                            <p className="text-sm text-gray-800 break-words">{b.product?.name || b.component_name}</p>
+                            {b.note && <p className="text-[11px] text-gray-400 break-words">{b.note}</p>}
+                          </div>
+                          <span className="text-xs font-bold text-gray-600 bg-white border border-gray-200 rounded px-1.5 py-0.5 shrink-0">x{b.quantity}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* Right: Info */}
@@ -312,8 +363,8 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
             </div>
           </div>
 
-          {/* 4. Bundles Detail */}
-          {hasBundlesData && (
+          {/* 4. Bundles Detail — ย้ายไปแสดงคอลัมน์ซ้ายใต้รูปแล้ว */}
+          {false && (
             <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
                 <div className="flex justify-between items-center mb-4">
                     <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2 uppercase tracking-wider">
@@ -337,7 +388,7 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
                                         <div className="flex items-center gap-3">
                                             <Package size={16} className="text-gray-400"/>
                                             <div>
-                                                <p className="text-sm font-bold text-gray-800">{b.product?.name}</p>
+                                                <p className="text-sm font-bold text-gray-800">{b.product?.name || b.component_name}</p>
                                                 <p className="text-xs text-gray-500">{b.product?.sku}</p>
                                             </div>
                                         </div>
@@ -382,7 +433,7 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
                                             <div key={i} className="flex justify-between items-center p-2 rounded-lg hover:bg-gray-50 border border-transparent hover:border-gray-100 transition-colors">
                                                 <div className="flex items-center gap-2">
                                                     <div className="w-1 h-1 bg-gray-300 rounded-full"></div>
-                                                    <p className="text-sm text-gray-700">{b.product?.name}</p>
+                                                    <p className="text-sm text-gray-700">{b.product?.name || b.component_name}</p>
                                                 </div>
                                                 <div className="flex items-center gap-3">
                                                     {showCost && <span className="text-xs text-amber-600 font-medium">฿{b.product?.cost_price?.toLocaleString()}</span>}

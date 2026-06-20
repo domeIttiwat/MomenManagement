@@ -5,6 +5,7 @@ import { useAuth } from '@/app/context/AuthContext';
 import BillPreview from './BillPreview';
 import ImageUploader from './ImageUploader';
 import AuditLogPanel from '@/app/components/common/AuditLogPanel';
+import OrderPrep from './OrderPrep';
 
 const OrderDetail = ({ order, onBack, onEdit, onDelete, showProfit, setShowProfit, onViewCustomer }) => {
   const { can } = useAuth();
@@ -351,6 +352,75 @@ const OrderDetail = ({ order, onBack, onEdit, onDelete, showProfit, setShowProfi
             </div>
           </div>
 
+          {/* การจัดเตรียมของ (BOM → checklist) */}
+          <OrderPrep order={order} />
+
+        </div>
+
+        <div className="space-y-6">
+           {/* Assignees (NEW) */}
+           <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+              <h3 className="font-bold text-gray-800 mb-4">ผู้รับผิดชอบ</h3>
+              <div className="space-y-2">
+                 {order.order_assignees?.map((a, i) => (
+                   <div key={i} className="flex items-center gap-2 p-2 rounded-lg border border-gray-100 bg-gray-50">
+                      <div className="w-8 h-8 rounded-full bg-white border border-gray-200 flex items-center justify-center overflow-hidden shrink-0">
+                        {a.user?.avatar_url ? (
+                          <img src={a.user.avatar_url} alt={a.user.first_name} className="w-full h-full object-cover"/>
+                        ) : (
+                          <span className="text-xs font-bold text-gray-400">{a.user?.first_name?.[0]}</span>
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-800 truncate">{a.user?.first_name} {a.user?.last_name}</p>
+                        <p className="text-xs text-indigo-500">{a.job_role}</p>
+                      </div>
+                   </div>
+                 ))}
+                 {(!order.order_assignees || order.order_assignees.length === 0) && <p className="text-gray-400 text-sm text-center">-</p>}
+              </div>
+           </div>
+
+           <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+              <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><CreditCard size={18} className="text-indigo-500"/> ประวัติการชำระเงิน</h3>
+              <div className="space-y-3 relative">
+                {order.order_payments && order.order_payments.length > 0 ? (
+                  <>
+                    <div className="absolute left-[19px] top-2 bottom-2 w-0.5 bg-gray-100"></div>
+                    {order.order_payments.map((pay, i) => (
+                      <div key={i} className="flex gap-4 relative z-10">
+                        <div className={`w-10 h-10 rounded-full flex items-center justify-center border-4 border-white shadow-sm shrink-0 ${pay.type === 'deposit' ? 'bg-amber-100 text-amber-600' : 'bg-emerald-100 text-emerald-600'}`}>
+                          <DollarSign size={16} />
+                        </div>
+                        <div className="flex-1 bg-gray-50 p-3 rounded-xl border border-gray-100">
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className={`text-xs font-bold uppercase tracking-wider ${pay.type === 'deposit' ? 'text-amber-600' : 'text-emerald-600'}`}>
+                                  {pay.type === 'deposit' ? 'มัดจำ' : 'ชำระเงิน'}
+                                </span>
+                                <span className="flex items-center gap-1 text-[10px] text-gray-500 bg-white px-1.5 py-0.5 rounded border border-gray-200">
+                                   {getPaymentIcon(pay.payment_method)}
+                                   {getPaymentLabel(pay.payment_method)}
+                                </span>
+                              </div>
+                              <p className="text-[10px] text-gray-400 mt-1">{new Date(pay.payment_date).toLocaleDateString('th-TH')}</p>
+                            </div>
+                            <span className="font-bold text-gray-900">฿{pay.amount.toLocaleString()}</span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </>
+                ) : (
+                  <div className="text-center py-8 bg-gray-50 rounded-2xl border border-dashed border-gray-200">
+                    <p className="text-gray-400 text-sm">ยังไม่มีรายการชำระเงิน</p>
+                  </div>
+                )}
+              </div>
+           </div>
+
+
           {/* Timeline Feed — Social Media Style */}
           <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
             {/* Header */}
@@ -525,71 +595,9 @@ const OrderDetail = ({ order, onBack, onEdit, onDelete, showProfit, setShowProfi
               <p className="text-[10px] text-gray-400 mt-2 pl-12">กด Ctrl+Enter เพื่อส่งด่วน</p>
             </div>
           </div>
-        </div>
 
-        <div className="space-y-6">
-           {/* Assignees (NEW) */}
-           <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
-              <h3 className="font-bold text-gray-800 mb-4">ผู้รับผิดชอบ</h3>
-              <div className="space-y-2">
-                 {order.order_assignees?.map((a, i) => (
-                   <div key={i} className="flex items-center gap-2 p-2 rounded-lg border border-gray-100 bg-gray-50">
-                      <div className="w-8 h-8 rounded-full bg-white border border-gray-200 flex items-center justify-center overflow-hidden shrink-0">
-                        {a.user?.avatar_url ? (
-                          <img src={a.user.avatar_url} alt={a.user.first_name} className="w-full h-full object-cover"/>
-                        ) : (
-                          <span className="text-xs font-bold text-gray-400">{a.user?.first_name?.[0]}</span>
-                        )}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-gray-800 truncate">{a.user?.first_name} {a.user?.last_name}</p>
-                        <p className="text-xs text-indigo-500">{a.job_role}</p>
-                      </div>
-                   </div>
-                 ))}
-                 {(!order.order_assignees || order.order_assignees.length === 0) && <p className="text-gray-400 text-sm text-center">-</p>}
-              </div>
-           </div>
-
-           <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
-              <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><CreditCard size={18} className="text-indigo-500"/> ประวัติการชำระเงิน</h3>
-              <div className="space-y-3 relative">
-                {order.order_payments && order.order_payments.length > 0 ? (
-                  <>
-                    <div className="absolute left-[19px] top-2 bottom-2 w-0.5 bg-gray-100"></div>
-                    {order.order_payments.map((pay, i) => (
-                      <div key={i} className="flex gap-4 relative z-10">
-                        <div className={`w-10 h-10 rounded-full flex items-center justify-center border-4 border-white shadow-sm shrink-0 ${pay.type === 'deposit' ? 'bg-amber-100 text-amber-600' : 'bg-emerald-100 text-emerald-600'}`}>
-                          <DollarSign size={16} />
-                        </div>
-                        <div className="flex-1 bg-gray-50 p-3 rounded-xl border border-gray-100">
-                          <div className="flex justify-between items-start">
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <span className={`text-xs font-bold uppercase tracking-wider ${pay.type === 'deposit' ? 'text-amber-600' : 'text-emerald-600'}`}>
-                                  {pay.type === 'deposit' ? 'มัดจำ' : 'ชำระเงิน'}
-                                </span>
-                                <span className="flex items-center gap-1 text-[10px] text-gray-500 bg-white px-1.5 py-0.5 rounded border border-gray-200">
-                                   {getPaymentIcon(pay.payment_method)}
-                                   {getPaymentLabel(pay.payment_method)}
-                                </span>
-                              </div>
-                              <p className="text-[10px] text-gray-400 mt-1">{new Date(pay.payment_date).toLocaleDateString('th-TH')}</p>
-                            </div>
-                            <span className="font-bold text-gray-900">฿{pay.amount.toLocaleString()}</span>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </>
-                ) : (
-                  <div className="text-center py-8 bg-gray-50 rounded-2xl border border-dashed border-gray-200">
-                    <p className="text-gray-400 text-sm">ยังไม่มีรายการชำระเงิน</p>
-                  </div>
-                )}
-              </div>
-           </div>
-
+      {/* Audit Log */}
+      <AuditLogPanel resourceType="order" resourceId={order.id} title="ประวัติการเปลี่ยนแปลง" compact />
            {order.notes && (
             <div className="bg-amber-50 p-6 rounded-3xl border border-amber-100">
               <h3 className="font-bold text-amber-800 mb-2 text-sm uppercase tracking-wider">หมายเหตุ</h3>
@@ -627,8 +635,6 @@ const OrderDetail = ({ order, onBack, onEdit, onDelete, showProfit, setShowProfi
         </div>
       )}
 
-      {/* Audit Log */}
-      <AuditLogPanel resourceType="order" resourceId={order.id} title="ประวัติการเปลี่ยนแปลง" compact />
     </div>
   );
 };

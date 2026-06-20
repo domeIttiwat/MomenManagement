@@ -1,0 +1,25 @@
+---
+description: Momen admin — conventions, shared DB, sandbox & security rules
+alwaysApply: true
+---
+
+# MomenManagement (admin) — กติกาสำหรับ Cursor
+
+อ่านไฟล์ความจริงก่อนเริ่มงานเสมอ: `CLAUDE.md`, `AI_CONTEXT.md`,
+`../SHARED_CONTEXT.md` (เมื่อแตะ DB), `../SANDBOX.md` (เมื่อแตะ schema)
+
+## กฎเหล็ก
+- DB = Supabase (Postgres) **ตัวเดียวที่แชร์กับ storefront** → แก้ schema ต้อง additive, ไม่ทำให้อีกแอปพัง
+- งานแตะ schema/DB ต้องผ่าน **sandbox flow** (local → migration → ROLLBACK-test บน prod → review → push)
+  **ห้ามแก้ schema prod ด้วยมือ**
+- RBAC: ทุก action guard `can(resource, action)` (ระวัง fail-open, AI_CONTEXT §5)
+- Audit: create/update/delete สำคัญเรียก `logAction()`
+- service-role (`supabaseAdmin.js`) = server เท่านั้น ห้าม import เข้า client / ห้ามขึ้นต้น NEXT_PUBLIC_
+- เงิน THB, charge เป็นสตางค์ (×100)
+- งานแตะ auth/order/pricing/RLS/migration/payment/upload → review ความปลอดภัยก่อนปล่อย
+- หลังแก้สำคัญ → อัปเดต AI_CONTEXT (Changelog+TODO) + SHARED_CONTEXT ถ้าแตะ schema/security
+
+## รูปแบบโค้ด
+- module pattern: `<Module>Main/List/Form/Detail`; อ่าน/เขียนผ่าน `@/lib/supabase`
+- Tailwind v4 + lucide-react + sonner; reuse pattern เดิม ดูตัวอย่างก่อนเขียนใหม่
+- stock/location ใช้ manual JS join (DB ไม่มี FK constraint — ดู AI_CONTEXT §7)

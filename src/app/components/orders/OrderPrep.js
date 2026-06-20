@@ -1,0 +1,428 @@
+import React, { useState, useEffect, useCallback } from 'react';
+import { ListChecks, Plus, Trash2, RotateCcw, Package, Box, Loader2, X, StickyNote, Search, Link2, Pencil } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/app/context/AuthContext';
+import { logAction } from '@/lib/auditLog';
+
+const STATUS = {
+  pending:     { label: 'ยังไม่เตรียม',   chip: 'bg-gray-100 text-gray-500',     dot: 'bg-gray-300' },
+  in_progress: { label: 'กำลังดำเนินการ', chip: 'bg-amber-100 text-amber-700',   dot: 'bg-amber-400' },
+  done:        { label: 'เตรียมแล้ว',     chip: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' },
+};
+const SOURCE_LABEL = { stock: 'ดึงจากสต๊อก', buy: 'สั่งซื้อเพิ่ม' };
+const STATUS_ORDER = ['pending', 'in_progress', 'done'];
+const SOURCE_ORDER = [null, 'buy', 'stock'];
+const nextStatus = (s) => STATUS_ORDER[(STATUS_ORDER.indexOf(s) + 1) % STATUS_ORDER.length];
+const nextSource = (s) => SOURCE_ORDER[(SOURCE_ORDER.indexOf(s ?? null) + 1) % SOURCE_ORDER.length];
+
+const OrderPrep = ({ order }) => {
+  const { can, profile } = useAuth();
+  const canEdit = can('assembly', 'prepare');
+  const meRef = () => (profile ? { id: profile.id, name: `${profile.first_name} ${profile.last_name}` } : null);
+
+  const [prep, setPrep] = useState(null);
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(false);          // popup แก้ไข
+  const [confirm, setConfirm] = useState(null);           // 'reset' | 'cancel'
+  const [confirmText, setConfirmText] = useState('');
+  const [manualTitle, setManualTitle] = useState('');
+  const [manualQty, setManualQty] = useState(1);
+  const [pickerFor, setPickerFor] = useState(null);
+  const [search, setSearch] = useState('');
+  const [results, setResults] = useState([]);
+  const [linkedNames, setLinkedNames] = useState({});
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const { data: p } = await supabase.from('order_preps').select('*').eq('order_id', order.id).maybeSingle();
+    setPrep(p || null);
+    if (p) {
+      const { data: its } = await supabase.from('order_prep_items').select('*').eq('prep_id', p.id).order('sort_order').order('created_at');
+      setItems(its || []);
+      const linkIds = [...new Set((its || []).map((x) => x.stock_product_id).filter(Boolean))];
+      if (linkIds.length) {
+        const { data: prods } = await supabase.from('products').select('id, name').in('id', linkIds);
+        const map = {}; (prods || []).forEach((pr) => { map[pr.id] = pr.name; });
+        setLinkedNames(map);
+      }
+    } else { setItems([]); }
+    setLoading(false);
+  }, [order.id]);
+
+  useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    if (!pickerFor) return;
+    const t = setTimeout(async () => {
+      let q = supabase.from('products').select('id, name, sku, cost_price').limit(20);
+      q = search.trim() ? q.ilike('name', `%${search}%`) : q.order('created_at', { ascending: false });
+      const { data } = await q;
+      setResults(data || []);
+    }, 250);
+    return () => clearTimeout(t);
+  }, [search, pickerFor]);
+
+  // ---------- start ----------
+  const startPrep = async () => {
+    if (!canEdit) return;
+    setBusy(true);
+    try {
+      const orderItems = order.order_items || [];
+      const pids = [...new Set(orderItems.map((it) => it.product_id).filter(Boolean))];
+      let bundles = [], variants = [];
+      if (pids.length) {
+        const [{ data: b }, { data: v }] = await Promise.all([
+          supabase.from('product_bundles').select('*').in('parent_product_id', pids),
+          supabase.from('product_variants').select('id, product_id, name').in('product_id', pids),
+        ]);
+        bundles = b || []; variants = v || [];
+      }
+      // BOM แบบเก่าที่ผูกเป็นสินค้า (child_product_id, ไม่มี component_name) → ดึงชื่อสินค้ามาแสดง
+      const childIds = [...new Set(bundles.filter((b) => !b.component_name && b.child_product_id).map((b) => b.child_product_id))];
+      const childMap = {};
+      if (childIds.length) {
+        const { data: cp } = await supabase.from('products').select('id, name').in('id', childIds);
+        (cp || []).forEach((p) => { childMap[p.id] = p.name; });
+      }
+      const { data: prepRow, error: pErr } = await supabase.from('order_preps')
+        .insert({ order_id: order.id, status: 'in_progress', created_by: meRef() }).select().single();
+      if (pErr) throw pErr;
+
+      for (const it of orderItems) {
+        const oqty = it.quantity || 1;
+        const vid = it.variant_name ? variants.find((v) => v.product_id === it.product_id && v.name === it.variant_name)?.id : null;
+        const comps = bundles.filter((b) => b.parent_product_id === it.product_id && (b.parent_variant_id == null || b.parent_variant_id === vid));
+        const node = {
+          prep_id: prepRow.id, parent_item_id: null, kind: 'product', ref_product_id: it.product_id || null,
+          title: it.product_name + (it.variant_name ? ` · ${it.variant_name}` : ''), qty: oqty, status: 'pending',
+        };
+        const { data: nodeRow, error: nErr } = await supabase.from('order_prep_items').insert(node).select().single();
+        if (nErr) throw nErr;
+        // ไม่มี BOM => เตรียมทั้งชิ้น (โหนดสินค้าเป็น leaf เอง, ไม่มีลูก)
+        if (comps.length) {
+          await supabase.from('order_prep_items').insert(comps.map((c, idx) => ({
+            prep_id: prepRow.id, parent_item_id: nodeRow.id, kind: 'component',
+            ref_product_id: c.child_product_id || it.product_id || null,
+            title: c.component_name || childMap[c.child_product_id] || '(ชิ้นส่วน)', qty: (c.quantity || 1) * oqty,
+            unit_price: null, source: null, status: 'pending', note: c.note || null, sort_order: idx,
+          })));
+        }
+      }
+      await logAction({ resource_type: 'order', resource_id: order.id, action: 'prep_start', resource_label: order.order_number, created_by: meRef() });
+      await load(); setEditing(true);
+    } catch (err) { alert('เริ่มจัดเตรียมไม่สำเร็จ: ' + err.message); }
+    finally { setBusy(false); }
+  };
+
+  const patchItem = async (id, patch) => {
+    setItems((prev) => prev.map((it) => (it.id === id ? { ...it, ...patch } : it)));
+    await supabase.from('order_prep_items').update(patch).eq('id', id);
+    refreshPrepStatus();
+  };
+  const refreshPrepStatus = async () => {
+    if (!prep) return;
+    const { data: its } = await supabase.from('order_prep_items').select('id,kind,parent_item_id,status').eq('prep_id', prep.id);
+    const all = its || [];
+    const hasChild = (id) => all.some((x) => x.parent_item_id === id);
+    const lv = all.filter((x) => x.kind !== 'product' || !hasChild(x.id));
+    let st = 'in_progress';
+    if (lv.length) { const done = lv.filter((x) => x.status === 'done').length; st = done === lv.length ? 'done' : 'in_progress'; }
+    await supabase.from('order_preps').update({ status: st, updated_at: new Date().toISOString() }).eq('id', prep.id);
+    setPrep((p) => (p ? { ...p, status: st } : p));
+  };
+  const deleteItem = async (id) => { setItems((prev) => prev.filter((it) => it.id !== id)); await supabase.from('order_prep_items').delete().eq('id', id); };
+
+  const addManual = async () => {
+    if (!manualTitle.trim() || !prep) return;
+    const { data, error } = await supabase.from('order_prep_items').insert({
+      prep_id: prep.id, parent_item_id: null, kind: 'manual', title: manualTitle.trim(), qty: Number(manualQty) || 1, status: 'pending', sort_order: 999,
+    }).select().single();
+    if (!error && data) { setItems((prev) => [...prev, data]); setManualTitle(''); setManualQty(1); }
+  };
+
+  const cycleSource = (it) => {
+    const ns = nextSource(it.source);
+    // แค่เปลี่ยนชนิดที่มา ไม่เด้ง popup เอง — ผู้ใช้ค่อยกดปุ่ม "เลือก" เปิดเลือกสต๊อกทีหลัง
+    patchItem(it.id, ns === 'stock' ? { source: 'stock' } : { source: ns, stock_product_id: null });
+  };
+
+  const selectStock = async (product) => {
+    if (!pickerFor) return;
+    setLinkedNames((m) => ({ ...m, [product.id]: product.name }));
+    await patchItem(pickerFor, { source: 'stock', stock_product_id: product.id, unit_price: Number(product.cost_price) || 0 });
+    setPickerFor(null); setSearch(''); setResults([]);
+  };
+
+  const doReset = async () => { // ล้างค่าการจัดเตรียม (เก็บรายการไว้)
+    if (!prep) return; setBusy(true);
+    await supabase.from('order_prep_items').update({ status: 'pending', source: null, unit_price: null, stock_product_id: null }).eq('prep_id', prep.id);
+    await supabase.from('order_preps').update({ status: 'in_progress' }).eq('id', prep.id);
+    setConfirm(null); setConfirmText(''); setBusy(false); await load();
+  };
+  const doCancel = async () => { // ยกเลิก/ลบการจัดเตรียมทั้งหมด
+    if (!prep) return; setBusy(true);
+    await supabase.from('order_preps').delete().eq('id', prep.id);
+    await logAction({ resource_type: 'order', resource_id: order.id, action: 'prep_cancel', resource_label: order.order_number, created_by: meRef() });
+    setConfirm(null); setConfirmText(''); setEditing(false); setBusy(false); await load();
+  };
+
+  // ---------- derived ----------
+  const childrenOf = (id) => items.filter((it) => it.parent_item_id === id);
+  const isLeaf = (it) => it.kind !== 'product' || childrenOf(it.id).length === 0;
+  const productNodes = items.filter((it) => it.kind === 'product');
+  const manualItems = items.filter((it) => it.kind === 'manual');
+  const leaves = items.filter(isLeaf);
+  const doneCount = leaves.filter((it) => it.status === 'done').length;
+  const progress = leaves.length ? Math.round((doneCount / leaves.length) * 100) : 0;
+  const totalCost = leaves.reduce((s, it) => s + ((Number(it.unit_price) || 0) * (Number(it.qty) || 1)), 0);
+
+  const card = 'bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden';
+
+  if (loading) return <div className={`${card} p-8 flex items-center gap-2 text-gray-400`}><Loader2 size={18} className="animate-spin" /> กำลังโหลดการจัดเตรียม...</div>;
+
+  // ===== ยังไม่เริ่ม =====
+  if (!prep) {
+    return (
+      <div className={`${card} px-8 py-6 flex items-center justify-between gap-4`}>
+        <div className="flex items-center gap-3">
+          <ListChecks size={22} className="text-indigo-500" />
+          <div>
+            <h3 className="font-bold text-gray-800">การจัดเตรียมของ</h3>
+            <p className="text-sm text-gray-400">ยังไม่เริ่มเตรียม — ระบบจะแตกรายการจาก BOM ของสินค้าในออเดอร์ให้</p>
+          </div>
+        </div>
+        {canEdit && (
+          <button onClick={startPrep} disabled={busy} className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl font-bold flex items-center gap-2 active:scale-95 transition-all shrink-0">
+            {busy ? <Loader2 size={16} className="animate-spin" /> : <ListChecks size={16} />} เริ่มจัดเตรียมของ
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  // ---- read-only row (หน้าออเดอร์) ----
+  const RoRow = ({ it, indent }) => (
+    <div className={`flex flex-wrap items-center gap-2 py-1.5 ${indent ? 'pl-7' : 'pl-3'} pr-3`}>
+      <span className={`w-2 h-2 rounded-full shrink-0 ${STATUS[it.status]?.dot}`} />
+      <span className="text-sm text-gray-800 flex-1 min-w-[120px]">{it.title}</span>
+      {it.source && <span className="text-[10px] text-indigo-600 bg-indigo-50 rounded px-1.5 py-0.5">{SOURCE_LABEL[it.source]}</span>}
+      <span className="flex items-baseline gap-1 bg-gray-100 rounded-md px-2 py-0.5 shrink-0"><span className="text-[10px] text-gray-400">จำนวน</span><span className="text-sm font-bold text-gray-800">{it.qty}</span></span>
+      {Number(it.unit_price) > 0 && <span className="text-xs text-amber-600 font-medium w-20 text-right">฿{Number(it.unit_price).toLocaleString()}</span>}
+      <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${STATUS[it.status]?.chip}`}>{STATUS[it.status]?.label}</span>
+    </div>
+  );
+
+  // ===== หน้าออเดอร์: tree อ่านง่าย + ปุ่มเปิด popup =====
+  return (
+    <>
+      <div className={card}>
+        <div className="bg-gray-50/50 px-8 py-5 border-b border-gray-100">
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <div className="flex items-center gap-2">
+              <ListChecks size={20} className="text-indigo-500" />
+              <h3 className="font-bold text-gray-800">การจัดเตรียมของ</h3>
+              <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${prep.status === 'done' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                {prep.status === 'done' ? 'เตรียมครบ' : 'กำลังเตรียม'}
+              </span>
+            </div>
+            {canEdit && (
+              <button onClick={() => setEditing(true)} className="bg-gray-900 hover:bg-black text-white text-sm px-4 py-2 rounded-xl font-bold flex items-center gap-1.5 active:scale-95 transition-all">
+                <Pencil size={14} /> อัปเดตการจัดเตรียม
+              </button>
+            )}
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="flex-1 h-2.5 bg-gray-200 rounded-full overflow-hidden">
+              <div className="h-full bg-indigo-500 transition-all" style={{ width: `${progress}%` }} />
+            </div>
+            <span className="text-sm font-bold text-gray-700">{progress}%</span>
+            <span className="text-xs text-gray-400">({doneCount}/{leaves.length})</span>
+            <span className="text-sm font-bold text-amber-600 ml-2">฿{totalCost.toLocaleString()}</span>
+          </div>
+        </div>
+
+        <div className="p-4 space-y-2.5">
+          {productNodes.map((node) => {
+            const kids = childrenOf(node.id);
+            return (
+              <div key={node.id} className="rounded-2xl border border-gray-100 overflow-hidden">
+                <div className="flex items-center gap-2 px-4 py-2 bg-indigo-50/40">
+                  <Package size={15} className="text-indigo-500" />
+                  <span className="font-bold text-sm text-gray-800 flex-1">{node.title}</span>
+                  <span className="text-xs text-gray-500 bg-white border border-gray-200 rounded px-2 py-0.5">x{node.qty}</span>
+                  {kids.length === 0 && <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${STATUS[node.status]?.chip}`}>{STATUS[node.status]?.label}</span>}
+                </div>
+                {kids.length > 0 && <div className="divide-y divide-gray-50">{kids.map((k) => <RoRow key={k.id} it={k} indent />)}</div>}
+              </div>
+            );
+          })}
+          {manualItems.length > 0 && (
+            <div className="rounded-2xl border border-dashed border-gray-200 overflow-hidden">
+              <div className="px-4 py-2 bg-gray-50 text-xs font-bold text-gray-600">รายการเพิ่มเติม</div>
+              <div className="divide-y divide-gray-50">{manualItems.map((m) => <RoRow key={m.id} it={m} />)}</div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ===== POPUP แก้ไข ===== */}
+      {editing && (
+        <div className="fixed inset-0 z-[90] bg-black/60 flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-white w-full max-w-3xl rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="px-6 py-4 border-b flex items-center justify-between bg-gray-50">
+              <div className="flex items-center gap-2">
+                <ListChecks size={20} className="text-indigo-500" />
+                <h3 className="font-bold text-gray-800">อัปเดตการจัดเตรียม</h3>
+                <span className="text-xs text-gray-400">{progress}% · ฿{totalCost.toLocaleString()}</span>
+              </div>
+              <button onClick={() => setEditing(false)}><X size={22} /></button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50/30">
+              {productNodes.map((node) => {
+                const kids = childrenOf(node.id);
+                return (
+                  <div key={node.id} className="rounded-2xl border border-gray-100 bg-white">
+                    <div className="flex items-center gap-2 px-4 py-2.5 bg-indigo-50/50 rounded-t-2xl">
+                      <Package size={16} className="text-indigo-500" />
+                      <span className="font-bold text-sm text-gray-800 flex-1">{node.title}</span>
+                      <span className="text-xs text-gray-500 bg-white border border-gray-200 rounded px-2 py-0.5">x{node.qty}</span>
+                    </div>
+                    <div className="px-2">
+                      {kids.length ? kids.map(renderEditRow)
+                        : <div className="px-2">{renderEditRow({ ...node, _whole: true })}</div>}
+                    </div>
+                  </div>
+                );
+              })}
+
+              <div className="rounded-2xl border border-dashed border-gray-200 bg-white">
+                <div className="px-4 py-2.5 bg-gray-50 rounded-t-2xl text-sm font-bold text-gray-600">รายการเพิ่มเติม (เฉพาะออเดอร์นี้)</div>
+                <div className="px-2">{manualItems.map(renderEditRow)}</div>
+                <div className="flex items-center gap-2 p-3">
+                  <input value={manualTitle} onChange={(e) => setManualTitle(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addManual(); } }}
+                    placeholder="พิมพ์ชื่อรายการที่ต้องเตรียมเพิ่ม..." className="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:border-indigo-400" />
+                  <input type="number" min="1" value={manualQty} onChange={(e) => setManualQty(parseInt(e.target.value) || 1)} className="w-16 px-2 py-2 border border-gray-200 rounded-lg text-sm text-center outline-none" />
+                  <button onClick={addManual} className="bg-gray-800 hover:bg-black text-white px-3 py-2 rounded-lg text-sm font-bold flex items-center gap-1 shrink-0"><Plus size={14} /> เพิ่ม</button>
+                </div>
+              </div>
+            </div>
+
+            <div className="px-6 py-3 border-t bg-gray-50 flex items-center justify-between gap-2">
+              <div className="flex gap-2">
+                <button onClick={() => { setConfirm('reset'); setConfirmText(''); }} className="text-xs text-gray-500 hover:bg-gray-100 px-3 py-2 rounded-lg flex items-center gap-1 font-semibold"><RotateCcw size={13} /> ล้างค่า</button>
+                <button onClick={() => { setConfirm('cancel'); setConfirmText(''); }} className="text-xs text-red-500 hover:bg-red-50 px-3 py-2 rounded-lg flex items-center gap-1 font-semibold"><Trash2 size={13} /> ยกเลิกการจัดเตรียม</button>
+              </div>
+              <button onClick={() => setEditing(false)} className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-xl font-bold">เสร็จสิ้น</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Stock picker */}
+      {pickerFor && (
+        <div className="fixed inset-0 z-[110] bg-black/60 flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[80vh]">
+            <div className="p-4 border-b flex justify-between items-center bg-gray-50">
+              <h3 className="font-bold text-gray-800 flex items-center gap-2"><Search size={18} /> เลือกสินค้าในสต๊อก (ดึงราคา)</h3>
+              <button onClick={() => { setPickerFor(null); setSearch(''); }}><X size={20} /></button>
+            </div>
+            <div className="p-3 border-b">
+              <div className="relative">
+                <Search className="absolute left-3 top-2.5 text-gray-400" size={16} />
+                <input autoFocus value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ค้นหาสินค้า..." className="w-full pl-10 pr-3 py-2 bg-gray-100 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-500/20" />
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto p-2 space-y-1">
+              {results.length ? results.map((p) => (
+                <button key={p.id} onClick={() => selectStock(p)} className="w-full flex items-center justify-between gap-2 p-3 hover:bg-gray-50 rounded-xl text-left border border-transparent hover:border-gray-200">
+                  <div className="min-w-0"><p className="text-sm font-bold text-gray-800 truncate">{p.name}</p><p className="text-[10px] text-gray-400 font-mono">{p.sku}</p></div>
+                  <span className="text-xs font-bold text-amber-600 shrink-0">฿{(p.cost_price || 0).toLocaleString()}</span>
+                </button>
+              )) : <p className="text-center text-gray-400 text-sm py-6">— ไม่พบสินค้า —</p>}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirm reset / cancel */}
+      {confirm && (
+        <div className="fixed inset-0 z-[120] bg-black/60 flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl p-5">
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="font-bold text-gray-800 flex items-center gap-2">
+                {confirm === 'cancel' ? <><Trash2 size={18} className="text-red-500" /> ยกเลิกการจัดเตรียม</> : <><RotateCcw size={18} className="text-gray-500" /> ล้างค่าการจัดเตรียม</>}
+              </h3>
+              <button onClick={() => { setConfirm(null); setConfirmText(''); }}><X size={20} /></button>
+            </div>
+            <p className="text-sm text-gray-600 mb-3">
+              {confirm === 'cancel'
+                ? <>ลบการจัดเตรียมทั้งหมดของออเดอร์นี้ (กู้คืนไม่ได้) — พิมพ์ <b>Cancel</b> เพื่อยืนยัน</>
+                : <>รีเซ็ตสถานะ/ที่มา/ราคาทุกรายการกลับเป็นเริ่มต้น (ยังเก็บรายการไว้) — พิมพ์ <b>Reset</b> เพื่อยืนยัน</>}
+            </p>
+            <input value={confirmText} onChange={(e) => setConfirmText(e.target.value)} placeholder={confirm === 'cancel' ? 'พิมพ์ Cancel' : 'พิมพ์ Reset'}
+              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:border-indigo-400 mb-3" />
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => { setConfirm(null); setConfirmText(''); }} className="px-4 py-2 text-sm text-gray-600 rounded-lg hover:bg-gray-100">ปิด</button>
+              {confirm === 'cancel'
+                ? <button onClick={doCancel} disabled={confirmText !== 'Cancel' || busy} className="px-4 py-2 text-sm font-bold text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-40">ยกเลิกทั้งหมด</button>
+                : <button onClick={doReset} disabled={confirmText !== 'Reset' || busy} className="px-4 py-2 text-sm font-bold text-white bg-gray-800 rounded-lg hover:bg-black disabled:opacity-40">ล้างค่า</button>}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+
+  // ---------- editable row (ในป๊อปอัพ) ----------
+  function renderEditRow(it) {
+    return (
+      <div key={it.id} className="flex flex-wrap items-center gap-2 py-2.5 px-2 border-b border-gray-50 last:border-0">
+        <Box size={13} className="text-gray-300 shrink-0" />
+        <span className="text-sm text-gray-800 flex-1 min-w-[110px]">{it.title}{it._whole && <span className="text-[10px] text-gray-400"> (ทั้งชิ้น)</span>}</span>
+
+        {/* จำนวน — เด่นชัด */}
+        <span className="flex items-baseline gap-1 bg-gray-900 text-white rounded-lg px-2.5 py-1 shrink-0">
+          <span className="text-[10px] opacity-60">จำนวน</span><span className="text-base font-black leading-none">{it.qty}</span>
+        </span>
+
+        {/* ที่มา — คลิกวน */}
+        <button type="button" disabled={!canEdit} onClick={() => cycleSource(it)} title="คลิกเพื่อเปลี่ยนที่มา"
+          className={`text-xs rounded-lg px-2.5 py-1.5 font-semibold border transition-colors w-28 text-center whitespace-nowrap shrink-0 ${it.source ? 'bg-indigo-50 text-indigo-700 border-indigo-100' : 'bg-white text-gray-400 border-gray-200'} disabled:opacity-60`}>
+          {it.source ? SOURCE_LABEL[it.source] : '— เลือกที่มา —'}
+        </button>
+        {it.source === 'stock' && (it.stock_product_id
+          ? <button disabled={!canEdit} onClick={() => setPickerFor(it.id)} title="เปลี่ยนสินค้า" className="text-[11px] text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-lg px-2 py-1 flex items-center gap-1 max-w-[130px] disabled:opacity-60"><Link2 size={11} className="shrink-0" /><span className="truncate">{linkedNames[it.stock_product_id] || `#${it.stock_product_id}`}</span></button>
+          : canEdit && <button onClick={() => setPickerFor(it.id)} className="text-[11px] text-indigo-600 border border-indigo-200 rounded-lg px-2 py-1 flex items-center gap-1"><Search size={11} /> เลือก</button>)}
+
+        {/* ราคา */}
+        <div className="flex items-center gap-1 border border-gray-200 rounded-lg px-1.5 py-1 bg-white">
+          <span className="text-[10px] text-gray-400">฿</span>
+          <input type="number" min="0" disabled={!canEdit} value={it.unit_price ?? ''} placeholder="0"
+            onChange={(e) => patchItem(it.id, { unit_price: e.target.value === '' ? null : Number(e.target.value) })}
+            className="w-14 text-right text-xs outline-none bg-transparent disabled:opacity-60" />
+        </div>
+
+        {/* สถานะ — คลิกวน */}
+        <button type="button" disabled={!canEdit} onClick={() => patchItem(it.id, { status: nextStatus(it.status) })} title="คลิกเพื่อเปลี่ยนสถานะ"
+          className={`text-xs rounded-lg px-2.5 py-1.5 font-semibold transition-colors ${STATUS[it.status]?.chip} disabled:opacity-60`}>
+          {STATUS[it.status]?.label}
+        </button>
+
+        {/* หมายเหตุ — ว่างแล้วคลิกออกจะหายเอง */}
+        {it.note != null
+          ? <input disabled={!canEdit} value={it.note} placeholder="พิมพ์หมายเหตุ..." autoFocus={it.note === ''}
+              onChange={(e) => patchItem(it.id, { note: e.target.value })}
+              onBlur={(e) => { if (e.target.value.trim() === '') patchItem(it.id, { note: null }); }}
+              className="text-xs border border-gray-200 rounded-lg px-2 py-1 bg-yellow-50/50 w-28 outline-none disabled:opacity-60" />
+          : canEdit && <button onClick={() => patchItem(it.id, { note: '' })} className="text-gray-300 hover:text-amber-500 p-1" title="เพิ่มหมายเหตุ"><StickyNote size={13} /></button>}
+
+        {canEdit && it.kind === 'manual' && <button onClick={() => deleteItem(it.id)} className="text-gray-300 hover:text-red-500 p-1"><Trash2 size={13} /></button>}
+      </div>
+    );
+  }
+};
+
+export default OrderPrep;

@@ -22,7 +22,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${inter.variable} ${ibmPlexSansThai.variable} font-sans`}>
+      <body
+        className={`${inter.variable} ${ibmPlexSansThai.variable} font-sans`}
+        suppressHydrationWarning
+      >
         {children}
         <Toaster richColors position="top-center" />
       </body>
