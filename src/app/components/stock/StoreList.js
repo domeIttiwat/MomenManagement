@@ -73,6 +73,7 @@ const StoreList = ({ onNew, onEdit, onView }) => {
       const locIds = (locs || []).map(l => l.id);
       if (locIds.length > 0) {
         await supabase.from('stock_items').update({ location_id: null }).in('location_id', locIds);
+        await supabase.from('stock_lots').update({ location_id: null, updated_at: new Date().toISOString() }).in('location_id', locIds);
       }
       // 2. Delete store (CASCADE deletes storage_locations)
       await supabase.from('stores').delete().eq('id', deletingStore.id);

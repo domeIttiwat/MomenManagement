@@ -10,7 +10,7 @@ import ProductDetail from './ProductDetail';
 import FastenerManager from './FastenerManager';
 import CategoryManagerPage from './CategoryManagerPage';
 
-const ProductMain = () => {
+const ProductMain = ({ initialNavData = null }) => {
   const { can, profile } = useAuth();
   const meRef = () => profile ? { id: profile.id, name: `${profile.first_name} ${profile.last_name}` } : null;
   const [view, setView] = useState('list');
@@ -145,6 +145,24 @@ const ProductMain = () => {
   };
 
   useEffect(() => { fetchAllData(); }, []);
+
+  useEffect(() => {
+    if (initialNavData?.target !== 'product') return;
+    const targetId = initialNavData.id || initialNavData.data?.id;
+    if (!targetId) return;
+
+    const found = products.find(product => String(product.id) === String(targetId));
+    if (found) {
+      setSelectedProduct(found);
+      setView('detail');
+      return;
+    }
+
+    if (initialNavData.data && products.length > 0) {
+      setSelectedProduct(initialNavData.data);
+      setView('detail');
+    }
+  }, [initialNavData?.timestamp, products]);
 
   const toggleCategory = (catName) => {
     setSelectedCategories(prev => 

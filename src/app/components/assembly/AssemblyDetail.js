@@ -8,6 +8,7 @@ import {
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
 import { logAction } from '@/lib/auditLog';
+import { allocateFifoStockOut, createStockLot, getCurrentProductPrices } from '@/lib/stockLots';
 import AuditLogPanel from '@/app/components/common/AuditLogPanel';
 
 const STAGES = ['preparing', 'in_progress', 'qc', 'completed'];
@@ -146,7 +147,7 @@ const AssemblyDetail = ({ job: initialJob, onBack, onEdit, onDelete }) => {
   const fetchWithdrawals = async () => {
     const { data } = await supabase
       .from('stock_transactions')
-      .select('id, transaction_type, quantity, created_at, note, product_id, variant_id, location_id, store_id, product:product_id(name, sku), variant:variant_id(name), location:location_id(code, name, store:store_id(id, name)), creator:created_by(first_name, last_name)')
+      .select('id, transaction_type, quantity, unit_cost_thb, total_cost_thb, created_at, note, product_id, variant_id, location_id, store_id, product:product_id(name, sku), variant:variant_id(name), location:location_id(code, name, store:store_id(id, name)), creator:created_by(first_name, last_name)')
       .eq('reference_type', 'assembly')
       .eq('reference_id', job.id)
       .order('created_at', { ascending: true });
@@ -177,10 +178,7 @@ const AssemblyDetail = ({ job: initialJob, onBack, onEdit, onDelete }) => {
         ? [job.customer_cache.first_name, job.customer_cache.last_name].filter(Boolean).join(' ')
         : null;
       const autoNote = `คืนคลัง: ${returnNote.trim()} / โปรเจ็ค "${job.title}"${customerName ? ` / ลูกค้า: ${customerName}` : ''}`;
-      let q = supabase.from('stock_items').select('id, quantity').eq('product_id', tx.product_id);
-      if (tx.variant_id) q = q.eq('variant_id', tx.variant_id); else q = q.is('variant_id', null);
-      if (tx.location_id) q = q.eq('location_id', tx.location_id); else q = q.is('location_id', null);
-      const { data: existing } = await q.maybeSingle();
+      const prices = await getCurrentProductPrices(tx.product_id, tx.variant_id || null);
       await supabase.from('stock_transactions').insert([{
         product_id: tx.product_id,
         variant_id: tx.variant_id || null,
@@ -192,21 +190,20 @@ const AssemblyDetail = ({ job: initialJob, onBack, onEdit, onDelete }) => {
         reference_type: 'assembly',
         reference_id: job.id,
         created_by: profile?.id,
+        unit_cost_thb: tx.unit_cost_thb || prices.cost_price || 0,
+        total_cost_thb: (tx.unit_cost_thb || prices.cost_price || 0) * tx.quantity,
       }]);
-      if (existing) {
-        await supabase.from('stock_items').update({
-          quantity: existing.quantity + tx.quantity,
-          updated_at: new Date().toISOString(),
-        }).eq('id', existing.id);
-      } else {
-        await supabase.from('stock_items').insert([{
-          product_id: tx.product_id,
-          variant_id: tx.variant_id || null,
-          location_id: tx.location_id || null,
-          quantity: tx.quantity,
-          created_by: profile?.id,
-        }]);
-      }
+      await createStockLot({
+        productId: tx.product_id,
+        variantId: tx.variant_id || null,
+        locationId: tx.location_id || null,
+        quantity: tx.quantity,
+        unitCostThb: tx.unit_cost_thb || prices.cost_price || 0,
+        sourceType: 'return',
+        note: autoNote,
+        profileId: profile?.id,
+        syncSummary: true,
+      });
       setReturningTxId(null);
       setReturnNote('');
       fetchWithdrawals();
@@ -234,7 +231,7 @@ const AssemblyDetail = ({ job: initialJob, onBack, onEdit, onDelete }) => {
         ? [job.customer_cache.first_name, job.customer_cache.last_name].filter(Boolean).join(' ')
         : null;
       const autoNote = `เบิกใช้งานโปรเจ็ค "${job.title}"${customerName ? ` / ลูกค้า: ${customerName}` : ''}`;
-      await supabase.from('stock_transactions').insert([{
+      const { data: txRow, error: txError } = await supabase.from('stock_transactions').insert([{
         product_id: wProduct.id,
         variant_id: wVariant?.id || null,
         transaction_type: 'stock_out',
@@ -245,11 +242,23 @@ const AssemblyDetail = ({ job: initialJob, onBack, onEdit, onDelete }) => {
         reference_type: 'assembly',
         reference_id: job.id,
         created_by: profile?.id,
-      }]);
-      await supabase.from('stock_items').update({
-        quantity: item.quantity - wQty,
-        updated_at: new Date().toISOString(),
-      }).eq('id', item.id);
+      }]).select('id').single();
+      if (txError) throw txError;
+      const lotResult = await allocateFifoStockOut({
+        productId: wProduct.id,
+        variantId: wVariant?.id || null,
+        locationId: item.location_id || null,
+        quantity: wQty,
+        referenceType: 'assembly',
+        referenceId: job.id,
+        stockTransactionId: txRow?.id,
+        profileId: profile?.id,
+        syncSummary: true,
+      });
+      await supabase.from('stock_transactions').update({
+        unit_cost_thb: lotResult.weightedUnitCost,
+        total_cost_thb: lotResult.totalCost,
+      }).eq('id', txRow.id);
       resetWithdrawForm();
       fetchWithdrawals();
     } catch (err) {
@@ -500,10 +509,7 @@ const AssemblyDetail = ({ job: initialJob, onBack, onEdit, onDelete }) => {
       : 'ยืนยันลบใบงานนี้?';
     if (!confirm(msg)) return;
     for (const tx of active) {
-      let q = supabase.from('stock_items').select('id, quantity').eq('product_id', tx.product_id);
-      if (tx.variant_id)  q = q.eq('variant_id',  tx.variant_id);  else q = q.is('variant_id',  null);
-      if (tx.location_id) q = q.eq('location_id', tx.location_id); else q = q.is('location_id', null);
-      const { data: existing } = await q.maybeSingle();
+      const prices = await getCurrentProductPrices(tx.product_id, tx.variant_id || null);
       await supabase.from('stock_transactions').insert([{
         product_id: tx.product_id, variant_id: tx.variant_id || null,
         transaction_type: 'stock_in', quantity: tx.quantity,
@@ -511,19 +517,20 @@ const AssemblyDetail = ({ job: initialJob, onBack, onEdit, onDelete }) => {
         note: `คืนคลังอัตโนมัติ (ลบใบงาน "${job.title}")`,
         reference_type: 'assembly', reference_id: job.id,
         created_by: profile?.id,
+        unit_cost_thb: tx.unit_cost_thb || prices.cost_price || 0,
+        total_cost_thb: (tx.unit_cost_thb || prices.cost_price || 0) * tx.quantity,
       }]);
-      if (existing) {
-        await supabase.from('stock_items').update({
-          quantity: existing.quantity + tx.quantity,
-          updated_at: new Date().toISOString(),
-        }).eq('id', existing.id);
-      } else {
-        await supabase.from('stock_items').insert([{
-          product_id: tx.product_id, variant_id: tx.variant_id || null,
-          location_id: tx.location_id || null, quantity: tx.quantity,
-          created_by: profile?.id,
-        }]);
-      }
+      await createStockLot({
+        productId: tx.product_id,
+        variantId: tx.variant_id || null,
+        locationId: tx.location_id || null,
+        quantity: tx.quantity,
+        unitCostThb: tx.unit_cost_thb || prices.cost_price || 0,
+        sourceType: 'return',
+        note: `คืนคลังอัตโนมัติ (ลบใบงาน "${job.title}")`,
+        profileId: profile?.id,
+        syncSummary: true,
+      });
     }
     onDelete();
   };

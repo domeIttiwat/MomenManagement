@@ -14,6 +14,7 @@ const RESOURCES = [
   { id: 'assembly', label: 'งานประกอบ (Assembly)' },
   { id: 'marketing', label: 'การตลาด (Marketing)' },
   { id: 'stock', label: 'สต๊อกสินค้า (Stock)' },
+  { id: 'procurement', label: 'สั่งของ / Supplier (Procurement)' },
   { id: 'users', label: 'จัดการทีมงาน (Users)' },
 ];
 
@@ -22,7 +23,7 @@ const ACTIONS = [
   { id: 'create',      label: 'เพิ่ม' },
   { id: 'edit',        label: 'แก้ไข' },
   { id: 'delete',      label: 'ลบ' },
-  { id: 'show_cost',   label: 'เห็นราคาทุน', onlyFor: ['products', 'orders', 'services'] },
+  { id: 'show_cost',   label: 'เห็นราคาทุน', onlyFor: ['products', 'orders', 'services', 'procurement'] },
   { id: 'show_profit', label: 'เห็นกำไร',    onlyFor: ['products', 'orders', 'services'] },
   { id: 'prepare',     label: 'เตรียมของ',    onlyFor: ['assembly'] },
   { id: 'assemble',    label: 'ประกอบ/ทำ',   onlyFor: ['assembly'] },
@@ -31,6 +32,9 @@ const ACTIONS = [
   { id: 'stock_out',  label: 'เบิกออกสินค้า',  onlyFor: ['stock'] },
   { id: 'delete_tx',  label: 'ลบประวัติสต๊อก', onlyFor: ['stock'] },
   { id: 'bom',        label: 'จัดการสูตร BOM', onlyFor: ['products'] },
+  { id: 'mark_paid',    label: 'ระบุว่าจ่ายแล้ว', onlyFor: ['procurement'] },
+  { id: 'mark_arrived', label: 'ระบุว่าของถึงแล้ว', onlyFor: ['procurement'] },
+  { id: 'receive_stock', label: 'รับเข้าสต๊อก', onlyFor: ['procurement'] },
 ];
 
 const RoleManager = () => {

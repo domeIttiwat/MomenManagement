@@ -22,6 +22,7 @@ const RESOURCE_LABELS = {
   assembly:  'ใบงาน',
   marketing: 'การตลาด',
   stock:     'สต๊อก',
+  procurement: 'สั่งของ',
 };
 
 const FIELD_LABELS = {

@@ -12,7 +12,8 @@ const ProductListItem = ({ product, showCost, onClick }) => {
   let profitDisplay = '+฿0';
 
   const sellPrice = Number(product.sell_price) || 0;
-  const costPrice = Number(product.cost_price) || 0;
+  const hasBaseCost = product.cost_price !== null && product.cost_price !== undefined && product.cost_price !== '';
+  const costPrice = hasBaseCost ? (Number(product.cost_price) || 0) : null;
 
   if (product.has_variants && product.product_variants && product.product_variants.length > 0) {
     const prices = product.product_variants.map(v => Number(v.sell_price) || 0);
@@ -22,14 +23,21 @@ const ProductListItem = ({ product, showCost, onClick }) => {
       ? `฿${minPrice.toLocaleString()}` 
       : `฿${minPrice.toLocaleString()} - ${maxPrice.toLocaleString()}`;
     
-    const costs = product.product_variants.map(v => Number(v.cost_price) || 0);
-    const minCost = Math.min(...costs);
-    costDisplay = `เริ่ม ฿${minCost.toLocaleString()}`;
-    profitDisplay = "ดูรายละเอียด";
+    const costs = product.product_variants
+      .filter(v => v.cost_price !== null && v.cost_price !== undefined && v.cost_price !== '')
+      .map(v => Number(v.cost_price) || 0);
+    if (costs.length > 0) {
+      const minCost = Math.min(...costs);
+      costDisplay = `เริ่ม ฿${minCost.toLocaleString()}`;
+      profitDisplay = "ดูรายละเอียด";
+    } else {
+      costDisplay = 'ยังไม่ระบุต้นทุน';
+      profitDisplay = 'ยังไม่ระบุต้นทุน';
+    }
   } else {
     priceDisplay = `฿${sellPrice.toLocaleString()}`;
-    costDisplay = `฿${costPrice.toLocaleString()}`;
-    profitDisplay = `+฿${(sellPrice - costPrice).toLocaleString()}`;
+    costDisplay = hasBaseCost ? `฿${costPrice.toLocaleString()}` : 'ยังไม่ระบุต้นทุน';
+    profitDisplay = hasBaseCost ? `+฿${(sellPrice - costPrice).toLocaleString()}` : 'ยังไม่ระบุต้นทุน';
   }
 
   // 2. Safe Stats Logic

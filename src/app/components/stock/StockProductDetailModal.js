@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
+import { allocateFifoStockOut, createStockLot } from '@/lib/stockLots';
 
 const fmt = (iso) => {
   const d = new Date(iso);
@@ -149,10 +150,51 @@ const StockProductDetailModal = ({ product, onClose, onStockIn, onStockOut, onAd
         note,
         reference_type: 'manual',
       };
-      await supabase.from('stock_transactions').insert([
+      const { data: txRows, error: txError } = await supabase.from('stock_transactions').insert([
         { ...txBase, transaction_type: 'stock_out', location_id: transferForm.sourceLocId, store_id: transferForm.sourceStoreId || null },
         { ...txBase, transaction_type: 'stock_in',  location_id: transferDest,             store_id: destLoc?.store?.id || null },
-      ]);
+      ]).select('id, transaction_type');
+      if (txError) throw txError;
+      const outTx = (txRows || []).find(tx => tx.transaction_type === 'stock_out');
+      const inTx = (txRows || []).find(tx => tx.transaction_type === 'stock_in');
+      const lotResult = await allocateFifoStockOut({
+        productId: product.id,
+        variantId: transferForm.variantId || null,
+        locationId: transferForm.sourceLocId,
+        quantity: qty,
+        referenceType: 'manual',
+        stockTransactionId: outTx?.id,
+        profileId: profile?.id,
+        syncSummary: false,
+      });
+      if (outTx?.id) {
+        await supabase.from('stock_transactions').update({
+          unit_cost_thb: lotResult.weightedUnitCost,
+          total_cost_thb: lotResult.totalCost,
+        }).eq('id', outTx.id);
+      }
+      if (inTx?.id) {
+        await supabase.from('stock_transactions').update({
+          unit_cost_thb: lotResult.weightedUnitCost,
+          total_cost_thb: lotResult.totalCost,
+        }).eq('id', inTx.id);
+      }
+      const allocations = lotResult.allocations.length > 0
+        ? lotResult.allocations
+        : [{ quantity: qty, unit_cost_thb: lotResult.weightedUnitCost }];
+      for (const allocation of allocations) {
+        await createStockLot({
+          productId: product.id,
+          variantId: transferForm.variantId || null,
+          locationId: transferDest,
+          quantity: allocation.quantity,
+          unitCostThb: allocation.unit_cost_thb,
+          sourceType: 'manual',
+          note,
+          profileId: profile?.id,
+          syncSummary: false,
+        });
+      }
 
       setTransferForm(null);
       await fetchAll();

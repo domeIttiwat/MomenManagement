@@ -3,6 +3,7 @@ import { ArrowLeft, Save, Loader2, Info, Wrench, Package, Layers, Sparkles, Fold
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
 import { logAction } from '@/lib/auditLog';
+import { recordPriceHistory } from '@/lib/stockLots';
 import ImageUploader from './ImageUploader';
 import CategoryManager from './CategoryManager';
 import VariantManager from './VariantManager';
@@ -23,6 +24,7 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
   const normalizeImages = (imgs) => {
     return (imgs || []).map(img => (typeof img === 'string' ? { url: img, file: null } : img));
   };
+  const moneyOrNull = (value) => (value === '' || value === null || value === undefined ? null : Number(value));
 
   const [formData, setFormData] = useState(initialData ? {
     ...initialData,
@@ -34,7 +36,7 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
     category_ids: initialData?.category_id ? [initialData.category_id] : [],
     description: '', 
     images: [], 
-    cost_price: 0, 
+    cost_price: '', 
     sell_price: 0, 
     has_variants: false,
     stock_quantity: 0
@@ -108,6 +110,15 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
 
     setLoading(true);
     try {
+      const existingProduct = initialData?.id
+        ? (await supabase.from('products').select('cost_price, sell_price').eq('id', initialData.id).maybeSingle()).data
+        : null;
+      const existingVariants = initialData?.id
+        ? (await supabase.from('product_variants').select('id, name, cost_price, sell_price').eq('product_id', initialData.id)).data || []
+        : [];
+      const oldVariantByName = {};
+      existingVariants.forEach(v => { oldVariantByName[v.name] = v; });
+
       // 1. Upload Main Images
       const uploadedImageUrls = await Promise.all(formData.images.map(async (imgObj) => {
         if (imgObj.file) {
@@ -125,8 +136,8 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
         category_id: formData.category_ids[0], 
         description: formData.description,
         images: uploadedImageUrls,
-        cost_price: formData.has_variants ? 0 : formData.cost_price,
-        sell_price: formData.has_variants ? 0 : formData.sell_price,
+        cost_price: formData.has_variants ? null : moneyOrNull(formData.cost_price),
+        sell_price: formData.has_variants ? 0 : Number(formData.sell_price || 0),
         has_variants: formData.has_variants,
       };
 
@@ -162,7 +173,7 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
             name: v.name,
             sku: v.sku || `${formData.sku}-${v.name.replace(/\s+/g, '')}`,
             options: v.options,
-            cost_price: Number(v.cost_price),
+            cost_price: moneyOrNull(v.cost_price),
             sell_price: Number(v.sell_price)
           }))).select();
           if (varErr) throw varErr;
@@ -171,7 +182,35 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
           variants.forEach(v => {
             if (v.id != null && newIdByName[v.name] != null) variantIdMap[v.id] = newIdByName[v.name];
           });
+
+          for (const nv of newVariants || []) {
+            const old = oldVariantByName[nv.name] || {};
+            await recordPriceHistory({
+              productId,
+              variantId: nv.id,
+              oldCostPrice: old.cost_price ?? null,
+              newCostPrice: nv.cost_price,
+              oldSellPrice: old.sell_price ?? null,
+              newSellPrice: nv.sell_price,
+              sourceType: initialData?.id ? 'product_form' : 'product_create',
+              sourceId: productId,
+              note: `แก้ราคา variant ${nv.name}`,
+              profileId: profile?.id,
+            });
+          }
         }
+      } else {
+        await recordPriceHistory({
+          productId,
+          oldCostPrice: existingProduct?.cost_price ?? null,
+          newCostPrice: productPayload.cost_price,
+          oldSellPrice: existingProduct?.sell_price ?? null,
+          newSellPrice: productPayload.sell_price,
+          sourceType: initialData?.id ? 'product_form' : 'product_create',
+          sourceId: productId,
+          note: 'แก้ราคาสินค้า',
+          profileId: profile?.id,
+        });
       }
 
       // Bundles / BOM — แก้เฉพาะผู้มีสิทธิ์ 'จัดการสูตร BOM' (กันผู้ไม่มีสิทธิ์เผลอลบสูตร)

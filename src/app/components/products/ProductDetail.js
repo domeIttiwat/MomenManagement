@@ -12,6 +12,7 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
   const [fasteners, setFasteners] = useState([]);
   const [bundles, setBundles] = useState([]);
   const [accessories, setAccessories] = useState([]); 
+  const [suppliers, setSuppliers] = useState([]);
   const [selectedImg, setSelectedImg] = useState(null);
   const [lightboxImg, setLightboxImg] = useState(null);
   
@@ -25,6 +26,8 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
     if (!img) return null;
     return typeof img === 'string' ? img : img.url;
   };
+  const hasCostValue = (value) => value !== null && value !== undefined && value !== '';
+  const costText = (value) => hasCostValue(value) ? `฿${(Number(value) || 0).toLocaleString()}` : 'ยังไม่ระบุต้นทุน';
 
   useEffect(() => {
     if (product) {
@@ -62,13 +65,19 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
         const { data: accData } = await supabase.from('product_compatible_accessories').select('*, product:accessory_id(id, name, sku, sell_price, cost_price, images)').eq('product_id', product.id);
         if (accData) setAccessories(accData);
 
-        // 5. Fetch stock locations (manual join — no FK dependency)
-        const [stockItemsRes, locRes2, storeRes2, variantRes] = await Promise.all([
+        // 5. Fetch stock locations + supplier links (manual join — no FK dependency)
+        const [stockItemsRes, locRes2, storeRes2, variantRes, supplierRes] = await Promise.all([
           supabase.from('stock_items').select('quantity, min_quantity, location_id, variant_id').eq('product_id', product.id),
           supabase.from('storage_locations').select('id, code, name, store_id'),
           supabase.from('stores').select('id, name'),
           supabase.from('product_variants').select('id, name').eq('product_id', product.id),
+          supabase.from('supplier_products').select('id, supplier:supplier_id(id, name, product_type)').eq('product_id', product.id),
         ]);
+        if (supplierRes.data) {
+          setSuppliers(supplierRes.data.map(row => row.supplier).filter(Boolean));
+        } else {
+          setSuppliers([]);
+        }
         if (stockItemsRes.data) {
           const sm2 = {};
           (storeRes2.data || []).forEach(s => { sm2[s.id] = s; });
@@ -95,8 +104,9 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
   if (!product) return null;
 
   const sellPrice = product.sell_price || 0;
-  const costPrice = product.cost_price || 0;
-  const profit = sellPrice - costPrice;
+  const hasBaseCost = product.cost_price !== null && product.cost_price !== undefined && product.cost_price !== '';
+  const costPrice = hasBaseCost ? (Number(product.cost_price) || 0) : null;
+  const profit = hasBaseCost ? sellPrice - costPrice : null;
   const { soldCount, timesOrdered, totalSalesVal, totalProfitVal } = product.stats || { soldCount: 0, timesOrdered: 0, totalSalesVal: 0, totalProfitVal: 0 };
   
   const hasBundlesData = bundles.length > 0 || product.hasBundles;
@@ -272,7 +282,7 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
             {!product.has_variants ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                  <div><p className="text-sm text-gray-500 font-medium mb-1">ราคาขายต่อชิ้น</p><p className="text-4xl font-black text-gray-900 tracking-tight">฿{sellPrice.toLocaleString()}</p></div>
-                 {showCost && <div><p className="text-sm text-amber-600 font-medium mb-1">ต้นทุนต่อชิ้น</p><p className="text-2xl font-bold text-amber-700">฿{costPrice.toLocaleString()}</p></div>}
+                 {showCost && <div><p className="text-sm text-amber-600 font-medium mb-1">ต้นทุนต่อชิ้น</p><p className="text-2xl font-bold text-amber-700">{hasBaseCost ? `฿${costPrice.toLocaleString()}` : 'ยังไม่ระบุต้นทุน'}</p></div>}
               </div>
             ) : (
               <div className="flex items-center gap-3 text-gray-600"><Layers size={24} className="text-indigo-500"/><span className="text-lg font-medium">สินค้านี้มี <span className="text-indigo-600 font-bold">{variants.length}</span> ตัวเลือก</span></div>
@@ -298,25 +308,33 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
                      </tr>
                    </thead>
                    <tbody className="divide-y divide-gray-50">
-                     {variants.map(v => (
-                       <tr key={v.id} className="hover:bg-indigo-50/30 transition-colors">
-                         <td className="px-6 py-4">
-                           <div className="font-bold text-gray-900">{v.name}</div>
-                           <div className="text-xs text-gray-400 font-mono mt-0.5">{v.sku}</div>
-                         </td>
-                         <td className="px-6 py-4 text-right font-bold text-lg text-gray-900">฿{v.sell_price.toLocaleString()}</td>
-                         {showCost && (
-                           <>
-                             <td className="px-6 py-4 text-right text-amber-700 font-medium">฿{v.cost_price.toLocaleString()}</td>
-                             <td className="px-6 py-4 text-right">
-                               <span className="text-emerald-700 bg-emerald-50 px-2 py-1 rounded-md font-bold text-xs border border-emerald-100">
-                                 +฿{(v.sell_price - v.cost_price).toLocaleString()}
-                                </span>
-                             </td>
-                           </>
-                         )}
-                       </tr>
-                     ))}
+                     {variants.map(v => {
+                       const hasVariantCost = v.cost_price !== null && v.cost_price !== undefined && v.cost_price !== '';
+                       const variantCost = hasVariantCost ? (Number(v.cost_price) || 0) : null;
+                       return (
+                         <tr key={v.id} className="hover:bg-indigo-50/30 transition-colors">
+                           <td className="px-6 py-4">
+                             <div className="font-bold text-gray-900">{v.name}</div>
+                             <div className="text-xs text-gray-400 font-mono mt-0.5">{v.sku}</div>
+                           </td>
+                           <td className="px-6 py-4 text-right font-bold text-lg text-gray-900">฿{v.sell_price.toLocaleString()}</td>
+                           {showCost && (
+                             <>
+                               <td className="px-6 py-4 text-right text-amber-700 font-medium">{hasVariantCost ? `฿${variantCost.toLocaleString()}` : 'ยังไม่ระบุต้นทุน'}</td>
+                               <td className="px-6 py-4 text-right">
+                                 {hasVariantCost ? (
+                                   <span className="text-emerald-700 bg-emerald-50 px-2 py-1 rounded-md font-bold text-xs border border-emerald-100">
+                                     +฿{(v.sell_price - variantCost).toLocaleString()}
+                                    </span>
+                                 ) : (
+                                   <span className="text-xs font-semibold text-gray-400">ยังไม่ระบุต้นทุน</span>
+                                 )}
+                               </td>
+                             </>
+                           )}
+                         </tr>
+                       );
+                     })}
                    </tbody>
                  </table>
                </div>
@@ -346,7 +364,7 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
                              </div>
                              <div className="text-right">
                                 <p className="text-sm font-bold text-indigo-600">฿{acc.product?.sell_price?.toLocaleString()}</p>
-                                {showCost && <p className="text-xs text-amber-600 font-medium">ทุน {acc.product?.cost_price?.toLocaleString()}</p>}
+                                {showCost && <p className="text-xs text-amber-600 font-medium">ทุน {costText(acc.product?.cost_price)}</p>}
                              </div>
                           </div>
                       );
@@ -396,7 +414,7 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
                                             {showCost && (
                                                 <div className="text-right mr-2 hidden sm:block">
                                                     <p className="text-[10px] text-gray-400">ทุนต่อชิ้น</p>
-                                                    <p className="text-xs font-bold text-amber-600">฿{b.product?.cost_price?.toLocaleString()}</p>
+                                                    <p className="text-xs font-bold text-amber-600">{costText(b.product?.cost_price)}</p>
                                                 </div>
                                             )}
                                             <span className="text-xs font-bold bg-gray-50 px-2 py-1 rounded border border-gray-200">x{b.quantity}</span>
@@ -436,7 +454,7 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
                                                     <p className="text-sm text-gray-700">{b.product?.name || b.component_name}</p>
                                                 </div>
                                                 <div className="flex items-center gap-3">
-                                                    {showCost && <span className="text-xs text-amber-600 font-medium">฿{b.product?.cost_price?.toLocaleString()}</span>}
+                                                    {showCost && <span className="text-xs text-amber-600 font-medium">{costText(b.product?.cost_price)}</span>}
                                                     <span className="text-xs font-bold bg-gray-100 px-2 py-0.5 rounded text-gray-600">x{b.quantity}</span>
                                                 </div>
                                             </div>
@@ -517,7 +535,26 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
           {/* 6. Files */}
           <ProductFilesView productId={product.id} />
 
-          {/* 7. Stock Locations */}
+          {/* 7. Suppliers */}
+          <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
+            <h3 className="text-sm font-bold text-gray-900 mb-4 flex items-center gap-2 uppercase tracking-wider">
+              <Warehouse size={16} className="text-indigo-500" /> Supplier ที่สั่งสินค้านี้
+            </h3>
+            {suppliers.length === 0 ? (
+              <p className="text-sm text-gray-400">ยังไม่ได้ผูก Supplier กับสินค้านี้</p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {suppliers.map(supplier => (
+                  <div key={supplier.id} className="border border-indigo-100 bg-indigo-50/40 rounded-xl p-3">
+                    <p className="font-bold text-gray-800">{supplier.name}</p>
+                    {supplier.product_type && <p className="text-xs text-gray-500 mt-0.5">{supplier.product_type}</p>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* 8. Stock Locations */}
           {stockLocations.length > 0 && (
             <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm">
               <h3 className="text-sm font-bold text-gray-900 mb-4 flex items-center gap-2 uppercase tracking-wider">

@@ -12,6 +12,7 @@ import NumericInput from '../products/NumericInput';
 import OrderUpdateManager from './OrderUpdateManager';
 import OrderTeamSelector from './OrderTeamSelector';
 import AccessorySuggestionModal from './AccessorySuggestionModal';
+import { allocateFifoStockOut } from '@/lib/stockLots';
 
 const OrderForm = ({ onCancel, onSuccess, initialData }) => {
   const { profile } = useAuth();
@@ -312,14 +313,13 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
         sell_price: item.sell_price,
         quantity: item.quantity
       }));
-      await supabase.from('order_items').insert(itemsPayload);
 
       // ตัดสต๊อกอัตโนมัติ (เฉพาะออเดอร์ใหม่ หรือสร้างครั้งแรก)
       if (deductStock && !initialData?.id) {
-        for (const item of formData.items) {
+        for (const [idx, item] of formData.items.entries()) {
           if (!item.product_id || item.is_custom) continue;
           // Find variant_id from variant_name match if possible
-          await supabase.from('stock_transactions').insert([{
+          const { data: txRow, error: txError } = await supabase.from('stock_transactions').insert([{
             product_id: item.product_id,
             variant_id: item.variant_id || null,
             transaction_type: 'stock_out',
@@ -328,20 +328,27 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
             reference_type: 'order',
             reference_id: orderId,
             created_by: meRef()?.id || profile?.id,
-          }]);
-          // Update stock_items
-          let q = supabase.from('stock_items').select('id, quantity').eq('product_id', item.product_id);
-          if (item.variant_id) q = q.eq('variant_id', item.variant_id);
-          else q = q.is('variant_id', null);
-          const { data: si } = await q.single();
-          if (si) {
-            await supabase.from('stock_items').update({
-              quantity: Math.max(0, si.quantity - item.quantity),
-              updated_at: new Date().toISOString(),
-            }).eq('id', si.id);
-          }
+          }]).select('id').single();
+          if (txError) throw txError;
+          const lotResult = await allocateFifoStockOut({
+            productId: item.product_id,
+            variantId: item.variant_id || null,
+            quantity: item.quantity,
+            referenceType: 'order',
+            referenceId: orderId,
+            stockTransactionId: txRow?.id,
+            profileId: meRef()?.id || profile?.id,
+            syncSummary: true,
+          });
+          await supabase.from('stock_transactions').update({
+            unit_cost_thb: lotResult.weightedUnitCost,
+            total_cost_thb: lotResult.totalCost,
+          }).eq('id', txRow.id);
+          itemsPayload[idx].cost_price = lotResult.weightedUnitCost;
         }
       }
+
+      await supabase.from('order_items').insert(itemsPayload);
 
       if (processedUpdates.length > 0) {
         await supabase.from('order_updates').insert(processedUpdates.map(u => ({

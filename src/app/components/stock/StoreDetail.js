@@ -134,6 +134,7 @@ const StoreDetail = ({ store, onBack, onEdit, onAddToLocation }) => {
     try {
       // 1. Move all items to "ไม่ระบุที่เก็บ"
       await supabase.from('stock_items').update({ location_id: null }).eq('location_id', deletingLoc.id);
+      await supabase.from('stock_lots').update({ location_id: null, updated_at: new Date().toISOString() }).eq('location_id', deletingLoc.id);
       // 2. Log deletion
       await supabase.from('storage_location_logs').insert([{
         location_id: deletingLoc.id,

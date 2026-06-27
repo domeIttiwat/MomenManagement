@@ -15,9 +15,10 @@ import Login from './login/page';
 import ServiceMain from './components/services/ServiceMain';
 import AssemblyMain from './components/assembly/AssemblyMain';
 import StockMain from './components/stock/StockMain';
+import ProcurementMain from './components/procurement/ProcurementMain';
 
 // สร้าง Wrapper Component
-const ALL_TABS = ['dashboard', 'products', 'stock', 'customers', 'orders', 'services', 'assembly', 'marketing', 'users'];
+const ALL_TABS = ['dashboard', 'products', 'stock', 'procurement', 'customers', 'orders', 'services', 'assembly', 'marketing', 'users'];
 
 const AppContent = () => {
   const { user, loading, profile, canView, permissions, isImpersonating, stopImpersonating, role } = useAuth();
@@ -54,6 +55,9 @@ const AppContent = () => {
   };
   const handleNavigateToOrder = (order: any) => {
     if (canView('orders')) { setActiveTab('orders'); setNavData({ target: 'order', data: order, timestamp: Date.now() }); }
+  };
+  const handleNavigateToProduct = (product: any) => {
+    if (canView('products')) { setActiveTab('products'); setNavData({ target: 'product', id: product?.id, data: product, timestamp: Date.now() }); }
   };
   const handleTabChange = (tab: any) => {
     if (canView(tab)) { setActiveTab(tab); setNavData(null); }
@@ -97,8 +101,9 @@ const AppContent = () => {
 
         <div className="max-w-[1600px] mx-auto animate-in fade-in duration-500">
           {activeTab === 'dashboard' && (canView('dashboard') ? <DashboardMain /> : <AccessDenied />)}
-          {activeTab === 'products' && (canView('products') ? <ProductMain /> : <AccessDenied />)}
+          {activeTab === 'products' && (canView('products') ? <ProductMain initialNavData={navData?.target === 'product' ? navData : null} /> : <AccessDenied />)}
           {activeTab === 'stock' && (canView('stock') ? <StockMain /> : <AccessDenied />)}
+          {activeTab === 'procurement' && (canView('procurement') ? <ProcurementMain onNavigateToProduct={handleNavigateToProduct} /> : <AccessDenied />)}
           {activeTab === 'customers' && (canView('customers') ? (
             <CustomerMain
               initialNavData={navData?.target === 'customer' ? navData : null}

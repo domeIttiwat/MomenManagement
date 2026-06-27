@@ -61,7 +61,7 @@ const VariantManager = ({ variants, onChange, mainSku }) => {
       return existing || { 
         ...c, 
         sku: generatedSku, 
-        cost_price: 0, 
+        cost_price: '', 
         sell_price: 0, 
         stock_quantity: 0 
       };
@@ -185,7 +185,8 @@ const VariantManager = ({ variants, onChange, mainSku }) => {
             <tbody className="divide-y divide-gray-50">
               {variants.map((v, i) => {
                 // คำนวณกำไรและ Margin แบบ Real-time
-                const cost = parseFloat(v.cost_price) || 0;
+                const hasCost = v.cost_price !== '' && v.cost_price !== null && v.cost_price !== undefined;
+                const cost = hasCost ? (parseFloat(v.cost_price) || 0) : 0;
                 const price = parseFloat(v.sell_price) || 0;
                 const profit = price - cost;
                 const margin = price > 0 ? ((profit / price) * 100).toFixed(1) : 0;
@@ -203,10 +204,16 @@ const VariantManager = ({ variants, onChange, mainSku }) => {
                     {/* แสดงผลกำไร */}
                     <td className="px-4 py-3">
                       <div className="flex flex-col">
-                        <span className={`font-bold text-sm ${profit > 0 ? 'text-emerald-600' : profit < 0 ? 'text-red-500' : 'text-gray-400'}`}>
-                          {profit > 0 ? '+' : ''}{profit.toLocaleString()}
-                        </span>
-                        {price > 0 && <span className="text-[10px] text-gray-400">{margin}%</span>}
+                        {hasCost ? (
+                          <>
+                            <span className={`font-bold text-sm ${profit > 0 ? 'text-emerald-600' : profit < 0 ? 'text-red-500' : 'text-gray-400'}`}>
+                              {profit > 0 ? '+' : ''}{profit.toLocaleString()}
+                            </span>
+                            {price > 0 && <span className="text-[10px] text-gray-400">{margin}%</span>}
+                          </>
+                        ) : (
+                          <span className="text-xs font-semibold text-gray-400">ยังไม่ระบุ</span>
+                        )}
                       </div>
                     </td>
 

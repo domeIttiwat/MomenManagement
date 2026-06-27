@@ -7,30 +7,13 @@ import {
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
 import { logAction } from '@/lib/auditLog';
+import { allocateFifoStockOut, createStockLot } from '@/lib/stockLots';
 
 const TX_TYPES = [
   { id: 'stock_in',   label: 'รับเข้าสต๊อก', icon: PackageCheck, color: 'text-green-700 bg-green-50 border-green-200' },
   { id: 'stock_out',  label: 'เบิกออก',        icon: PackageMinus, color: 'text-red-700 bg-red-50 border-red-200' },
   { id: 'adjustment', label: 'ปรับสต๊อก',      icon: Sliders,      color: 'text-blue-700 bg-blue-50 border-blue-200' },
 ];
-
-const upsertStockItem = async (productId, variantId, locationId, delta, profileId) => {
-  let q = supabase.from('stock_items').select('id, quantity').eq('product_id', productId);
-  if (variantId) q = q.eq('variant_id', variantId); else q = q.is('variant_id', null);
-  if (locationId) q = q.eq('location_id', locationId); else q = q.is('location_id', null);
-  const { data: existing } = await q.maybeSingle();
-  if (existing) {
-    await supabase.from('stock_items').update({
-      quantity: Math.max(0, existing.quantity + delta),
-      updated_at: new Date().toISOString(),
-    }).eq('id', existing.id);
-  } else {
-    await supabase.from('stock_items').insert([{
-      product_id: productId, variant_id: variantId || null,
-      location_id: locationId || null, quantity: Math.max(0, delta), created_by: profileId,
-    }]);
-  }
-};
 
 const StockTransactionForm = ({ initialData, onCancel, onSuccess }) => {
   const { profile } = useAuth();
@@ -41,6 +24,7 @@ const StockTransactionForm = ({ initialData, onCancel, onSuccess }) => {
   const [selectedProduct, setSelectedProduct] = useState(initialData?.product || null);
   const [selectedVariant, setSelectedVariant] = useState(initialData?.variant || null);
   const [quantity, setQuantity] = useState(1);
+  const [unitCost, setUnitCost] = useState(0);
   const [note, setNote] = useState('');
 
   // Product search
@@ -93,6 +77,12 @@ const StockTransactionForm = ({ initialData, onCancel, onSuccess }) => {
     } else setVariants([]);
   }, [selectedProduct?.id]);
 
+  useEffect(() => {
+    if (!selectedProduct) return;
+    const baseCost = selectedVariant?.cost_price ?? selectedProduct.cost_price ?? 0;
+    setUnitCost(baseCost || 0);
+  }, [selectedProduct?.id, selectedVariant?.id]);
+
   const loadProductStockItems = useCallback(async () => {
     if (!selectedProduct?.id) { setProductStockItems([]); return; }
     setStockItemsLoading(true);
@@ -128,7 +118,7 @@ const StockTransactionForm = ({ initialData, onCancel, onSuccess }) => {
   const searchProducts = async (term) => {
     if (!term.trim()) { setProductResults([]); return; }
     const { data } = await supabase.from('products')
-      .select('id, name, sku, has_variants').or(`name.ilike.%${term}%,sku.ilike.%${term}%`).limit(10);
+      .select('id, name, sku, has_variants, cost_price, sell_price').or(`name.ilike.%${term}%,sku.ilike.%${term}%`).limit(10);
     setProductResults(data || []);
   };
 
@@ -210,7 +200,20 @@ const StockTransactionForm = ({ initialData, onCancel, onSuccess }) => {
             store_id: item.location?.store?.id || null, location_id: item.location_id,
             note: `ยกเลิกการจัดเก็บที่ ${item.location?.code || 'ไม่ระบุ'}`,
             reference_type: 'manual', created_by: profile?.id,
-          }]);
+          }]).select('id').single().then(async ({ data: cancelTx }) => {
+            if ((item.quantity || 0) > 0) {
+              await allocateFifoStockOut({
+                productId: selectedProduct.id,
+                variantId,
+                locationId: item.location_id,
+                quantity: item.quantity,
+                referenceType: 'manual',
+                stockTransactionId: cancelTx?.id,
+                profileId: profile?.id,
+                syncSummary: false,
+              });
+            }
+          });
           await supabase.from('stock_items').delete().eq('id', itemId);
         }
 
@@ -238,16 +241,46 @@ const StockTransactionForm = ({ initialData, onCancel, onSuccess }) => {
                   : txType === 'adjustment' ? (adjustSign * quantity)
                   : +quantity;
 
-      await supabase.from('stock_transactions').insert([{
+      const { data: txRow, error: txError } = await supabase.from('stock_transactions').insert([{
         product_id: selectedProduct.id, variant_id: variantId,
         transaction_type: txType, quantity,
         store_id: stId, location_id: locId,
         note: note.trim(),
         images: imageData.length > 0 ? imageData : null,
+        unit_cost_thb: (txType === 'stock_in' || (txType === 'adjustment' && delta > 0)) ? Number(unitCost) || 0 : null,
+        total_cost_thb: (txType === 'stock_in' || (txType === 'adjustment' && delta > 0)) ? (Number(unitCost) || 0) * quantity : null,
         reference_type: 'manual', created_by: profile?.id,
-      }]);
+      }]).select('id').single();
+      if (txError) throw txError;
 
-      await upsertStockItem(selectedProduct.id, variantId, locId, delta, profile?.id);
+      if (txType === 'stock_in' || (txType === 'adjustment' && delta > 0)) {
+        await createStockLot({
+          productId: selectedProduct.id,
+          variantId,
+          locationId: locId,
+          quantity,
+          unitCostThb: Number(unitCost) || 0,
+          sourceType: 'manual',
+          note: note.trim(),
+          profileId: profile?.id,
+          syncSummary: true,
+        });
+      } else {
+        const result = await allocateFifoStockOut({
+          productId: selectedProduct.id,
+          variantId,
+          locationId: locId,
+          quantity,
+          referenceType: 'manual',
+          stockTransactionId: txRow?.id,
+          profileId: profile?.id,
+          syncSummary: true,
+        });
+        await supabase.from('stock_transactions').update({
+          unit_cost_thb: result.weightedUnitCost,
+          total_cost_thb: result.totalCost,
+        }).eq('id', txRow.id);
+      }
       await logAction({
         resource_type: 'stock',
         resource_id: selectedProduct.id,
@@ -665,6 +698,24 @@ const StockTransactionForm = ({ initialData, onCancel, onSuccess }) => {
             </div>
           )}
         </div>
+
+        {(txType === 'stock_in' || (txType === 'adjustment' && adjustSign > 0)) && selectedProduct && (
+          <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 space-y-2">
+            <label className={labelClass}>ต้นทุนต่อหน่วยของล็อตนี้</label>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              className={inputClass}
+              value={unitCost}
+              onChange={e => setUnitCost(e.target.value)}
+              placeholder="0.00"
+            />
+            <p className="text-xs text-gray-400 ml-1">
+              ใช้สร้าง lot cost สำหรับ FIFO ถ้าไม่ทราบ ระบบตั้งต้นจากราคาทุนปัจจุบันของสินค้า/variant
+            </p>
+          </div>
+        )}
 
         {/* Note — required */}
         <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">

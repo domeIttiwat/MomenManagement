@@ -11,6 +11,7 @@ import ServiceItemManager from './ServiceItemManager';
 import NumericInput from '../products/NumericInput';
 import ServiceBillPreview from './ServiceBillPreview';
 import ServiceUpdateManager from './ServiceUpdateManager';
+import { allocateFifoStockOut } from '@/lib/stockLots';
 
 const ServiceForm = ({ onCancel, onSuccess, initialData }) => {
   const { profile } = useAuth();
@@ -179,8 +180,7 @@ const ServiceForm = ({ onCancel, onSuccess, initialData }) => {
         serviceId = data.id;
       }
 
-      if (formData.items.length > 0) {
-        await supabase.from('service_items').insert(formData.items.map(i => ({
+      const serviceItemsPayload = formData.items.map(i => ({
           service_id: serviceId,
           description: i.description,
           type: i.type,
@@ -188,14 +188,13 @@ const ServiceForm = ({ onCancel, onSuccess, initialData }) => {
           sell_price: i.sell_price,
           quantity: i.quantity,
           sub_items: i.sub_items
-        })));
-      }
+        }));
 
       // ตัดสต๊อกอัตโนมัติ (เฉพาะงานใหม่ที่มี product_id)
       if (deductStock && !initialData?.id) {
-        for (const item of formData.items) {
+        for (const [idx, item] of formData.items.entries()) {
           if (!item.product_id) continue;
-          await supabase.from('stock_transactions').insert([{
+          const { data: txRow, error: txError } = await supabase.from('stock_transactions').insert([{
             product_id: item.product_id,
             variant_id: item.variant_id || null,
             transaction_type: 'stock_out',
@@ -204,18 +203,28 @@ const ServiceForm = ({ onCancel, onSuccess, initialData }) => {
             reference_type: 'service',
             reference_id: serviceId,
             created_by: meRef()?.id || profile?.id,
-          }]);
-          let q = supabase.from('stock_items').select('id, quantity').eq('product_id', item.product_id);
-          if (item.variant_id) q = q.eq('variant_id', item.variant_id);
-          else q = q.is('variant_id', null);
-          const { data: si } = await q.single();
-          if (si) {
-            await supabase.from('stock_items').update({
-              quantity: Math.max(0, si.quantity - (item.quantity || 1)),
-              updated_at: new Date().toISOString(),
-            }).eq('id', si.id);
-          }
+          }]).select('id').single();
+          if (txError) throw txError;
+          const lotResult = await allocateFifoStockOut({
+            productId: item.product_id,
+            variantId: item.variant_id || null,
+            quantity: item.quantity || 1,
+            referenceType: 'service',
+            referenceId: serviceId,
+            stockTransactionId: txRow?.id,
+            profileId: meRef()?.id || profile?.id,
+            syncSummary: true,
+          });
+          await supabase.from('stock_transactions').update({
+            unit_cost_thb: lotResult.weightedUnitCost,
+            total_cost_thb: lotResult.totalCost,
+          }).eq('id', txRow.id);
+          serviceItemsPayload[idx].cost_price = lotResult.weightedUnitCost;
         }
+      }
+
+      if (serviceItemsPayload.length > 0) {
+        await supabase.from('service_items').insert(serviceItemsPayload);
       }
 
       if (processedUpdates.length > 0) {
