@@ -5,7 +5,7 @@
 > เก็บ "Changelog" และ "TODO" ให้ทันสมัย เพื่อให้ AI รุ่นไหนก็อ่านแล้วทำงานต่อได้ทันที
 > เรื่อง DB/security ที่ใช้ร่วมกับ storefront อยู่ที่ `../SHARED_CONTEXT.md`
 
-Last updated: 2026-06-20
+Last updated: 2026-06-27
 
 ---
 
@@ -14,7 +14,7 @@ Last updated: 2026-06-20
 MomenManagement = **ระบบหลังบ้าน (admin/back-office)** สำหรับพนักงานแบรนด์ Momen (ต้อง login)
 เป็นแอปคนละตัวกับ `../MomenStore` (หน้าร้านลูกค้า) แต่ **ใช้ Supabase project เดียวกัน**
 
-แอปนี้ดูแล: สินค้า, สต๊อก/คลัง, ออเดอร์, ลูกค้า, งานประกอบ (assembly), การตลาด, บริการ,
+แอปนี้ดูแล: สินค้า, สต๊อก/คลัง, สั่งของ/Supplier, ออเดอร์, ลูกค้า, งานประกอบ (assembly), การตลาด, บริการ,
 พนักงาน + ระบบสิทธิ์ (RBAC), และ audit log
 
 > หมายเหตุประวัติ: โปรเจ็คเริ่มจาก Firebase Studio (ยังเหลือร่องรอย `GEMINI.md`, `firebase-debug.log`,
@@ -77,6 +77,7 @@ src/
     │   ├── dashboard/               # กราฟ/สรุป (recharts)
     │   ├── products/                # สินค้า + หมวดหมู่ + variants + accessory
     │   ├── stock/                   # สต๊อก/คลัง/ตำแหน่งเก็บ/transaction
+    │   ├── procurement/             # รอบสั่งของ/Supplier/lot costing/price history
     │   ├── orders/                  # ออเดอร์ + รายการ + ชำระเงิน
     │   ├── customers/               # ลูกค้า
     │   ├── assembly/                # งานประกอบ (assembly_jobs) + เบิก/คืนคลัง
@@ -117,7 +118,8 @@ resource นั้น → ต้อง insert row ของ resource ใหม�
 ดูขั้นตอนปลอดภัยที่ skill `rbac-change`
 
 resource ที่ใช้อยู่ (เห็นจากโค้ด): `product`, `customer`, `order`, `service`, `assembly`,
-`marketing`, `stock` (มี action ย่อย `stock_in`, `stock_out`, `delete_tx` นอกเหนือ view/create/edit/delete)
+`marketing`, `stock` (มี action ย่อย `stock_in`, `stock_out`, `delete_tx` นอกเหนือ view/create/edit/delete),
+`procurement` (มี `mark_paid`, `mark_arrived`, `receive_stock`, `show_cost`)
 
 ---
 
@@ -137,6 +139,19 @@ resource ที่ใช้อยู่ (เห็นจากโค้ด): `pr
 
 - `stores` (สาขา) → `storage_locations` (ตำแหน่งเก็บในสาขา) → `stock_items` (จำนวนคงเหลือต่อ product/variant/location)
 - ทุกการเคลื่อนไหวเขียน `stock_transactions` (`reference_type` รวมค่า `'assembly'`)
+- Lot costing ใหม่: `stock_lots` เป็น source of truth ของต้นทุน FIFO; `stock_items` เป็น summary
+  ให้ UI/หน้าร้านอ่านเหมือนเดิม; allocation อยู่ที่ `stock_lot_allocations`
+- `src/lib/stockLots.js` เป็น helper กลางสำหรับ create lot, FIFO allocate, update price history,
+  receive purchase order — ห้ามเขียน logic ตัดล็อตกระจายใน component ใหม่
+- ต้นทุนสินค้าใช้ `null` = "ยังไม่ระบุต้นทุน", `0` = ต้นทุนศูนย์จริง; ProductForm ต้องไม่ normalize
+  cost ว่างเป็น 0. เมื่อรับ purchase order/lot เข้าระบบค่อย update เป็น landed cost ล่าสุดตาม FIFO flow
+- Procurement freight rule: ใช้ `freight_amount` เป็นค่าส่ง local ในสกุลของ PO เท่านั้น
+  (ซ่อนเมื่อ currency=THB), ใช้ `thai_freight_thb` เป็นค่าส่งในไทย, และ `freight_thb`
+  คือยอดรวมค่าส่ง THB สำหรับกระจายเข้า landed cost; ห้ามนำ UI "ค่าส่งคนละสกุล" กลับมา
+- Procurement payment rule: ตอนอัปเดตสถานะ `paid` ต้องระบุยอดจ่ายจริงเป็น THB (`paid_amount_thb`)
+  โดยแสดงยอดระบบให้เทียบก่อนบันทึก; ถ้า DB ยังไม่มี column ให้ UI fallback ได้แต่ migration ต้องตามให้ครบ
+- Image UX rule: รูปที่แสดงจาก status/timeline/comment/upload ใน admin ต้องเปิดเป็น popup/lightbox
+  ในหน้าเดิมเสมอ พร้อมปุ่มปิด/เลื่อนรูปถ้ามีหลายรูป; ห้ามใช้ลิงก์เปิด tab ใหม่
 - **AssemblyDetail**: เบิกวัสดุจากคลัง (หัก `stock_items` + log transaction) และ **คืนคลัง**
   - เบิก = สีเขียว, คืน = สีแดง; รายการที่คืนแล้วจะหายจากลิสต์ "เบิก"
   - ลบใบงานประกอบ → auto-return วัสดุที่ยังไม่คืนกลับคลังอัตโนมัติ
@@ -176,6 +191,31 @@ resource ที่ใช้อยู่ (เห็นจากโค้ด): `pr
 
 ## 11. Changelog
 
+- **2026-06-27 (later 2)** — แยก timeline ของ PO ออกเป็น 2 การ์ด: **"ประวัติสถานะ"** (read-only,
+  `StatusHistoryCard`) กับ **"คอมเมนต์"** (`PurchaseOrderTimeline` เดิม โชว์เฉพาะคอมเมนต์มือ).
+  เพิ่มคอลัมน์ `update_type` ('status'|'comment', default 'comment') + `status` ใน
+  `purchase_order_updates` (migration `purchase_order_updates_type_status`, additive, backfill ของเก่า
+  7 แถวเป็น 'status'); จุด insert: StatusUpdateModal + รับเข้าสต๊อก = `status`, ฟอร์มคอมเมนต์ = `comment`.
+  รูปสลิป/ตอนเปลี่ยนสถานะไปอยู่ใน "ประวัติสถานะ" (มี badge สถานะ + lightbox) ไม่ปนกับคอมเมนต์อีก.
+  แถวเก่าที่ยังไม่มี `update_type` มี `classifyUpdate()` เดาจากข้อความเป็น fallback
+- **2026-06-27 (later)** — แก้ schema drift ของ `purchase_orders`: คอลัมน์ `thai_freight_thb` +
+  `paid_amount_thb` ขาดบน prod (migration `20260627_procurement_lot_costing.sql` ไม่ถูก push ครบ) ทำให้
+  "รับเข้าสต๊อก" พัง → apply migration `add_purchase_orders_freight_paid_columns` (additive, ROLLBACK-test
+  ผ่าน, RLS/anon ไม่กระทบ); `receivePurchaseOrder` เพิ่ม guard คอลัมน์ thai_freight (write-side).
+  เพิ่ม **modal เลือกคลังปลายทางตอนรับเข้าสต๊อก** (`ReceiveStockModal` ใน `ProcurementMain.js`) แทน
+  `confirm()` เดิม — เลือก location ต่อรายการ, `receivePurchaseOrder` รับ `itemLocations` แล้วผูก
+  FIFO lot + `stock_items` + เขียนกลับ `purchase_order_items.location_id` ตามคลังที่เลือก
+  (เดิมของเข้า location จาก PO line ซึ่งมักเป็น null). บันทึกกับดักไว้ที่ `../GOTCHAS.md` #21
+- **2026-06-27** — เพิ่มระบบ `procurement`: Sidebar tab "สั่งของ", Supplier management,
+  purchase order lifecycle, price history, migration `20260627_procurement_lot_costing.sql`,
+  lot costing/FIFO helper (`src/lib/stockLots.js`), manual stock-in สร้างล็อต, stock-out/order/service/
+  assembly ใช้ FIFO allocation และ order/service item cost ใช้ weighted cost จากล็อตจริง; ปรับ status update
+  ให้บังคับกรอกวันที่จริงตอนกดสถานะ, currency dropdown THB/USD/RMB, และเพิ่ม `purchase_order_updates`
+  timeline พร้อมรูปแนบหลายรูปใน bucket `procurement`; Product/Supplier UI แยก cost `null`
+  เป็น "ยังไม่ระบุต้นทุน" และให้ PO receipt update cost ล่าสุดเมื่อมีล็อตจริง; ปรับ freight เป็น
+  local freight + Thai freight; ฟอร์ม PO แสดงสินค้าของ Supplier พร้อม variants, บังคับเลือก
+  `variant_id` เมื่อสินค้าเปิด variants, เพิ่ม quick-add spec จากหน้า PO, และเปิด `ProductForm`
+  เป็น modal เพื่อสร้างสินค้าใหม่แล้วผูกกับ Supplier อัตโนมัติ
 - **2026-06-20** — สร้าง memory ฝั่ง admin ครั้งแรก (`CLAUDE.md` + ไฟล์นี้) แทน `GEMINI.md` ที่ล้าสมัย,
   เชื่อมกับชั้นกลาง `../SHARED_CONTEXT.md`, และเพิ่ม AI team (agents/skills) เฉพาะ admin
   (admin-feature-engineer, rbac-guardian + admin-module-scaffold, rbac-change, stock-assembly-flow,
@@ -199,6 +239,9 @@ resource ที่ใช้อยู่ (เห็นจากโค้ด): `pr
 - [ ] pin search_path + จำกัด EXECUTE ฟังก์ชัน SECURITY DEFINER; ตรวจตาราง `users` ที่ไม่มี policy
 
 **โครงสร้าง/คุณภาพ:**
+- [ ] Apply migration `supabase/migrations/20260627_procurement_lot_costing.sql` ผ่าน sandbox flow
+  แล้ว ROLLBACK-test บน prod ก่อน push; ยืนยัน opening lots รวมยอดตรงกับ `stock_items`
+- [ ] เพิ่ม test/QA manual สำหรับ FIFO allocation ข้ามหลายล็อต และ receipt ที่กระจาย freight ตามมูลค่า
 - [ ] เพิ่ม FK constraint ให้ stock location (จะได้เลิกใช้ manual JS join)
 - [ ] รวม `.sql` กระจัดกระจาย (audit_log, stock_*, storage_locations) ให้เป็นชุด migration เดียว + บันทึกใน SHARED_CONTEXT §4
 - [ ] ลบร่องรอย Firebase ที่ไม่ใช้ (`firebase-debug.log`, `GEMINI.md` ที่ล้าสมัย, `.idx/` ถ้าไม่ใช้แล้ว)
