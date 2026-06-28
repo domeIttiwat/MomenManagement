@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, Package, Users, ShoppingBag, X, Megaphone, ShieldCheck, Wrench, Hammer, Boxes, PackagePlus } from 'lucide-react';
+import { LayoutDashboard, Package, Users, ShoppingBag, X, Megaphone, ShieldCheck, Wrench, Hammer, Boxes, PackagePlus, Wallet } from 'lucide-react';
 import { useAuth } from '@/app/context/AuthContext';
 
 const Sidebar = ({ activeTab, setActiveTab, isOpen, onClose = () => {} }) => {
@@ -7,6 +7,7 @@ const Sidebar = ({ activeTab, setActiveTab, isOpen, onClose = () => {} }) => {
 
   const menuItems = [
     { id: 'dashboard', label: 'ภาพรวม', icon: LayoutDashboard },
+    { id: 'finance', label: 'การจัดการเงิน', icon: Wallet },
     { id: 'products', label: 'สินค้า', icon: Package },
     { id: 'stock', label: 'สต๊อกสินค้า', icon: Boxes },
     { id: 'procurement', label: 'สั่งของ', icon: PackagePlus },

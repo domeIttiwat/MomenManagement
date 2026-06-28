@@ -15,6 +15,7 @@ const RESOURCES = [
   { id: 'marketing', label: 'การตลาด (Marketing)' },
   { id: 'stock', label: 'สต๊อกสินค้า (Stock)' },
   { id: 'procurement', label: 'สั่งของ / Supplier (Procurement)' },
+  { id: 'finance', label: 'การจัดการเงิน (Finance)' },
   { id: 'users', label: 'จัดการทีมงาน (Users)' },
 ];
 
@@ -35,6 +36,8 @@ const ACTIONS = [
   { id: 'mark_paid',    label: 'ระบุว่าจ่ายแล้ว', onlyFor: ['procurement'] },
   { id: 'mark_arrived', label: 'ระบุว่าของถึงแล้ว', onlyFor: ['procurement'] },
   { id: 'receive_stock', label: 'รับเข้าสต๊อก', onlyFor: ['procurement'] },
+  { id: 'adjust', label: 'ปรับยอด/กระทบยอด', onlyFor: ['finance'] },
+  { id: 'offset', label: 'เห็นหมวด Offset (ลับ)', onlyFor: ['finance'] },
 ];
 
 const RoleManager = () => {

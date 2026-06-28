@@ -191,6 +191,40 @@ resource ที่ใช้อยู่ (เห็นจากโค้ด): `pr
 
 ## 11. Changelog
 
+- **2026-06-28 (การเงิน — รายจ่าย manual + เป้าหมายโฟกัส)** — **รายจ่ายเลิก auto** (ปิด trigger
+  PO/marketing/fee + ลบรายการ auto ฝั่งจ่ายทิ้ง) ให้กรอกเองล้วน — คงเฉพาะ **รายรับ auto** (order/service
+  payments). เพิ่ม `finance_budgets` (เป้าหมายต่อหมวด รายเดือน) + **การ์ดโฟกัส** บนภาพรวม (1 คอลัมน์/แถว:
+  จ่ายแล้ว/เป้า/เหลือ + bar + %) นับยอดเดือนปัจจุบัน, รองรับหลายโฟกัส. กด "+โฟกัส" จากลิสต์รายจ่ายตามหมวด
+  → ตั้งเป้าใน `BudgetModal`. ดู `../GOTCHAS.md` #25 (แก้ใหม่)
+- **2026-06-28 (การเงิน — หมวด 2 ชั้น + ลากจัด + เอิร์ธโทน)** — เพิ่ม `finance_categories.parent_id` +
+  `is_group` (หมวด ← ชนิด). CategoryModal ใหม่: ลาก "ชนิด" เข้า "หมวด" ได้ (@hello-pangea/dnd) +
+  เพิ่ม/แก้/ลบหมวดและชนิดชัดเจน. dropdown หมวดในฟอร์มเป็น optgroup (เลือกเฉพาะชนิด). donut รายจ่าย
+  roll-up ตามหมวดแม่. seed กลุ่มรายจ่าย (สาธารณูปโภค/ดำเนินการ/การขาย/อื่นๆ) + จัดของเดิมเข้ากลุ่ม.
+  เปิดสิทธิ์ `finance.delete` ให้ Supervisor/Admin (เดิม false ทำให้ลบไม่ได้). ธีมหน้าเป็นเอิร์ธโทน
+  หัวเทาดำ. ย้ายเมนู Sidebar เป็น "การจัดการเงิน" ใต้ภาพรวม. กรอกรายจ่ายด่วน + เลือกช่วงเอง + สถิติช่องทาง
+- **2026-06-28 (ระบบการเงิน เฟส 3 — COGS + recurring)** — เพิ่มในหน้าการเงิน: การ์ด **COGS**
+  (ต้นทุนสินค้าที่ขายไปในช่วง, RPC `finance_cogs` จาก stock_lot_allocations ของ order/service —
+  เป็น analytic ไม่ใช่กระแสเงินสด) + **กำไรขั้นต้น** (รายรับขาย−COGS). **รายการประจำ** (`finance_recurring`
+  + RPC `finance_post_due_recurring`): ตั้งครั้งเดียว (เงินเดือน/ค่าเช่า/วันที่กำหนด) ระบบลง
+  finance_transactions ให้อัตโนมัติทุกเดือน (เรียก RPC ตอนเปิดหน้าการเงิน, กันซ้ำต่อเดือนด้วย ref
+  `recurringId-YYYYMM`, source='recurring' badge "ประจำ" ล็อกแก้). RPC ทั้งหมด pin search_path +
+  REVOKE anon. ระบบการเงินครบ 3 เฟสแล้ว
+- **2026-06-28 (ระบบการเงิน เฟส 2 — auto-post)** — DB triggers ซิงค์เงินเข้า/ออกจากระบบอื่นเข้า
+  `finance_transactions` อัตโนมัติ: `order_payments`→รายรับ(ขาย), `service_payments`→รายรับ(บริการ),
+  `purchase_orders.paid_amount_thb`→รายจ่าย(ซื้อของ), `marketing_expenses`→รายจ่าย(การตลาด),
+  `fee_amount`→รายจ่าย(ค่าธรรมเนียม). map หมวดผ่าน `system_key` + map ช่องทาง (`_fin_method`).
+  กันนับซ้ำด้วย unique `(source,ref_type,ref_id) WHERE source<>'manual'` + upsert/void เมื่อแก้/ลบ.
+  backfill ของเดิมแล้ว (รายรับขาย 1.65M, บริการ 56k, การตลาด 92k, ซื้อของ 41k). ฟังก์ชัน SECURITY DEFINER
+  pin search_path + REVOKE anon/public. รายการ auto ในหน้าการเงินล็อกแก้/ลบ (badge "อัตโนมัติ").
+  **อย่ากรอกมือซ้ำกับรายการ auto** (จะนับซ้ำ). ดู `../GOTCHAS.md` #25
+- **2026-06-28 (ระบบการเงิน เฟส 1)** — โมดูลใหม่ "การเงิน" (`finance/FinanceMain.js`) ใน Sidebar +
+  page.tsx (`canView('finance')`). ตาราง `finance_categories` + `finance_transactions` (cash basis,
+  source manual/auto, ref กันนับซ้ำ), seed 10 หมวด (income/expense), bucket `finance`, RBAC resource
+  `finance` (ตอน apply ได้เฉพาะ Supervisor+Admin — Technician/Coordinator ปรับเพิ่มใน RBAC UI ได้).
+  หน้า: KPI (รายรับ/จ่าย/สุทธิ) + กราฟ (โดนัทรายจ่ายตามหมวด + แท่งรายรับ-จ่าย) + กรองช่วง เดือน/ไตรมาส/ปี
+  + กรองช่องทาง (เงินสด/ธนาคาร/พร้อมเพย์) + ฟอร์มกรอกเร็ว (จำนวน/หมวด/วันที่/ช่องทาง/แนบรูป) +
+  จัดการหมวด. **เฟส 2 (ยังไม่ทำ):** auto-post จาก order/service payments + PO + marketing + fee
+  (แนะนำใช้ DB triggers). **เฟส 3:** COGS/กำไรขั้นต้น + recurring. ดู `../docs/STOCK_REVIEW.md` รูปแบบเดียวกัน
 - **2026-06-28 (จัดเตรียมของงานบริการ = ก๊อป OrderPrep)** — ของจริงที่ user ต้องการคือ panel
   **"การจัดเตรียมของ" สีขาว** ในหน้าออเดอร์ (`OrderPrep.js` + ตาราง `order_preps`/`order_prep_items`)
   ไม่ใช่ระบบงานประกอบสีดำ. ก๊อปเป็น `ServicePrep.js` + ตาราง `service_preps`/`service_prep_items`

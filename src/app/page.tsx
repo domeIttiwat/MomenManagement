@@ -16,9 +16,10 @@ import ServiceMain from './components/services/ServiceMain';
 import AssemblyMain from './components/assembly/AssemblyMain';
 import StockMain from './components/stock/StockMain';
 import ProcurementMain from './components/procurement/ProcurementMain';
+import FinanceMain from './components/finance/FinanceMain';
 
 // สร้าง Wrapper Component
-const ALL_TABS = ['dashboard', 'products', 'stock', 'procurement', 'customers', 'orders', 'services', 'assembly', 'marketing', 'users'];
+const ALL_TABS = ['dashboard', 'products', 'stock', 'procurement', 'customers', 'orders', 'services', 'assembly', 'marketing', 'finance', 'users'];
 
 const AppContent = () => {
   const { user, loading, profile, canView, permissions, isImpersonating, stopImpersonating, role } = useAuth();
@@ -119,6 +120,7 @@ const AppContent = () => {
           {activeTab === 'services' && (canView('services') ? <ServiceMain /> : <AccessDenied />)}
           {activeTab === 'assembly' && (canView('assembly') ? <AssemblyMain /> : <AccessDenied />)}
           {activeTab === 'marketing' && (canView('marketing') ? <MarketingMain /> : <AccessDenied />)}
+          {activeTab === 'finance' && (canView('finance') ? <FinanceMain /> : <AccessDenied />)}
           {activeTab === 'users' && (canView('users') ? <UserMain /> : <AccessDenied />)}
         </div>
         </div>
