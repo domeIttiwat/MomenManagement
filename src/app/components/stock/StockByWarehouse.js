@@ -33,7 +33,7 @@ const StockByWarehouse = ({ onStockIn, onStockOut, onAdjust, onNewTx }) => {
       supabase.from('products').select('id, name, sku, has_variants, images, product_variants(id, name, sku)').order('name'),
       supabase.from('stock_items').select('id, product_id, variant_id, location_id, quantity, min_quantity'),
       supabase.from('storage_locations').select('id, code, name, store_id').order('code'),
-      supabase.from('stores').select('id, name, location_detail').order('name'),
+      supabase.from('stores').select('id, name, location_detail, color').order('name'),
     ]);
     const pmap = {};
     (prodRes.data || []).forEach(p => { pmap[p.id] = p; });
@@ -218,10 +218,11 @@ const StockByWarehouse = ({ onStockIn, onStockOut, onAdjust, onNewTx }) => {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {stores.map(store => {
             const st = storeStats.byStore[store.id] || { qty: 0, skus: 0, shelves: new Set() };
+            const color = store.color;
             return (
-              <button key={store.id} onClick={() => setSelected(store)} className="group text-left bg-white border border-gray-100 hover:border-teal-300 hover:shadow-md rounded-2xl p-5 transition-all">
+              <button key={store.id} onClick={() => setSelected(store)} style={color ? { borderLeftWidth: 4, borderLeftColor: color } : undefined} className="group text-left bg-white border border-gray-100 hover:border-teal-300 hover:shadow-md rounded-2xl p-5 transition-all">
                 <div className="flex items-start justify-between">
-                  <span className="w-11 h-11 rounded-2xl bg-teal-100 text-teal-700 flex items-center justify-center"><Warehouse size={22} /></span>
+                  <span className="w-11 h-11 rounded-2xl bg-teal-100 text-teal-700 flex items-center justify-center" style={color ? { backgroundColor: color + '22', color } : undefined}><Warehouse size={22} /></span>
                   <ChevronRight size={18} className="text-gray-300 group-hover:text-teal-500 mt-2" />
                 </div>
                 <p className="font-bold text-gray-900 mt-3 group-hover:text-teal-700">{store.name}</p>

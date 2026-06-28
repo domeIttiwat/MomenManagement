@@ -1,8 +1,10 @@
 'use client';
 import React, { useState } from 'react';
-import { ArrowLeft, Save, Loader2, Upload, X, Eye, ImagePlus } from 'lucide-react';
+import { ArrowLeft, Save, Loader2, Upload, X, Eye, ImagePlus, Plus } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
+
+const STORE_COLORS = ['#14b8a6', '#0ea5e9', '#6366f1', '#8b5cf6', '#ec4899', '#ef4444', '#f97316', '#f59e0b', '#22c55e', '#64748b'];
 
 /* ---- Inline ImageUploader adapted for stores bucket ---- */
 const StoreImageUploader = ({ images = [], onChange }) => {
@@ -56,6 +58,7 @@ const StoreForm = ({ initialData, onCancel, onSuccess }) => {
     name: initialData?.name || '',
     description: initialData?.description || '',
     location_detail: initialData?.location_detail || '',
+    color: initialData?.color || '',
     is_active: initialData?.is_active !== undefined ? initialData.is_active : true,
     images: (initialData?.images || []).map(img =>
       typeof img === 'string' ? { url: img, file: null } : img
@@ -85,6 +88,7 @@ const StoreForm = ({ initialData, onCancel, onSuccess }) => {
         name: formData.name.trim(),
         description: formData.description || null,
         location_detail: formData.location_detail || null,
+        color: formData.color || null,
         is_active: formData.is_active,
         images: uploadedImages,
         updated_at: new Date().toISOString(),
@@ -133,6 +137,25 @@ const StoreForm = ({ initialData, onCancel, onSuccess }) => {
           <div>
             <label className={labelClass}>ที่ตั้ง / ตำแหน่งจริง</label>
             <input className={inputClass} placeholder="เช่น ชั้นวาง A-3, ตู้ B หมายเลข 5" value={formData.location_detail} onChange={e => setFormData({ ...formData, location_detail: e.target.value })} />
+          </div>
+          <div>
+            <label className={labelClass}>สีประจำคลัง <span className="text-gray-300 normal-case font-medium">(ไว้จดจำคลังในการ์ด)</span></label>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button type="button" onClick={() => setFormData({ ...formData, color: '' })} title="ไม่มีสี"
+                className={`w-9 h-9 rounded-full border-2 flex items-center justify-center text-gray-300 ${!formData.color ? 'border-gray-800' : 'border-gray-200 hover:border-gray-300'}`}>
+                <X size={14} />
+              </button>
+              {STORE_COLORS.map(c => (
+                <button key={c} type="button" onClick={() => setFormData({ ...formData, color: c })} style={{ backgroundColor: c }}
+                  className={`w-9 h-9 rounded-full transition-transform hover:scale-110 ${formData.color === c ? 'ring-2 ring-offset-2 ring-gray-800' : 'border-2 border-white shadow'}`} />
+              ))}
+              <label title="เลือกสีเอง"
+                className={`w-9 h-9 rounded-full flex items-center justify-center cursor-pointer relative overflow-hidden ${formData.color && !STORE_COLORS.includes(formData.color) ? 'ring-2 ring-offset-2 ring-gray-800' : 'border-2 border-dashed border-gray-300 hover:border-teal-500'}`}
+                style={formData.color && !STORE_COLORS.includes(formData.color) ? { backgroundColor: formData.color } : {}}>
+                <input type="color" value={formData.color || '#14b8a6'} onChange={e => setFormData({ ...formData, color: e.target.value })} className="absolute inset-0 opacity-0 cursor-pointer" />
+                {!(formData.color && !STORE_COLORS.includes(formData.color)) && <Plus size={14} className="text-gray-400" />}
+              </label>
+            </div>
           </div>
           <label className="flex items-center gap-3 cursor-pointer">
             <div className={`relative w-11 h-6 rounded-full transition-colors ${formData.is_active ? 'bg-teal-500' : 'bg-gray-200'}`} onClick={() => setFormData({ ...formData, is_active: !formData.is_active })}>

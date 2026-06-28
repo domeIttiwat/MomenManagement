@@ -191,6 +191,9 @@ resource ที่ใช้อยู่ (เห็นจากโค้ด): `pr
 
 ## 11. Changelog
 
+- **2026-06-28 (สีประจำคลัง)** — เพิ่มคอลัมน์ `stores.color` (hex, additive) + ตัวเลือกสีใน `StoreForm`
+  (พาเลตสำเร็จ + เลือกสีเองอิสระผ่าน `<input type=color>`). การ์ดคลังใน `StockByWarehouse` (แถบซ้าย+ไอคอน)
+  และ `StoreList` (แถบบน) ทาสีตามที่ตั้ง ไว้จดจำคลังได้ง่าย
 - **2026-06-28 (จัดเตรียมของในงานบริการ)** — เพิ่ม `MaterialPrepPanel` (`components/common/`) — พอร์ต
   flow "เบิกวัสดุ/คืนคลัง" จาก AssemblyDetail มาเป็น component generic (ใช้ `stock_transactions`
   reference_type/id เป็นแหล่งบันทึก เหมือน assembly ไม่มีตารางใหม่). ฝังใน `ServiceDetail`

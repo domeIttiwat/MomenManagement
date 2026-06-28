@@ -124,7 +124,7 @@ const StoreList = ({ onNew, onEdit, onView }) => {
           {filtered.map(store => {
             const coverImage = Array.isArray(store.images) && store.images.length > 0 ? store.images[0]?.url : null;
             return (
-              <div key={store.id} className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden hover:shadow-md transition-shadow">
+              <div key={store.id} style={store.color ? { borderTopWidth: 4, borderTopColor: store.color } : undefined} className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden hover:shadow-md transition-shadow">
                 {/* Image */}
                 <div className="h-36 bg-gray-50 flex items-center justify-center overflow-hidden">
                   {coverImage
