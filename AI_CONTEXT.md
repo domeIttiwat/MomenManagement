@@ -191,6 +191,10 @@ resource ที่ใช้อยู่ (เห็นจากโค้ด): `pr
 
 ## 11. Changelog
 
+- **2026-06-28 (ไฟล์ supplier)** — เพิ่ม `suppliers.files` (jsonb `[{label,url}]`, additive). ฟอร์ม supplier
+  เพิ่มส่วน "ไฟล์ที่เกี่ยวข้อง" (เพิ่ม URL ไม่จำกัด + ป้ายว่าเป็นไฟล์อะไร). SupplierDetail แสดงเป็นการ์ดลิงก์
+  (favicon + ชื่อ + เปิดไฟล์ใหม่) + ปุ่ม "พรีวิว" ฝัง iframe ถ้าเป็นลิงก์ Google Drive/Docs (`drivePreviewUrl`
+  แปลงเป็น `/preview`). คู่กับ supplier contact cards ที่ทำก่อนหน้า (URL/phone/ID แสดงครบ + กดเปิดได้)
 - **2026-06-28 (สีประจำคลัง)** — เพิ่มคอลัมน์ `stores.color` (hex, additive) + ตัวเลือกสีใน `StoreForm`
   (พาเลตสำเร็จ + เลือกสีเองอิสระผ่าน `<input type=color>`). การ์ดคลังใน `StockByWarehouse` (แถบซ้าย+ไอคอน)
   และ `StoreList` (แถบบน) ทาสีตามที่ตั้ง ไว้จดจำคลังได้ง่าย

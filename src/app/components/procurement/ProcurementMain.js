@@ -210,6 +210,7 @@ const emptySupplier = {
   images: [],
   is_active: true,
   contacts: [{ channel: 'Line', label: '', account_id: '', url: '', phone: '', note: '' }],
+  files: [],
 };
 
 const makeOrderNumber = () => {
@@ -1948,7 +1949,8 @@ const SupplierList = ({ suppliers, onNew, onOpen, canCreate }) => {
 
 const SupplierForm = ({ supplier, products, profile, onCancel, onSaved }) => {
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState(() => supplier ? { ...supplier, images: supplier.images || [], contacts: supplier.contacts?.length ? supplier.contacts : emptySupplier.contacts } : emptySupplier);
+  const [form, setForm] = useState(() => supplier ? { ...supplier, images: supplier.images || [], files: supplier.files || [], contacts: supplier.contacts?.length ? supplier.contacts : emptySupplier.contacts } : emptySupplier);
+  const updateFile = (idx, key, val) => setForm(prev => ({ ...prev, files: prev.files.map((f, i) => i === idx ? { ...f, [key]: val } : f) }));
   const [selectedProductIds, setSelectedProductIds] = useState(() => (supplier?.productLinks || []).map(link => String(link.product_id)));
   const [productCategoryFilter, setProductCategoryFilter] = useState('');
   const [productSearch, setProductSearch] = useState('');
@@ -2000,7 +2002,7 @@ const SupplierForm = ({ supplier, products, profile, onCancel, onSaved }) => {
     if (!form.name.trim()) return alert('กรุณาระบุชื่อร้านค้า');
     setSaving(true);
     try {
-      const payload = { name: form.name.trim(), product_type: form.product_type || null, note: form.note || null, images: form.images || [], is_active: form.is_active !== false, updated_by: profile?.id || null, updated_at: new Date().toISOString() };
+      const payload = { name: form.name.trim(), product_type: form.product_type || null, note: form.note || null, images: form.images || [], files: (form.files || []).filter(f => (f.url || '').trim()).map(f => ({ label: (f.label || '').trim(), url: f.url.trim() })), is_active: form.is_active !== false, updated_by: profile?.id || null, updated_at: new Date().toISOString() };
       let supplierId = supplier?.id;
       if (supplierId) {
         const { error } = await supabase.from('suppliers').update(payload).eq('id', supplierId);
@@ -2132,6 +2134,21 @@ const SupplierForm = ({ supplier, products, profile, onCancel, onSaved }) => {
         <div className="flex justify-between items-center"><h3 className="font-bold text-gray-800">ช่องทางติดต่อ</h3><button type="button" onClick={() => setForm({ ...form, contacts: [...form.contacts, { channel: 'Line', label: '', account_id: '', url: '', phone: '', note: '' }] })} className="text-indigo-600 bg-indigo-50 px-3 py-2 rounded-xl text-sm font-semibold"><Plus size={14} className="inline mr-1"/>เพิ่มช่องทาง</button></div>
         {form.contacts.map((c, idx) => <div key={idx} className="grid grid-cols-1 md:grid-cols-6 gap-2"><select value={c.channel} onChange={e => updateContact(idx, 'channel', e.target.value)} className={inputClass}>{CHANNELS.map(ch => <option key={ch} value={ch}>{ch}</option>)}</select><input placeholder="ชื่อ/Label" value={c.label || ''} onChange={e => updateContact(idx, 'label', e.target.value)} className={inputClass}/><input placeholder="ID" value={c.account_id || ''} onChange={e => updateContact(idx, 'account_id', e.target.value)} className={inputClass}/><input placeholder="URL" value={c.url || ''} onChange={e => updateContact(idx, 'url', e.target.value)} className={inputClass}/><input placeholder="Phone" value={c.phone || ''} onChange={e => updateContact(idx, 'phone', e.target.value)} className={inputClass}/><div className="flex gap-1"><input placeholder="Note" value={c.note || ''} onChange={e => updateContact(idx, 'note', e.target.value)} className={inputClass}/><button type="button" onClick={() => setForm({ ...form, contacts: form.contacts.filter((_, i) => i !== idx) })} className="p-2 text-red-400 hover:bg-red-50 rounded-xl"><Trash2 size={16}/></button></div></div>)}
       </div>
+
+      <div className="bg-white rounded-3xl border border-gray-100 shadow-sm p-6 space-y-3">
+        <div className="flex justify-between items-center">
+          <div><h3 className="font-bold text-gray-800">ไฟล์ที่เกี่ยวข้อง</h3><p className="text-xs text-gray-400">วางลิงก์ Google Drive/เอกสาร แล้วระบุว่าเป็นไฟล์อะไร (เพิ่มได้ไม่จำกัด)</p></div>
+          <button type="button" onClick={() => setForm({ ...form, files: [...(form.files || []), { label: '', url: '' }] })} className="text-indigo-600 bg-indigo-50 px-3 py-2 rounded-xl text-sm font-semibold shrink-0"><Plus size={14} className="inline mr-1"/>เพิ่มไฟล์</button>
+        </div>
+        {(form.files || []).length === 0 && <p className="text-sm text-gray-400">ยังไม่มีไฟล์</p>}
+        {(form.files || []).map((f, idx) => (
+          <div key={idx} className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)_auto] gap-2">
+            <input placeholder="ไฟล์เกี่ยวกับอะไร (เช่น แคตตาล็อก, ใบเสนอราคา)" value={f.label || ''} onChange={e => updateFile(idx, 'label', e.target.value)} className={inputClass}/>
+            <input placeholder="วาง URL (Google Drive ฯลฯ)" value={f.url || ''} onChange={e => updateFile(idx, 'url', e.target.value)} className={inputClass}/>
+            <button type="button" onClick={() => setForm({ ...form, files: form.files.filter((_, i) => i !== idx) })} className="p-2 text-red-400 hover:bg-red-50 rounded-xl justify-self-start"><Trash2 size={16}/></button>
+          </div>
+        ))}
+      </div>
     </form>
   );
 };
@@ -2146,6 +2163,50 @@ const normalizeUrl = (u) => {
 const domainOf = (u) => {
   try { return new URL(normalizeUrl(u)).hostname.replace(/^www\./, ''); }
   catch { return String(u || '').replace(/^https?:\/\//i, '').split('/')[0]; }
+};
+
+// คืน URL สำหรับ embed preview ถ้าเป็นลิงก์ Google Drive/Docs, ไม่งั้นคืน null
+const drivePreviewUrl = (u) => {
+  const url = normalizeUrl(u);
+  if (!url) return null;
+  let m = url.match(/https?:\/\/(?:drive|docs)\.google\.com\/(document|spreadsheets|presentation)\/d\/([a-zA-Z0-9_-]+)/);
+  if (m) return `https://docs.google.com/${m[1]}/d/${m[2]}/preview`;
+  m = url.match(/https?:\/\/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/);
+  if (m) return `https://drive.google.com/file/d/${m[1]}/preview`;
+  m = url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  if (/drive\.google\.com/.test(url) && m) return `https://drive.google.com/file/d/${m[1]}/preview`;
+  return null;
+};
+
+const SupplierFileCard = ({ f }) => {
+  const [open, setOpen] = useState(false);
+  const url = normalizeUrl(f.url);
+  const domain = url ? domainOf(f.url) : null;
+  const preview = drivePreviewUrl(f.url);
+  if (!url) return null;
+  return (
+    <div className="border border-gray-100 rounded-2xl overflow-hidden">
+      <div className="flex items-center gap-3 p-3">
+        <span className="relative w-9 h-9 rounded-lg bg-white border border-gray-100 flex items-center justify-center shrink-0 overflow-hidden">
+          <Globe size={16} className="text-gray-300" />
+          <img src={`https://www.google.com/s2/favicons?domain=${domain}&sz=64`} alt="" className="absolute inset-0 w-full h-full object-contain p-1" onError={e => e.currentTarget.remove()} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-gray-800 truncate">{f.label || domain || 'ไฟล์'}</p>
+          <p className="text-xs text-gray-400 truncate">{f.url}</p>
+        </div>
+        {preview && (
+          <button type="button" onClick={() => setOpen(o => !o)} className="text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1.5 rounded-lg shrink-0">{open ? 'ซ่อน' : 'พรีวิว'}</button>
+        )}
+        <a href={url} target="_blank" rel="noopener noreferrer" className="p-1.5 text-gray-400 hover:text-indigo-600 shrink-0" title="เปิดไฟล์"><ExternalLink size={16} /></a>
+      </div>
+      {preview && open && (
+        <div className="border-t border-gray-100 bg-gray-50">
+          <iframe src={preview} title={f.label || 'preview'} className="w-full h-80" allow="autoplay" />
+        </div>
+      )}
+    </div>
+  );
 };
 
 const SupplierContactCard = ({ c }) => {
@@ -2271,6 +2332,14 @@ const SupplierDetail = ({ supplier, onBack, onEdit, canEdit, onNavigateToProduct
                 <SupplierContactCard key={c.id || `${c.channel}-${i}`} c={c} />
               ))}
             </div>
+            {(supplier.files || []).length > 0 && (
+              <div className="mt-5">
+                <h3 className="font-bold text-gray-800 mb-2">ไฟล์ที่เกี่ยวข้อง</h3>
+                <div className="space-y-2">
+                  {(supplier.files || []).map((f, i) => <SupplierFileCard key={i} f={f} />)}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
