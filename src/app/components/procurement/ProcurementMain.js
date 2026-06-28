@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowLeft, Building2, Calendar, CheckCircle, ChevronDown, ChevronLeft, ChevronRight, ClipboardList,
   DollarSign, ExternalLink, History, ImageIcon, LayoutGrid, List, Loader2, Package, PackagePlus, Plus, RefreshCw,
-  Save, Search, Store, Trash2, Truck, X, Check, Pencil,
+  Save, Search, Store, Trash2, Truck, X, Check, Pencil, AtSign, Phone, Globe,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
@@ -44,6 +44,28 @@ const poDayDiff = (from, to = new Date()) => {
   const end = to instanceof Date ? to : new Date(to);
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
   return Math.max(0, Math.floor((end - start) / 86400000));
+};
+// แปลงเป็นวันที่ local (ตัดเวลา/timezone ออก ให้ตรงกับวันที่ที่โชว์)
+const toLocalDate = (v) => {
+  if (!v) return null;
+  const [y, m, d] = String(v).split('T')[0].split('-').map(Number);
+  return (y && m && d) ? new Date(y, m - 1, d) : null;
+};
+// ช่วงห่างแบบ ปี/เดือน/วัน (เช่น "1 ปี 2 เดือน 5 วัน" หรือ "17 วัน")
+const humanDuration = (from, to) => {
+  let a = toLocalDate(from), b = toLocalDate(to);
+  if (!a || !b) return null;
+  if (b < a) { const t = a; a = b; b = t; }
+  let years = b.getFullYear() - a.getFullYear();
+  let months = b.getMonth() - a.getMonth();
+  let days = b.getDate() - a.getDate();
+  if (days < 0) { months -= 1; days += new Date(b.getFullYear(), b.getMonth(), 0).getDate(); }
+  if (months < 0) { years -= 1; months += 12; }
+  const parts = [];
+  if (years) parts.push(`${years} ปี`);
+  if (months) parts.push(`${months} เดือน`);
+  if (days || parts.length === 0) parts.push(`${days} วัน`);
+  return parts.join(' ');
 };
 const poStepMeta = (order) => ([
   { id: 'ordered', label: 'สั่ง', date: order?.ordered_at || order?.created_at },
@@ -1246,8 +1268,13 @@ const OrderDetail = ({ order, profile, locations = [], onBack, onEdit, onRefresh
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
         <SummaryPanel icon={Calendar} title="วันที่สำคัญ" subtitle="ข้อมูลที่ใช้วัดระยะเวลาของรอบนี้">
           <SummaryLine label="วันที่สั่ง" value={dtForInput(order.ordered_at) || '-'} />
-          <SummaryLine label="วันที่จ่าย" value={dtForInput(order.paid_at) || '-'} />
-          <SummaryLine label="วันที่ถึง" value={dtForInput(order.arrived_at) || '-'} />
+          <SummaryLine label="วันที่จ่าย" value={dtForInput(order.paid_at) || '-'}
+            sub={order.ordered_at && order.paid_at ? `ห่างจากสั่ง ${humanDuration(order.ordered_at, order.paid_at)}` : null} />
+          <SummaryLine label="วันที่ถึง" value={dtForInput(order.arrived_at) || '-'}
+            sub={order.paid_at && order.arrived_at ? `ห่างจากจ่าย ${humanDuration(order.paid_at, order.arrived_at)}` : null} />
+          {order.ordered_at && order.arrived_at && (
+            <SummaryLine label="รวม สั่ง → ถึง" value={humanDuration(order.ordered_at, order.arrived_at)} emphasis />
+          )}
         </SummaryPanel>
         <SummaryPanel icon={DollarSign} title="ยอดเงิน" subtitle={`สกุลเงินหลัก: ${order.currency || 'THB'} · FX ${num(order.fx_rate) || 1}`}>
           <SummaryLine label="ยอดสินค้า THB" value={`฿${goodsTotalThb.toLocaleString()}`} />
@@ -2109,6 +2136,49 @@ const SupplierForm = ({ supplier, products, profile, onCancel, onSaved }) => {
   );
 };
 
+// เติม scheme ให้ URL ที่ผู้ใช้กรอกแบบไม่มี http (เช่น "shopee.co.th/...")
+const normalizeUrl = (u) => {
+  if (!u) return null;
+  const s = String(u).trim();
+  if (!s) return null;
+  return /^https?:\/\//i.test(s) ? s : `https://${s}`;
+};
+const domainOf = (u) => {
+  try { return new URL(normalizeUrl(u)).hostname.replace(/^www\./, ''); }
+  catch { return String(u || '').replace(/^https?:\/\//i, '').split('/')[0]; }
+};
+
+const SupplierContactCard = ({ c }) => {
+  const url = normalizeUrl(c.url);
+  const domain = url ? domainOf(c.url) : null;
+  const hasAny = c.account_id || c.phone || url || c.note;
+  return (
+    <div className="border border-gray-100 rounded-2xl p-4 space-y-2">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700">{c.channel || 'Other'}</span>
+        {c.label && <span className="text-sm font-semibold text-gray-700">{c.label}</span>}
+      </div>
+      {c.account_id && <p className="text-sm text-gray-600 break-all flex items-center gap-1.5"><AtSign size={13} className="text-gray-400 shrink-0" />{c.account_id}</p>}
+      {c.phone && <a href={`tel:${c.phone}`} className="text-sm text-gray-600 hover:text-indigo-600 flex items-center gap-1.5"><Phone size={13} className="text-gray-400 shrink-0" />{c.phone}</a>}
+      {url && (
+        <a href={url} target="_blank" rel="noopener noreferrer" className="group flex items-center gap-2.5 p-2.5 rounded-xl bg-gray-50 hover:bg-indigo-50 border border-gray-100 hover:border-indigo-200 transition-colors">
+          <span className="relative w-9 h-9 rounded-lg bg-white border border-gray-100 flex items-center justify-center shrink-0 overflow-hidden">
+            <Globe size={16} className="text-gray-300" />
+            <img src={`https://www.google.com/s2/favicons?domain=${domain}&sz=64`} alt="" className="absolute inset-0 w-full h-full object-contain p-1" onError={e => e.currentTarget.remove()} />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-semibold text-gray-800 truncate group-hover:text-indigo-700">{domain}</span>
+            <span className="block text-xs text-gray-400 truncate">{c.url}</span>
+          </span>
+          <ExternalLink size={15} className="text-gray-400 group-hover:text-indigo-600 shrink-0" />
+        </a>
+      )}
+      {c.note && <p className="text-xs text-gray-400">{c.note}</p>}
+      {!hasAny && <p className="text-sm text-gray-300">—</p>}
+    </div>
+  );
+};
+
 const SupplierDetail = ({ supplier, onBack, onEdit, canEdit, onNavigateToProduct }) => {
   const [productViewMode, setProductViewMode] = useState(() => getStoredViewMode('procurement_supplier_product_view_mode', 'grid'));
   const [selectedProduct, setSelectedProduct] = useState(null);
@@ -2197,12 +2267,8 @@ const SupplierDetail = ({ supplier, onBack, onEdit, canEdit, onNavigateToProduct
             <h3 className="font-bold text-gray-800 mb-2">ข้อมูล Supplier</h3>
             <p className="text-gray-600 whitespace-pre-wrap">{supplier.note || 'ไม่มีหมายเหตุ'}</p>
             <div className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-3">
-              {(supplier.contacts || []).length === 0 ? <p className="text-sm text-gray-400">ยังไม่มีช่องทางติดต่อ</p> : (supplier.contacts || []).map(c => (
-                <div key={c.id || `${c.channel}-${c.account_id}`} className="border border-gray-100 rounded-2xl p-4">
-                  <p className="font-bold text-gray-800">{c.channel}{c.label ? ` · ${c.label}` : ''}</p>
-                  <p className="text-sm text-gray-500 mt-1 break-all">{c.account_id || c.phone || c.url || '-'}</p>
-                  {c.note && <p className="text-xs text-gray-400 mt-1">{c.note}</p>}
-                </div>
+              {(supplier.contacts || []).length === 0 ? <p className="text-sm text-gray-400">ยังไม่มีช่องทางติดต่อ</p> : (supplier.contacts || []).map((c, i) => (
+                <SupplierContactCard key={c.id || `${c.channel}-${i}`} c={c} />
               ))}
             </div>
           </div>
@@ -2421,10 +2487,13 @@ const SummaryPanel = ({ icon: Icon, title, subtitle, children }) => (
   </div>
 );
 
-const SummaryLine = ({ label, value, emphasis = false }) => (
+const SummaryLine = ({ label, value, sub = null, emphasis = false }) => (
   <div className={`flex items-center justify-between gap-3 rounded-2xl px-3 py-2.5 ${emphasis ? 'bg-indigo-50' : 'bg-gray-50'}`}>
     <span className="text-xs font-bold text-gray-500">{label}</span>
-    <span className={`text-sm font-bold text-right ${emphasis ? 'text-indigo-700' : 'text-gray-900'}`}>{value}</span>
+    <div className="text-right">
+      <span className={`text-sm font-bold ${emphasis ? 'text-indigo-700' : 'text-gray-900'}`}>{value}</span>
+      {sub && <span className="block text-[11px] font-semibold text-indigo-500 mt-0.5">{sub}</span>}
+    </div>
   </div>
 );
 

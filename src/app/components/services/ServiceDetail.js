@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
 import ServiceBillPreview from './ServiceBillPreview';
 import AuditLogPanel from '@/app/components/common/AuditLogPanel';
+import MaterialPrepPanel from '@/app/components/common/MaterialPrepPanel';
 
 const ServiceDetail = ({ service, onBack, onEdit, onDelete, showProfit, setShowProfit }) => {
   const { can } = useAuth();
@@ -558,6 +559,16 @@ const ServiceDetail = ({ service, onBack, onEdit, onDelete, showProfit, setShowP
           )}
         </div>
       )}
+
+      {/* จัดเตรียมของ / เบิกวัสดุ (เพิ่มเอง) */}
+      <div className="mt-4">
+        <MaterialPrepPanel
+          referenceType="service"
+          referenceId={service.id}
+          noteLabel={service.service_number || service.description || ''}
+          customerName={service.customer_cache ? [service.customer_cache.first_name, service.customer_cache.last_name].filter(Boolean).join(' ') : null}
+        />
+      </div>
 
       {/* Audit Log */}
       <AuditLogPanel resourceType="service" resourceId={service.id} title="ประวัติการเปลี่ยนแปลง" compact />

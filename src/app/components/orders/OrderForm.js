@@ -315,6 +315,7 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
       }));
 
       // ตัดสต๊อกอัตโนมัติ (เฉพาะออเดอร์ใหม่ หรือสร้างครั้งแรก)
+      const stockShortages = [];
       if (deductStock && !initialData?.id) {
         for (const [idx, item] of formData.items.entries()) {
           if (!item.product_id || item.is_custom) continue;
@@ -344,7 +345,11 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
             unit_cost_thb: lotResult.weightedUnitCost,
             total_cost_thb: lotResult.totalCost,
           }).eq('id', txRow.id);
+          if (lotResult.missingQty > 0) stockShortages.push(lotResult.missingQty);
           itemsPayload[idx].cost_price = lotResult.weightedUnitCost;
+        }
+        if (stockShortages.length > 0) {
+          alert(`⚠️ มี ${stockShortages.length} รายการที่สต๊อกไม่พอ — ระบบตัดเท่าที่มีและบันทึกออเดอร์แล้ว โปรดตรวจสอบสต๊อก`);
         }
       }
 

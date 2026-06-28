@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { Boxes, History, Warehouse } from 'lucide-react';
 import { useAuth } from '@/app/context/AuthContext';
-import StockList from './StockList';
+import StockByWarehouse from './StockByWarehouse';
 import StockTransactionLog from './StockTransactionLog';
 import StoreList from './StoreList';
 import StoreForm from './StoreForm';
@@ -96,7 +96,7 @@ const StockMain = () => {
       {/* Content */}
       {activeSubTab === 'items' && (
         itemsView === 'list'
-          ? <StockList onStockIn={(p, v) => openTxForm('stock_in', p, v)} onStockOut={(p, v) => openTxForm('stock_out', p, v)} onAdjust={(p, v) => openTxForm('adjustment', p, v)} onNewTx={() => openTxForm(null)} />
+          ? <StockByWarehouse onStockIn={(p, v) => openTxForm('stock_in', p, v)} onStockOut={(p, v) => openTxForm('stock_out', p, v)} onAdjust={(p, v) => openTxForm('adjustment', p, v)} onNewTx={() => openTxForm(null)} />
           : <StockTransactionForm initialData={txFormInitial} onCancel={() => setItemsView('list')} onSuccess={handleTxSuccess} />
       )}
 

@@ -187,142 +187,66 @@ export async function createStockLot({
   const qty = Math.max(0, Math.trunc(toNum(quantity)));
   if (!productId || qty <= 0) return null;
 
-  const { data, error } = await supabase
-    .from('stock_lots')
-    .insert([{
-      lot_code: lotCode || buildLotCode(sourceType === 'purchase_order' ? 'PO' : 'LOT'),
-      product_id: productId,
-      variant_id: nullOrValue(variantId),
-      location_id: nullOrValue(locationId),
-      purchase_order_id: nullOrValue(purchaseOrderId),
-      purchase_order_item_id: nullOrValue(purchaseOrderItemId),
-      supplier_id: nullOrValue(supplierId),
-      source_type: sourceType,
-      original_quantity: qty,
-      remaining_quantity: qty,
-      landed_unit_cost_thb: round2(unitCostThb),
-      received_at: receivedAt || new Date().toISOString(),
-      note,
-      created_by: nullOrValue(profileId),
-    }])
-    .select('*')
-    .single();
-
-  if (error) {
-    if (isMissingSchemaError(error)) {
-      if (syncSummary) {
-        await syncStockItemQuantity({ productId, variantId, locationId, delta: qty, profileId });
-      }
-      return null;
-    }
-    throw error;
-  }
-
-  if (syncSummary) {
-    await syncStockItemQuantity({ productId, variantId, locationId, delta: qty, profileId });
-  }
-  return data;
+  // atomic (เฟส 1): insert lot + (option) อัปเดต summary ใน transaction เดียวฝั่ง DB ผ่าน RPC
+  const { data, error } = await supabase.rpc('stock_add_lot', {
+    p_product_id: productId,
+    p_variant_id: nullOrValue(variantId),
+    p_location_id: nullOrValue(locationId),
+    p_quantity: qty,
+    p_unit_cost: round2(unitCostThb),
+    p_source_type: sourceType,
+    p_purchase_order_id: nullOrValue(purchaseOrderId),
+    p_purchase_order_item_id: nullOrValue(purchaseOrderItemId),
+    p_supplier_id: nullOrValue(supplierId),
+    p_lot_code: nullOrValue(lotCode),
+    p_note: nullOrValue(note),
+    p_received_at: nullOrValue(receivedAt),
+    p_profile_id: nullOrValue(profileId),
+    p_sync_summary: syncSummary,
+  });
+  if (error) throw error;
+  return data; // { id, lot_code }
 }
 
-export async function allocateFifoStockOut({
-  productId,
-  variantId = null,
-  locationId = null,
-  quantity,
-  referenceType = 'manual',
-  referenceId = null,
-  stockTransactionId = null,
-  profileId = null,
-  syncSummary = true,
-}) {
+export async function allocateFifoStockOut(opts) {
+  const {
+    productId,
+    variantId = null,
+    quantity,
+    referenceType = 'manual',
+    referenceId = null,
+    stockTransactionId = null,
+    profileId = null,
+    syncSummary = true,
+  } = opts;
+  // ผูกคลังหรือไม่: ถ้าผู้เรียก "ส่ง locationId มา" (แม้เป็น null = bin ไม่ระบุคลัง) = ตัดเฉพาะคลังนั้น
+  // ถ้า "ไม่ส่ง locationId" (เช่น ขายออเดอร์/บริการ) = ตัดข้ามคลังแบบ FIFO ทั่วทั้งสินค้า
+  const hasLocationConstraint = Object.prototype.hasOwnProperty.call(opts, 'locationId') && opts.locationId !== undefined;
+  const constraintLocationId = hasLocationConstraint ? (opts.locationId || null) : null;
   const requestedQty = Math.max(0, Math.trunc(toNum(quantity)));
   if (!productId || requestedQty <= 0) {
     return { allocations: [], totalCost: 0, weightedUnitCost: 0, missingQty: requestedQty };
   }
 
-  let q = supabase
-    .from('stock_lots')
-    .select('id, remaining_quantity, landed_unit_cost_thb, location_id, received_at, created_at')
-    .eq('product_id', productId)
-    .gt('remaining_quantity', 0)
-    .order('received_at', { ascending: true })
-    .order('created_at', { ascending: true });
-  if (variantId) q = q.eq('variant_id', variantId); else q = q.is('variant_id', null);
-  if (locationId) q = q.eq('location_id', locationId);
-
-  const { data: lots, error } = await q;
-  if (error) {
-    if (isMissingSchemaError(error)) {
-      const prices = await getCurrentProductPrices(productId, variantId);
-      if (syncSummary) {
-        await syncStockItemQuantity({ productId, variantId, locationId, delta: -requestedQty, profileId });
-      }
-      return {
-        allocations: [],
-        totalCost: round2(prices.cost_price * requestedQty),
-        weightedUnitCost: round2(prices.cost_price),
-        missingQty: 0,
-      };
-    }
-    throw error;
-  }
-
-  let remaining = requestedQty;
-  const allocations = [];
-
-  for (const lot of lots || []) {
-    if (remaining <= 0) break;
-    const available = Math.max(0, Math.trunc(toNum(lot.remaining_quantity)));
-    if (available <= 0) continue;
-    const qty = Math.min(available, remaining);
-    const unitCost = round2(lot.landed_unit_cost_thb);
-
-    const { error: updateError } = await supabase
-      .from('stock_lots')
-      .update({
-        remaining_quantity: available - qty,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', lot.id);
-    if (updateError) throw updateError;
-
-    const allocationPayload = {
-      stock_transaction_id: nullOrValue(stockTransactionId),
-      stock_lot_id: lot.id,
-      product_id: productId,
-      variant_id: nullOrValue(variantId),
-      quantity: qty,
-      unit_cost_thb: unitCost,
-      reference_type: referenceType,
-      reference_id: nullOrValue(referenceId),
-      created_by: nullOrValue(profileId),
-    };
-    const { data: allocation, error: allocationError } = await supabase
-      .from('stock_lot_allocations')
-      .insert([allocationPayload])
-      .select('*')
-      .single();
-    if (allocationError) throw allocationError;
-
-    allocations.push(allocation || allocationPayload);
-    remaining -= qty;
-  }
-
-  const allocatedQty = requestedQty - remaining;
-  if (syncSummary && allocatedQty > 0) {
-    await syncStockItemQuantity({ productId, variantId, locationId, delta: -allocatedQty, profileId });
-  }
-
-  const fallbackCost = remaining > 0 ? toNum((await getCurrentProductPrices(productId, variantId)).cost_price) : 0;
-  const allocatedCost = allocations.reduce((sum, a) => sum + (toNum(a.unit_cost_thb) * toNum(a.quantity)), 0);
-  const totalCost = round2(allocatedCost + (remaining * fallbackCost));
-  const weightedUnitCost = requestedQty > 0 ? round2(totalCost / requestedQty) : 0;
-
+  // atomic (เฟส 1): FIFO allocate + allocations + (option) ลด summary per-location ใน transaction เดียวฝั่ง DB
+  const { data, error } = await supabase.rpc('stock_issue_fifo', {
+    p_product_id: productId,
+    p_variant_id: nullOrValue(variantId),
+    p_quantity: requestedQty,
+    p_location_scoped: hasLocationConstraint,
+    p_location_id: constraintLocationId,
+    p_reference_type: referenceType,
+    p_reference_id: nullOrValue(referenceId),
+    p_stock_transaction_id: nullOrValue(stockTransactionId),
+    p_profile_id: nullOrValue(profileId),
+    p_sync_summary: syncSummary,
+  });
+  if (error) throw error;
   return {
-    allocations,
-    totalCost,
-    weightedUnitCost,
-    missingQty: remaining,
+    allocations: Array.isArray(data?.allocations) ? data.allocations : [],
+    totalCost: toNum(data?.totalCost),
+    weightedUnitCost: toNum(data?.weightedUnitCost),
+    missingQty: toNum(data?.missingQty),
   };
 }
 

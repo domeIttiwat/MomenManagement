@@ -191,6 +191,45 @@ resource ที่ใช้อยู่ (เห็นจากโค้ด): `pr
 
 ## 11. Changelog
 
+- **2026-06-28 (จัดเตรียมของในงานบริการ)** — เพิ่ม `MaterialPrepPanel` (`components/common/`) — พอร์ต
+  flow "เบิกวัสดุ/คืนคลัง" จาก AssemblyDetail มาเป็น component generic (ใช้ `stock_transactions`
+  reference_type/id เป็นแหล่งบันทึก เหมือน assembly ไม่มีตารางใหม่). ฝังใน `ServiceDetail`
+  (referenceType='service') ให้ **เพิ่มเอง**ว่าจะเตรียมอะไร แล้วเบิกตัดสต๊อก (FIFO ผ่าน lib atomic) +
+  คืนคลังได้ ต่างจากงานประกอบรถที่ items มาจากระบบอัตโนมัติ. เป็น panel แยกจาก service billable items.
+  **ยังเหลือ:** ลบใบงานบริการที่มีของเบิกค้างยังไม่ auto-return (assembly ทำ, service ยังไม่ทำ) — ควรเพิ่มภายหลัง
+- **2026-06-28 (ลบคลังให้ถูกต้อง)** — เดิมลบคลัง/ชั้น set `location_id=NULL` ดิบ → ถ้าสินค้ามีของทั้ง
+  ในคลังนั้น **และ** มีของ "ไม่ระบุคลัง" อยู่แล้ว จะชน unique index (`stock_items_base` ฯลฯ) ลบไม่ได้.
+  เพิ่ม RPC `stock_unassign_locations(location_ids[])` ที่ **ย้าย+รวมยอด** เข้าแถว null แบบ atomic
+  (`supabase/migrations/20260628_stock_unassign_locations_rpc.sql`). StoreList (ลบคลัง) + StoreDetail
+  (ลบชั้นแบบย้ายของ) เรียก RPC นี้แทน. และ **ลบคลังต้องพิมพ์ชื่อคลังให้ตรงเพื่อยืนยัน** (typed confirm) แทน
+  ช่องหมายเหตุเดิม. FK ที่ชี้ storage_locations เป็น ON DELETE SET NULL ทุกตัว → ของไม่หายอยู่แล้ว
+- **2026-06-28 (เฟส 3)** — เติมหน้าสต๊อก: (1) **"จัดเข้าชั้น"** quick action จากการ์ดไม่ระบุคลัง
+  (`AssignShelfModal`) — เลือกชั้นปลายทาง + จำนวน → ตัดล็อตฝั่งไม่ระบุคลัง (allocate scoped null) แล้วสร้าง
+  ล็อตใหม่ที่ชั้นปลายทางคงต้นทุนต่อล็อต + ลง ledger out/in (ใช้ RPC atomic เฟส 1, summary คงตรง);
+  (2) **มุมมองล็อต** (`LotView`) — ปุ่มสลับในหน้าคลัง โชว์ล็อต active: มาจาก PO ไหน/แหล่ง, เข้าคลัง/ชั้นไหน
+  (หรือ "ไม่ระบุคลัง"), คงเหลือ/เริ่มต้น, ต้นทุน/ชิ้น, วันรับเข้า — ค้นด้วยสินค้า/SKU/ล็อต/PO ได้.
+  **หมายเหตุ:** การ "จัดเข้าชั้น" ประกอบจาก allocate+createLot หลาย call (atomic ต่อ call, summary คงตรง)
+  ยังไม่ atomic ทั้ง move — ถ้าต้องเป๊ะทำเป็น RPC `stock_move` เดียวภายหลัง
+- **2026-06-28 (เฟส 2)** — รื้อ UX สต๊อกเป็น **warehouse-first**: แท็บ "สต๊อกสินค้า" ตอนนี้เป็น
+  `StockByWarehouse` (การ์ดคลังแต่ละคลัง + การ์ด "ไม่ระบุคลัง" → กดเข้าไปเห็นชั้นวาง + รายการของในคลัง,
+  ค้นในคลังได้) + ปุ่มสลับ "มุมมองรายสินค้า" (reuse `StockList` เดิมไว้ค้นข้ามคลัง). กดที่รายการเปิด
+  `StockProductDetailModal` (มีปุ่มย้าย/รับเข้า/เบิก). ของไม่ระบุคลัง (location_id NULL, qty>0) เป็น
+  พลเมืองชั้นหนึ่งแล้ว. ลดความซ้ำซ้อน StockList↔StoreDetail (StoreDetail เหลือไว้แท็บ "จัดการคลัง"
+  สำหรับแก้โครงสร้างคลัง/ชั้น). ดู `../docs/STOCK_REVIEW.md` §4
+- **2026-06-28 (เฟส 1)** — ตัด/เติมสต๊อก **atomic ระดับ DB**: เพิ่ม RPC `stock_issue_fifo`,
+  `stock_add_lot`, `stock_adjust_summary` (migration `stock_atomic_movement_rpcs` + `_v2`,
+  SECURITY INVOKER, grant authenticated เท่านั้น). `allocateFifoStockOut()`/`createStockLot()` ใน
+  `lib/stockLots.js` กลายเป็น wrapper บาง ๆ เรียก RPC — callers ทั้งหมด (manual/order/service/assembly/
+  procurement/transfer) ไม่ต้องแก้ (คง signature/return เดิม รวม `syncSummary` flag + `allocations`).
+  ลด lot+summary ใน transaction เดียว → ไม่มีทางครึ่ง ๆ. **หมายเหตุ:** ledger (`stock_transactions`) ยัง
+  insert ฝั่ง client → atomic แค่ lot+summary (full ledger-in-RPC = เฟสถัดไป). ROLLBACK-test prod ผ่าน
+  (invariant คงอยู่). ดู `../GOTCHAS.md` #22-23
+- **2026-06-28** — รีวิวระบบสต๊อกทั้งหมด (เอกสาร `../docs/STOCK_REVIEW.md`) + แก้ correctness เฟส 0:
+  `allocateFifoStockOut()` เดิมตัด FIFO ข้ามคลังเมื่อ `locationId=null` แต่ลด summary เฉพาะแถว null →
+  divergence (เด่นชัดในออเดอร์/บริการที่ "ไม่ส่ง locationId"). แก้เป็น: ส่ง locationId = ตัดเฉพาะคลังนั้น
+  (รวม null=bin), ไม่ส่ง = ตัดข้ามคลัง, และ **ลด summary ตามคลังของล็อตที่ตัดจริง (per-location)** →
+  stock_items ตรงกับ stock_lots ทุกคลังเสมอ. เพิ่มเตือน oversell (`missingQty>0`) ใน OrderForm/ServiceForm.
+  ดู `../GOTCHAS.md` #22. (ตอนตรวจ prod ยังตรงกัน 100% — แก้ก่อนเกิดจริง)
 - **2026-06-27 (later 2)** — แยก timeline ของ PO ออกเป็น 2 การ์ด: **"ประวัติสถานะ"** (read-only,
   `StatusHistoryCard`) กับ **"คอมเมนต์"** (`PurchaseOrderTimeline` เดิม โชว์เฉพาะคอมเมนต์มือ).
   เพิ่มคอลัมน์ `update_type` ('status'|'comment', default 'comment') + `status` ใน

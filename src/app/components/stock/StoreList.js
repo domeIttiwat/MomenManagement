@@ -65,18 +65,19 @@ const StoreList = ({ onNew, onEdit, onView }) => {
   };
 
   const confirmDeleteStore = async () => {
-    if (!deleteStoreNote.trim()) return alert('กรุณาระบุหมายเหตุการลบ');
+    if (deleteStoreNote.trim() !== (deletingStore?.name || '')) return alert('พิมพ์ชื่อคลังให้ตรงเพื่อยืนยันการลบ');
     setDeleteStoreLoading(true);
     try {
-      // 1. Move all stock_items in this store's locations to "ไม่ระบุที่เก็บ"
+      // 1. ย้าย stock ในคลังนี้ไป "ไม่ระบุที่เก็บ" แบบ "รวมยอด" (atomic ผ่าน RPC — กัน unique ชน)
       const { data: locs } = await supabase.from('storage_locations').select('id').eq('store_id', deletingStore.id);
       const locIds = (locs || []).map(l => l.id);
       if (locIds.length > 0) {
-        await supabase.from('stock_items').update({ location_id: null }).in('location_id', locIds);
-        await supabase.from('stock_lots').update({ location_id: null, updated_at: new Date().toISOString() }).in('location_id', locIds);
+        const { error: rpcErr } = await supabase.rpc('stock_unassign_locations', { p_location_ids: locIds });
+        if (rpcErr) throw rpcErr;
       }
-      // 2. Delete store (CASCADE deletes storage_locations)
-      await supabase.from('stores').delete().eq('id', deletingStore.id);
+      // 2. ลบคลัง (CASCADE ลบ storage_locations)
+      const { error: delErr } = await supabase.from('stores').delete().eq('id', deletingStore.id);
+      if (delErr) throw delErr;
       closeDeleteStoreDialog();
       fetchStores();
     } catch (err) {
@@ -201,9 +202,10 @@ const StoreList = ({ onNew, onEdit, onView }) => {
               </div>
             )}
 
+            <p className="text-xs text-gray-500 mb-1.5">พิมพ์ชื่อคลัง <span className="font-bold text-gray-700">{deletingStore.name}</span> เพื่อยืนยันการลบ</p>
             <input
               className="w-full px-3 py-2.5 bg-gray-50 border border-gray-200 focus:border-red-400 focus:ring-2 focus:ring-red-400/20 rounded-xl outline-none text-gray-700 text-sm mb-4"
-              placeholder="หมายเหตุการลบ (บังคับ)..."
+              placeholder={deletingStore.name}
               value={deleteStoreNote}
               onChange={e => setDeleteStoreNote(e.target.value)}
               autoFocus
@@ -214,7 +216,7 @@ const StoreList = ({ onNew, onEdit, onView }) => {
                 className="px-4 py-2 text-sm text-gray-600 bg-white border border-gray-200 hover:bg-gray-50 rounded-xl font-medium transition-colors">
                 ยกเลิก
               </button>
-              <button type="button" onClick={confirmDeleteStore} disabled={deleteStoreLoading || !deleteStoreNote.trim()}
+              <button type="button" onClick={confirmDeleteStore} disabled={deleteStoreLoading || deleteStoreNote.trim() !== deletingStore.name}
                 className="px-4 py-2 text-sm bg-red-600 hover:bg-red-700 text-white rounded-xl font-medium flex items-center gap-2 transition-colors disabled:opacity-50">
                 {deleteStoreLoading ? '...' : (
                   deleteStoreItems.length > 0

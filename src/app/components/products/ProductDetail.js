@@ -167,7 +167,7 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
         {/* Left: Images */}
         <div className="lg:col-span-5 space-y-4">
-          <div className="sticky top-24 space-y-4">
+          <div className="sticky top-24 space-y-4 max-h-[calc(100vh-6rem)] overflow-y-auto pr-1">
             <div className="aspect-square bg-gray-50 rounded-3xl overflow-hidden border border-gray-100 relative shadow-sm group">
                {selectedImg ? (
                  <img src={selectedImg} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
@@ -194,7 +194,6 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
                 })}
               </div>
             )}
-          </div>
 
           {/* สูตรประกอบ (BOM) — แสดงใต้รูป แยกของหลัก/รุ่นย่อย */}
           {bundles.length > 0 && (
@@ -246,6 +245,7 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
               })}
             </div>
           )}
+          </div>
         </div>
 
         {/* Right: Info */}

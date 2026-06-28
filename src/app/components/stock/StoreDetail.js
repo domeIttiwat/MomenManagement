@@ -132,9 +132,9 @@ const StoreDetail = ({ store, onBack, onEdit, onAddToLocation }) => {
     if (!deleteNote.trim()) return alert('กรุณาระบุหมายเหตุการลบ');
     setDeleteLoading(true);
     try {
-      // 1. Move all items to "ไม่ระบุที่เก็บ"
-      await supabase.from('stock_items').update({ location_id: null }).eq('location_id', deletingLoc.id);
-      await supabase.from('stock_lots').update({ location_id: null, updated_at: new Date().toISOString() }).eq('location_id', deletingLoc.id);
+      // 1. ย้ายของไป "ไม่ระบุที่เก็บ" แบบรวมยอด (atomic ผ่าน RPC — กัน unique ชน)
+      const { error: rpcErr } = await supabase.rpc('stock_unassign_locations', { p_location_ids: [deletingLoc.id] });
+      if (rpcErr) throw rpcErr;
       // 2. Log deletion
       await supabase.from('storage_location_logs').insert([{
         location_id: deletingLoc.id,
