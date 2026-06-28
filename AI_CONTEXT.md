@@ -191,6 +191,19 @@ resource ที่ใช้อยู่ (เห็นจากโค้ด): `pr
 
 ## 11. Changelog
 
+- **2026-06-28 (จัดเตรียมของงานบริการ = ก๊อป OrderPrep)** — ของจริงที่ user ต้องการคือ panel
+  **"การจัดเตรียมของ" สีขาว** ในหน้าออเดอร์ (`OrderPrep.js` + ตาราง `order_preps`/`order_prep_items`)
+  ไม่ใช่ระบบงานประกอบสีดำ. ก๊อปเป็น `ServicePrep.js` + ตาราง `service_preps`/`service_prep_items`
+  (migration `add_service_prep_tables`, มิเรอร์ schema เดิม, RLS authenticated/anon-revoke). startPrep
+  ดึงรายการจาก `service_items` + sub_items (ไม่มี BOM แบบสินค้า). ฝังใน `ServiceDetail` แทน
+  `ServicePrepSection` (assembly) ที่เข้าใจผิดรอบก่อน → orphaned ทั้ง `ServicePrepSection.js` และ
+  `MaterialPrepPanel.js`
+- **2026-06-28 (จัดของงานบริการ = ระบบกลาง assembly)** — แทน `MaterialPrepPanel` (เบิกหลวมๆ) ด้วย
+  `ServicePrepSection` ที่ **reuse ระบบงานประกอบ (assembly) 100%**: assembly_jobs รองรับ
+  `ref_type='service'` อยู่แล้ว → จากหน้างานบริการกด "สร้างงานจัดของ" เปิด `AssemblyForm` (prefill ผูก
+  service, auto-populate items จาก service_items, เพิ่มเอง/แก้ได้) → บันทึกเป็น assembly_job → เปิด
+  `AssemblyDetail` (เบิกของจากคลัง/เตรียม/เบิก-คืน/stage/ทีม) เหมือนฝั่ง order เป๊ะ. งานจัดของของ service
+  ก็ขึ้นในแท็บ "งานประกอบ" ด้วย (badge 🔧 Service). `MaterialPrepPanel.js` เลิกใช้แล้ว (orphaned)
 - **2026-06-28 (ไฟล์ supplier)** — เพิ่ม `suppliers.files` (jsonb `[{label,url}]`, additive). ฟอร์ม supplier
   เพิ่มส่วน "ไฟล์ที่เกี่ยวข้อง" (เพิ่ม URL ไม่จำกัด + ป้ายว่าเป็นไฟล์อะไร). SupplierDetail แสดงเป็นการ์ดลิงก์
   (favicon + ชื่อ + เปิดไฟล์ใหม่) + ปุ่ม "พรีวิว" ฝัง iframe ถ้าเป็นลิงก์ Google Drive/Docs (`drivePreviewUrl`

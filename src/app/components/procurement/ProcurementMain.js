@@ -630,6 +630,40 @@ const OrderStageTracker = ({ order, onEditStatus, canEdit, canMarkPaid, canMarkA
   );
 };
 
+// ช่องค้นหา + เลือก Supplier (แทน dropdown เดิม เพื่อค้นง่ายเมื่อมีหลายร้าน)
+const SupplierPicker = ({ suppliers, value, onChange }) => {
+  const [query, setQuery] = useState('');
+  const [open, setOpen] = useState(false);
+  const selected = suppliers.find(s => String(s.id) === String(value));
+  const list = suppliers.filter(s => (s.name || '').toLowerCase().includes(query.toLowerCase()));
+  return (
+    <div className="relative">
+      <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+      <input
+        className={`${inputClass} pl-9 pr-8`}
+        placeholder="ค้นหา / เลือก Supplier..."
+        value={open ? query : (selected?.name || '')}
+        onChange={e => { setQuery(e.target.value); setOpen(true); }}
+        onFocus={() => { setQuery(''); setOpen(true); }}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+      />
+      {selected && !open && (
+        <button type="button" onMouseDown={e => { e.preventDefault(); onChange(''); setQuery(''); }} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500" title="ล้าง"><X size={15} /></button>
+      )}
+      {open && (
+        <div className="absolute z-30 top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-xl max-h-64 overflow-y-auto">
+          {list.length === 0 ? <p className="px-4 py-3 text-sm text-gray-400">ไม่พบ Supplier</p> : list.map(s => (
+            <button key={s.id} type="button" onMouseDown={() => { onChange(String(s.id)); setQuery(''); setOpen(false); }}
+              className={`w-full text-left px-4 py-2.5 text-sm border-b border-gray-50 last:border-0 hover:bg-indigo-50 ${String(s.id) === String(value) ? 'bg-indigo-50/60 font-semibold text-indigo-700' : 'text-gray-700'}`}>
+              {s.name}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const OrderFormPanel = ({ order, suppliers, products, lastPurchases, profile, canEdit, onCancel, onSaved, showCost }) => {
   const [saving, setSaving] = useState(false);
   const [catalogProducts, setCatalogProducts] = useState(products || []);
@@ -705,11 +739,13 @@ const OrderFormPanel = ({ order, suppliers, products, lastPurchases, profile, ca
     });
   }, []);
   const totals = useMemo(() => {
+    const fx = num(form.fx_rate) || 1;
     const subtotalForeign = form.items.reduce((sum, item) => sum + (num(item.unit_cost_foreign) * num(item.quantity_ordered)), 0);
-    const subtotalThb = subtotalForeign * (num(form.fx_rate) || 1);
-    const localFreightThb = (form.currency || 'THB') === 'THB' ? 0 : num(form.freight_amount) * (num(form.fx_rate) || 1);
+    const subtotalThb = subtotalForeign * fx;
+    const localFreightThb = (form.currency || 'THB') === 'THB' ? 0 : num(form.freight_amount) * fx;
     const freightThb = localFreightThb + num(form.thai_freight_thb);
-    return { subtotalForeign: round2(subtotalForeign), subtotalThb: round2(subtotalThb), freightThb: round2(freightThb), grandTotalThb: round2(subtotalThb + freightThb) };
+    const grandTotalThb = round2(subtotalThb + freightThb);
+    return { subtotalForeign: round2(subtotalForeign), subtotalThb: round2(subtotalThb), freightThb: round2(freightThb), grandTotalThb, grandTotalForeign: round2(grandTotalThb / fx) };
   }, [form]);
 
   const updateItem = (idx, field, value) => {
@@ -931,7 +967,7 @@ const OrderFormPanel = ({ order, suppliers, products, lastPurchases, profile, ca
       <FormHeader title={order ? 'แก้ไขรอบสั่งของ' : 'สร้างรอบสั่งของ'} onBack={onCancel} saving={saving} />
       <div className="bg-white rounded-3xl border border-gray-100 shadow-sm p-6 grid grid-cols-1 md:grid-cols-4 gap-4">
         <Field label="เลขรอบ"><input required value={form.order_number} onChange={e => setForm({ ...form, order_number: e.target.value })} className={inputClass} /></Field>
-        <Field label="Supplier"><select required value={form.supplier_id} onChange={e => setForm({ ...form, supplier_id: e.target.value })} className={inputClass}><option value="">เลือก Supplier</option>{suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></Field>
+        <Field label="Supplier"><SupplierPicker suppliers={suppliers} value={form.supplier_id} onChange={id => setForm({ ...form, supplier_id: id })} /></Field>
         <Field label="สถานะ"><div className="px-4 py-3 bg-gray-50 rounded-xl text-sm font-bold text-gray-700">{statusLabel(form.status || 'draft')}</div></Field>
         <Field label="สกุลเงิน">
           <select value={form.currency} onChange={e => setForm({ ...form, currency: e.target.value })} className={inputClass}>
@@ -943,7 +979,7 @@ const OrderFormPanel = ({ order, suppliers, products, lastPurchases, profile, ca
           <Field label={`ค่าส่ง local (${form.currency || 'THB'})`}><input type="number" step="0.01" min="0" value={form.freight_amount} onChange={e => setForm({ ...form, freight_amount: e.target.value })} className={inputClass} /></Field>
         )}
         <Field label="ค่าส่งในไทย (THB)"><input type="number" step="0.01" min="0" value={form.thai_freight_thb} onChange={e => setForm({ ...form, thai_freight_thb: e.target.value })} className={inputClass} /></Field>
-        <Field label="ยอดรวม THB"><div className="px-4 py-3 bg-gray-50 rounded-xl font-bold text-gray-800">฿{totals.grandTotalThb.toLocaleString()}</div></Field>
+        <Field label="ยอดรวม THB"><div className="px-4 py-3 bg-gray-50 rounded-xl"><div className="font-bold text-gray-800">฿{totals.grandTotalThb.toLocaleString()}</div>{form.currency && form.currency !== 'THB' && <div className="text-xs font-semibold text-indigo-500 mt-0.5">≈ {form.currency} {totals.grandTotalForeign.toLocaleString()}</div>}</div></Field>
         <div className="md:col-span-4"><Field label="หมายเหตุ"><textarea rows={2} value={form.note || ''} onChange={e => setForm({ ...form, note: e.target.value })} className={inputClass} /></Field></div>
       </div>
 
@@ -1442,6 +1478,7 @@ const StatusUpdateModal = ({ order, status, profile, onClose, onSaved }) => {
   const [files, setFiles] = useState([]);
   const fileInputRef = useRef(null);
   const [paidAmountThb, setPaidAmountThb] = useState(order.paid_amount_thb ?? order.grand_total_thb ?? 0);
+  const [paidAmountForeign, setPaidAmountForeign] = useState(() => round2(num(order.paid_amount_thb ?? order.grand_total_thb ?? 0) / (num(order.fx_rate) || 1)));
   const [localFreightAmount, setLocalFreightAmount] = useState(order.currency === 'THB' ? 0 : (order.freight_amount || 0));
   const [thaiFreightThb, setThaiFreightThb] = useState(order.thai_freight_thb ?? (order.currency === 'THB' ? (order.freight_thb ?? order.freight_amount ?? 0) : 0));
   const arrivedItems = order.purchase_order_items || [];
@@ -1553,13 +1590,26 @@ const StatusUpdateModal = ({ order, status, profile, onClose, onSaved }) => {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div>
                 <p className="text-xs font-bold text-emerald-600 uppercase tracking-wide">ยอดตามระบบ</p>
-                <p className="font-bold text-gray-900">฿{num(order.grand_total_thb).toLocaleString()}</p>
+                <p className="font-bold text-gray-900">฿{num(order.grand_total_thb).toLocaleString()}
+                  {!isTHB && <span className="text-sm font-semibold text-emerald-600 ml-2">≈ {orderCurrency} {round2(num(order.grand_total_thb) / (num(order.fx_rate) || 1)).toLocaleString()}</span>}
+                </p>
               </div>
-              <p className="text-xs text-gray-400">ใช้สำหรับบันทึกว่าโอนจริงเท่าไหร่ อาจเท่าหรือไม่เท่ากับยอดระบบได้</p>
+              <p className="text-xs text-gray-400 sm:max-w-[230px]">กรอกได้ทั้ง THB หรือ {orderCurrency} ระบบแปลงให้อัตโนมัติ (เติมยอดระบบให้แล้ว)</p>
             </div>
-            <Field label="ยอดที่จ่ายจริง (THB) *">
-              <input type="number" min="0" step="0.01" required value={paidAmountThb} onChange={e => setPaidAmountThb(e.target.value)} className={inputClass} />
-            </Field>
+            <div className={`grid grid-cols-1 ${isTHB ? '' : 'sm:grid-cols-2'} gap-2`}>
+              <Field label="ยอดที่จ่ายจริง (THB) *">
+                <input type="number" min="0" step="0.01" required value={paidAmountThb}
+                  onChange={e => { const v = e.target.value; setPaidAmountThb(v); setPaidAmountForeign(v === '' ? '' : round2(num(v) / (num(order.fx_rate) || 1))); }}
+                  className={inputClass} />
+              </Field>
+              {!isTHB && (
+                <Field label={`ยอดที่จ่ายจริง (${orderCurrency})`}>
+                  <input type="number" min="0" step="0.01" value={paidAmountForeign}
+                    onChange={e => { const v = e.target.value; setPaidAmountForeign(v); setPaidAmountThb(v === '' ? '' : round2(num(v) * (num(order.fx_rate) || 1))); }}
+                    className={inputClass} />
+                </Field>
+              )}
+            </div>
           </div>
         )}
         {status === 'arrived' && (
