@@ -454,10 +454,16 @@ const MiniStageTracker = ({ order }) => {
 const OrderList = ({ orders, onNew, onOpen, canCreate, loading }) => {
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('');
+  const [showReceived, setShowReceived] = useState(false); // รอบที่รับเข้าสต๊อกแล้ว → เก็บเป็นประวัติ ซ่อนจากบอร์ด
+  const receivedCount = orders.filter(o => o.status === 'received').length;
   const filtered = orders.filter(o => {
     const itemHay = (o.purchase_order_items || []).map(item => `${item.product?.name || ''} ${item.variant?.name || ''}`).join(' ');
     const hay = `${o.order_number || ''} ${o.supplier?.name || ''} ${itemHay}`.toLowerCase();
-    return hay.includes(search.toLowerCase()) && (!status || o.status === status);
+    if (!hay.includes(search.toLowerCase())) return false;
+    if (status) return o.status === status;
+    // ค่าเริ่มต้น: ซ่อนที่รับเข้าแล้ว เว้นแต่กดดูประวัติ
+    if (o.status === 'received' && !showReceived) return false;
+    return true;
   });
   const currentStageDate = (order) => {
     if (order.status === 'received') return order.received_at || order.arrived_at;
@@ -478,6 +484,11 @@ const OrderList = ({ orders, onNew, onOpen, canCreate, loading }) => {
             <option value="">ทุกสถานะ</option>
             {STATUSES.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
           </select>
+          {!status && (
+            <button onClick={() => setShowReceived(v => !v)} disabled={receivedCount === 0 && !showReceived} className={`py-2.5 px-3 rounded-xl text-sm font-semibold border flex items-center gap-1.5 ${showReceived ? 'bg-indigo-50 border-indigo-200 text-indigo-600' : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'} disabled:opacity-50 disabled:cursor-not-allowed`} title={receivedCount === 0 ? 'ยังไม่มีรอบที่รับเข้าสต๊อกแล้ว' : ''}>
+              <History size={15} /> {showReceived ? 'ซ่อนที่รับเข้าแล้ว' : `ดูที่รับเข้าแล้ว (${receivedCount})`}
+            </button>
+          )}
         </div>
         {canCreate && <button onClick={onNew} className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-xl font-semibold flex items-center gap-2 text-sm"><Plus size={16} /> สร้างรอบสั่งของ</button>}
       </div>
