@@ -38,6 +38,7 @@ const ACTIONS = [
   { id: 'receive_stock', label: 'รับเข้าสต๊อก', onlyFor: ['procurement'] },
   { id: 'adjust', label: 'ปรับยอด/กระทบยอด', onlyFor: ['finance'] },
   { id: 'offset', label: 'เห็นหมวด Offset (ลับ)', onlyFor: ['finance'] },
+  { id: 'close_period', label: 'ปิด/เปิดงวด (สิ้นเดือน)', onlyFor: ['finance'] },
 ];
 
 const RoleManager = () => {

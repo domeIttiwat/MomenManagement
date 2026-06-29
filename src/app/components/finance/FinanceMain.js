@@ -3,7 +3,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import {
   Wallet, TrendingUp, TrendingDown, Plus, ChevronLeft, ChevronRight, Search, X, Loader2,
   Pencil, Trash2, ImagePlus, Tags, ArrowUpCircle, ArrowDownCircle, RefreshCw, Package, Percent, Repeat, ToggleLeft, ToggleRight,
-  GripVertical, FolderPlus, Check,
+  GripVertical, FolderPlus, Check, Camera,
 } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend, ComposedChart, Line } from 'recharts';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
@@ -105,8 +105,12 @@ const FinanceMain = () => {
   const [offsetBalanceEffect, setOffsetBalanceEffect] = useState(0); // ผลต่อยอดคงเหลือจาก offset ทั้งหมด (RPC)
   const [recons, setRecons] = useState([]);              // ประวัติการปรับยอด
   const [reconOpen, setReconOpen] = useState(false);
+  const [closes, setCloses] = useState([]);              // การปิดงวดรายเดือน (snapshot)
+  const [closing, setClosing] = useState(false);
+  const [periodModalOpen, setPeriodModalOpen] = useState(false);
   const postedRef = useRef(false);
   const canAdjust = can('finance', 'adjust'); // ปรับยอด: เฉพาะ role ที่ติ๊ก action "ปรับยอด" (ตอนนี้ Supervisor)
+  const canClose = can('finance', 'close_period'); // ปิด/เปิดงวด: Supervisor + Admin
   const canSeeOffset = can('finance', 'offset'); // เห็นหมวด Offset (ลับ): เฉพาะ Supervisor
   const [showOffset, setShowOffset] = useState(false); // toggle เปิด/ปิด Offset (เฉพาะ Supervisor)
   useEffect(() => { try { if (canSeeOffset && localStorage.getItem('fin_show_offset') === '1') setShowOffset(true); } catch { /* ignore */ } }, [canSeeOffset]);
@@ -160,9 +164,13 @@ const FinanceMain = () => {
     const { data } = await supabase.from('finance_reconciliations').select('*').order('created_at', { ascending: false }).limit(100);
     setRecons(data || []);
   }, []);
+  const fetchCloses = useCallback(async () => {
+    const { data } = await supabase.from('finance_period_closes').select('*').order('period', { ascending: false }).limit(60);
+    setCloses(data || []);
+  }, []);
   const refreshAll = useCallback(() => { fetchTxns(); fetchMonthSpent(); fetchBalance(); }, [fetchTxns, fetchMonthSpent, fetchBalance]);
 
-  useEffect(() => { fetchCategories(); fetchBudgets(); fetchMonthSpent(); fetchBalance(); fetchRecons(); }, [fetchCategories, fetchBudgets, fetchMonthSpent, fetchBalance, fetchRecons]);
+  useEffect(() => { fetchCategories(); fetchBudgets(); fetchMonthSpent(); fetchBalance(); fetchRecons(); fetchCloses(); }, [fetchCategories, fetchBudgets, fetchMonthSpent, fetchBalance, fetchRecons, fetchCloses]);
   useEffect(() => { fetchTxns(); }, [fetchTxns]);
   useEffect(() => { fetchBalance(); }, [txns, fetchBalance]); // ยอดคงเหลือเปลี่ยนเมื่อมีรายการเพิ่ม/แก้/ลบ
   // โพสต์รายการประจำที่ถึงกำหนด (ครั้งเดียวตอนเปิดหน้า) แล้วโหลดใหม่
@@ -189,6 +197,37 @@ const FinanceMain = () => {
   const expense = baseExpense + (offsetHidden ? offsetPeriodSum : 0); // ยอดรายจ่ายรวม = บวก offset เสมอ
   const net = income - expense;
   const shownBalance = systemBalance + (offsetHidden ? offsetBalanceEffect : 0); // ยอดคงเหลือที่แสดง = บวก offset เสมอ
+
+  // ---- ปิดยอดสิ้นเดือน (เฉพาะมุมมองรายเดือน) ----
+  const periodKey = toStr(new Date(anchor.getFullYear(), anchor.getMonth(), 1));
+  const prevPeriodKey = toStr(new Date(anchor.getFullYear(), anchor.getMonth() - 1, 1));
+  const closesByPeriod = useMemo(() => Object.fromEntries(closes.map(c => [c.period, c])), [closes]);
+  const thisClose = closesByPeriod[periodKey];
+  const openingBalance = Number(closesByPeriod[prevPeriodKey]?.ending_balance || 0); // ยอดยกมา = ending ของเดือนก่อน (snapshot)
+  const endingThisMonth = openingBalance + income - expense; // คงเหลือสิ้นเดือน (รวม offset)
+  const reconciledThisMonth = recons.some(r => String(r.recon_date).slice(0, 7) === periodKey.slice(0, 7));
+
+  const closeMonth = async () => {
+    if (!reconciledThisMonth && !window.confirm('เดือนนี้ยังไม่ได้กระทบยอด (ปรับให้ตรงเงินจริง)\nแนะนำให้กระทบยอดก่อนปิดงวด — ยืนยันปิดงวดเลย?')) return;
+    if (reconciledThisMonth && !window.confirm(`ปิดงวด ${periodLabel('month', anchor)} ?\nยอดปลายงวด ${baht(endingThisMonth)} จะถูกยกไปเป็นยอดต้นเดือนถัดไป`)) return;
+    setClosing(true);
+    try {
+      await supabase.rpc('finance_close_period', { p_period: periodKey, p_by: meRef() });
+      await logAction({ resource_type: 'finance', action: 'create', resource_label: `ปิดงวด ${periodLabel('month', anchor)} (คงเหลือ ${baht(endingThisMonth)})`, created_by: meRef() });
+      fetchCloses();
+    } catch (err) { alert('ปิดงวดไม่สำเร็จ: ' + err.message); }
+    finally { setClosing(false); }
+  };
+  const reopenMonth = async () => {
+    if (!window.confirm(`เปิดงวด ${periodLabel('month', anchor)} ใหม่?\n(ยอดยกมาของเดือนถัดไปที่ปิดไปแล้วจะไม่เปลี่ยน เพื่อไม่ให้กระทบเดือนปัจจุบัน)`)) return;
+    setClosing(true);
+    try {
+      await supabase.rpc('finance_reopen_period', { p_period: periodKey });
+      await logAction({ resource_type: 'finance', action: 'update', resource_label: `เปิดงวด ${periodLabel('month', anchor)}`, created_by: meRef() });
+      fetchCloses();
+    } catch (err) { alert('เปิดงวดไม่สำเร็จ: ' + err.message); }
+    finally { setClosing(false); }
+  };
   const salesIncome = scoped.filter(t => t.type === 'income' && (t.source === 'order' || t.source === 'service')).reduce((s, t) => s + Number(t.amount || 0), 0);
   const grossProfit = salesIncome - cogs;
 
@@ -296,6 +335,7 @@ const FinanceMain = () => {
             {canEdit && <button onClick={() => setTxModal({ type: 'income' })} className="px-4 py-2.5 rounded-xl font-bold flex items-center gap-2 text-sm text-white" style={{ backgroundColor: EARTH.income }}><ArrowUpCircle size={16} /> + รายรับ</button>}
             {canEdit && <button onClick={() => setTxModal({ type: 'expense' })} className="px-4 py-2.5 rounded-xl font-bold flex items-center gap-2 text-sm text-white" style={{ backgroundColor: EARTH.expense }}><ArrowDownCircle size={16} /> + รายจ่าย</button>}
             {canAdjust && <button onClick={() => setReconOpen(true)} className="px-4 py-2.5 rounded-xl font-bold flex items-center gap-2 text-sm text-white bg-white/15 backdrop-blur border border-white/25 hover:bg-white/25 transition-colors"><Wallet size={16} /> ปรับยอด</button>}
+            {canClose && mode === 'month' && <button onClick={() => setPeriodModalOpen(true)} className="px-4 py-2.5 rounded-xl font-bold flex items-center gap-2 text-sm text-white bg-white/15 backdrop-blur border border-white/25 hover:bg-white/25 transition-colors"><Check size={16} /> ปิดยอด</button>}
           </div>
         )}
       </div>
@@ -507,8 +547,6 @@ const FinanceMain = () => {
         )}
       </div>
 
-      {/* กระทบยอดเงินสด — สถิติเห็นทุกคน, ปรับยอดเฉพาะ Supervisor */}
-      <ReconcileCard systemBalance={shownBalance} recons={recons} canAdjust={canAdjust} />
 
       {/* ช่องทางที่ลูกค้าจ่ายเข้ามา (สถิติ) */}
       {incomeByMethod.length > 0 && (
@@ -588,7 +626,8 @@ const FinanceMain = () => {
       {catModalOpen && <CategoryModal categories={pickCategories} onClose={() => setCatModalOpen(false)} onChanged={fetchCategories} canDelete={canDelete} />}
       {recurOpen && <RecurringModal categories={pickCategories} profile={profile} onClose={() => setRecurOpen(false)} onChanged={fetchTxns} canDelete={canDelete} />}
       {budgetModal && <BudgetModal {...budgetModal} categories={pickCategories} profile={profile} onClose={() => setBudgetModal(null)} onSaved={() => { setBudgetModal(null); fetchBudgets(); fetchMonthSpent(); }} />}
-      {reconOpen && <ReconcileModal systemBalance={shownBalance} categories={categories} profile={profile} onClose={() => setReconOpen(false)} onSaved={() => { setReconOpen(false); refreshAll(); fetchRecons(); }} />}
+      {reconOpen && <ReconcileModal systemBalance={shownBalance} recons={recons} categories={categories} profile={profile} onClose={() => setReconOpen(false)} onSaved={() => { setReconOpen(false); refreshAll(); fetchRecons(); }} />}
+      {periodModalOpen && <PeriodCloseModal periodTitle={periodLabel('month', anchor)} opening={openingBalance} income={income} expense={expense} ending={endingThisMonth} thisClose={thisClose} closes={closes} reconciled={reconciledThisMonth} closing={closing} onCloseMonth={closeMonth} onReopen={reopenMonth} onClose={() => setPeriodModalOpen(false)} />}
     </div>
   );
 };
@@ -851,10 +890,19 @@ const TxModal = ({ txn, defaultType, categories, profile, onClose, onSaved }) =>
                 <button type="button" onClick={() => setImages(images.filter((_, x) => x !== i))} className="absolute top-0.5 right-0.5 bg-red-500 text-white rounded-full p-0.5"><X size={10} /></button>
               </div>
             ))}
-            {files.map((f, i) => <div key={`f${i}`} className="w-16 h-16 rounded-xl overflow-hidden border border-gray-100"><img src={URL.createObjectURL(f)} alt="" className="w-full h-full object-cover" /></div>)}
-            <label className="w-16 h-16 rounded-xl border-2 border-dashed border-gray-300 flex items-center justify-center cursor-pointer hover:border-indigo-400 text-gray-400">
-              <input type="file" accept="image/*" multiple className="hidden" onChange={e => setFiles(prev => [...prev, ...Array.from(e.target.files || [])])} />
-              <ImagePlus size={18} />
+            {files.map((f, i) => (
+              <div key={`f${i}`} className="relative w-16 h-16 rounded-xl overflow-hidden border border-gray-100">
+                <img src={URL.createObjectURL(f)} alt="" className="w-full h-full object-cover" />
+                <button type="button" onClick={() => setFiles(files.filter((_, x) => x !== i))} className="absolute top-0.5 right-0.5 bg-black/55 text-white rounded-full p-0.5"><X size={10} /></button>
+              </div>
+            ))}
+            <label className="w-16 h-16 rounded-xl border-2 border-dashed border-gray-300 flex flex-col items-center justify-center cursor-pointer hover:border-stone-400 text-gray-400 text-[9px] gap-0.5">
+              <ImagePlus size={16} /> แนบรูป
+              <input type="file" accept="image/*" multiple className="hidden" onChange={e => { setFiles(prev => [...prev, ...Array.from(e.target.files || [])]); e.target.value = ''; }} />
+            </label>
+            <label className="w-16 h-16 rounded-xl border-2 border-dashed border-gray-300 flex flex-col items-center justify-center cursor-pointer hover:border-stone-400 text-gray-400 text-[9px] gap-0.5">
+              <Camera size={16} /> ถ่ายรูป
+              <input type="file" accept="image/*" capture="environment" className="hidden" onChange={e => { setFiles(prev => [...prev, ...Array.from(e.target.files || [])]); e.target.value = ''; }} />
             </label>
           </div>
         </div>
@@ -1041,14 +1089,26 @@ const QuickExpense = ({ categories, profile, onSaved }) => {
         <label className="text-xs text-gray-500 flex items-center gap-1.5">วันที่ &amp; เวลา
           <input type="datetime-local" value={dt} onChange={e => setDt(e.target.value)} className="text-xs px-2 py-1.5 bg-gray-50 border border-gray-200 rounded-lg outline-none" />
         </label>
-        <button onClick={() => setShowMore(s => !s)} className="text-xs font-semibold text-stone-600 hover:underline">{showMore ? 'ซ่อน' : 'เพิ่มช่องทาง/แนบรูป'}</button>
-        {showMore && (
-          <>
-            <select value={method} onChange={e => setMethod(e.target.value)} className="text-xs px-2 py-1.5 bg-gray-50 border border-gray-200 rounded-lg outline-none">{METHODS.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}</select>
-            <label className="text-xs px-2 py-1.5 bg-gray-50 border border-gray-200 rounded-lg cursor-pointer flex items-center gap-1 text-gray-500"><ImagePlus size={13} /> แนบรูป<input type="file" accept="image/*" multiple className="hidden" onChange={e => setFiles(prev => [...prev, ...Array.from(e.target.files || [])])} /></label>
-            {files.length > 0 && <span className="text-xs text-gray-400">{files.length} รูป</span>}
-          </>
-        )}
+        <button onClick={() => setShowMore(s => !s)} className="text-xs font-semibold text-stone-600 hover:underline">{showMore ? 'ซ่อนช่องทาง' : 'เลือกช่องทางจ่าย'}</button>
+        {showMore && <select value={method} onChange={e => setMethod(e.target.value)} className="text-xs px-2 py-1.5 bg-gray-50 border border-gray-200 rounded-lg outline-none">{METHODS.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}</select>}
+      </div>
+      {/* แนบรูปบิล — เห็นตัวอย่าง, หลายรูป, ถ่ายรูปได้ */}
+      <div className="flex items-center gap-2 mt-2.5 flex-wrap">
+        {files.map((f, i) => (
+          <div key={i} className="relative w-14 h-14 rounded-lg overflow-hidden border border-gray-200 group">
+            <img src={URL.createObjectURL(f)} alt="" className="w-full h-full object-cover" />
+            <button onClick={() => setFiles(prev => prev.filter((_, x) => x !== i))} className="absolute top-0.5 right-0.5 bg-black/55 text-white rounded-full p-0.5"><X size={11} /></button>
+          </div>
+        ))}
+        <label className="w-14 h-14 rounded-lg border-2 border-dashed border-gray-300 flex flex-col items-center justify-center cursor-pointer hover:border-stone-400 text-gray-400 text-[9px] gap-0.5">
+          <ImagePlus size={16} /> แนบรูป
+          <input type="file" accept="image/*" multiple className="hidden" onChange={e => { setFiles(prev => [...prev, ...Array.from(e.target.files || [])]); e.target.value = ''; }} />
+        </label>
+        <label className="w-14 h-14 rounded-lg border-2 border-dashed border-gray-300 flex flex-col items-center justify-center cursor-pointer hover:border-stone-400 text-gray-400 text-[9px] gap-0.5">
+          <Camera size={16} /> ถ่ายรูป
+          <input type="file" accept="image/*" capture="environment" className="hidden" onChange={e => { setFiles(prev => [...prev, ...Array.from(e.target.files || [])]); e.target.value = ''; }} />
+        </label>
+        {files.length > 0 && <span className="text-xs text-gray-400">{files.length} รูป</span>}
       </div>
     </div>
   );
@@ -1285,62 +1345,9 @@ const ExpenseBreakdownCard = ({ scoped, categories, canEdit, budgetByCat, setBud
 // ===================== กระทบยอดเงินสด (สถิติเห็นทุกคน / ปรับยอดเฉพาะ Supervisor) =====================
 const reconDateLabel = (s) => { const d = new Date(s); return `${d.getDate()} ${TH_MONTHS[d.getMonth()]} ${(d.getFullYear() + 543) % 100}`; };
 
-const ReconcileCard = ({ systemBalance, recons, canAdjust }) => {
+const ReconcileModal = ({ systemBalance, recons = [], categories, profile, onClose, onSaved }) => {
   const totalOver = recons.filter(r => Number(r.diff) > 0).reduce((s, r) => s + Number(r.diff), 0);
   const totalShort = recons.filter(r => Number(r.diff) < 0).reduce((s, r) => s + Math.abs(Number(r.diff)), 0);
-  return (
-    <div className="bg-white rounded-3xl border border-gray-100 shadow-sm p-5">
-      <div className="flex items-start justify-between gap-3 flex-wrap mb-4">
-        <div>
-          <h3 className="font-bold text-gray-800">กระทบยอดเงินสด</h3>
-          <p className="text-xs text-gray-400">เทียบยอดในระบบกับเงินจริงที่นับได้ แล้วปรับให้ตรง{!canAdjust ? ' · ปรับยอดได้เฉพาะ Supervisor' : ''}</p>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-3 gap-3 mb-4">
-        <div className="rounded-2xl bg-stone-50 p-3">
-          <p className="text-[11px] text-gray-400">ยอดคงเหลือในระบบ</p>
-          <p className="text-lg sm:text-xl font-black text-gray-800">{baht(systemBalance)}</p>
-        </div>
-        <div className="rounded-2xl bg-stone-50 p-3">
-          <p className="text-[11px] text-gray-400">ปรับเกินสะสม</p>
-          <p className="text-lg sm:text-xl font-black" style={{ color: EARTH.income }}>{baht(totalOver)}</p>
-        </div>
-        <div className="rounded-2xl bg-stone-50 p-3">
-          <p className="text-[11px] text-gray-400">ปรับขาดสะสม</p>
-          <p className="text-lg sm:text-xl font-black" style={{ color: EARTH.expense }}>{baht(totalShort)}</p>
-        </div>
-      </div>
-
-      <p className="text-xs font-bold text-gray-400 mb-2">ประวัติการปรับยอด {recons.length > 0 ? `(${recons.length})` : ''}</p>
-      {recons.length === 0 ? (
-        <p className="text-center text-gray-400 py-8 text-sm">ยังไม่มีการปรับยอด</p>
-      ) : (
-        <div className="space-y-2 max-h-80 overflow-auto pr-1">
-          {recons.map(r => {
-            const d = Number(r.diff); const over = d > 0; const even = Math.round(d * 100) === 0;
-            const col = even ? '#a8a29e' : over ? EARTH.income : EARTH.expense;
-            return (
-              <div key={r.id} className="flex items-start gap-3 p-2.5 rounded-2xl border border-stone-100">
-                <span className="mt-0.5 shrink-0" style={{ color: col }}>{over ? <ArrowUpCircle size={20} /> : even ? <Check size={20} /> : <ArrowDownCircle size={20} />}</span>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-bold text-gray-800">
-                    {even ? 'ตรงพอดี' : over ? 'เงินเกิน' : 'เงินขาด'} {!even && <span style={{ color: col }}>{baht(Math.abs(d))}</span>}
-                    <span className="text-xs font-normal text-gray-400"> · {reconDateLabel(r.recon_date)}</span>
-                  </p>
-                  <p className="text-xs text-gray-500 truncate">{r.reason || '—'}</p>
-                  <p className="text-[11px] text-gray-400">นับได้ {baht(r.counted_total)} / ระบบ {baht(r.system_balance)}{r.created_by?.name ? ` · โดย ${r.created_by.name}` : ''}</p>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-};
-
-const ReconcileModal = ({ systemBalance, categories, profile, onClose, onSaved }) => {
   const meRef = () => (profile ? { id: profile.id, name: `${profile.first_name} ${profile.last_name}` } : null);
   const [date, setDate] = useState(toStr(new Date()));
   const [lines, setLines] = useState([{ name: 'เงินสด', amount: '' }]);
@@ -1405,6 +1412,10 @@ const ReconcileModal = ({ systemBalance, categories, profile, onClose, onSaved }
         <div className="rounded-2xl p-4 text-white" style={{ background: 'linear-gradient(135deg, #5b4a3c, #3d3833)' }}>
           <p className="text-[11px] uppercase tracking-wider text-white/50">ยอดคงเหลือในระบบ</p>
           <p className="text-2xl font-black">{baht(systemBalance)}</p>
+          <div className="flex gap-4 mt-2 pt-2 border-t border-white/10 text-xs">
+            <span className="text-white/60">ปรับเกินสะสม <span className="font-bold text-white">{baht(totalOver)}</span></span>
+            <span className="text-white/60">ปรับขาดสะสม <span className="font-bold text-white">{baht(totalShort)}</span></span>
+          </div>
         </div>
 
         <div>
@@ -1451,6 +1462,86 @@ const ReconcileModal = ({ systemBalance, categories, profile, onClose, onSaved }
           <button onClick={onClose} disabled={saving} className="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-xl text-sm font-semibold">ยกเลิก</button>
           <button onClick={save} disabled={saving} className="px-5 py-2 text-white rounded-xl text-sm font-bold flex items-center gap-2 disabled:opacity-50" style={{ backgroundColor: EARTH.net }}>{saving && <Loader2 size={14} className="animate-spin" />} ยืนยันปรับยอด</button>
         </div>
+
+        {/* ประวัติการปรับยอด */}
+        <div className="pt-1">
+          <p className="text-xs font-bold text-gray-400 mb-2">ประวัติการปรับยอด {recons.length > 0 ? `(${recons.length})` : ''}</p>
+          {recons.length === 0 ? (
+            <p className="text-center text-gray-400 py-6 text-sm">ยังไม่มีการปรับยอด</p>
+          ) : (
+            <div className="space-y-2 max-h-60 overflow-auto pr-1">
+              {recons.map(r => {
+                const d = Number(r.diff); const ov = d > 0; const ev = Math.round(d * 100) === 0;
+                const col = ev ? '#a8a29e' : ov ? EARTH.income : EARTH.expense;
+                return (
+                  <div key={r.id} className="flex items-start gap-3 p-2.5 rounded-2xl border border-stone-100">
+                    <span className="mt-0.5 shrink-0" style={{ color: col }}>{ov ? <ArrowUpCircle size={20} /> : ev ? <Check size={20} /> : <ArrowDownCircle size={20} />}</span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-bold text-gray-800">{ev ? 'ตรงพอดี' : ov ? 'เงินเกิน' : 'เงินขาด'} {!ev && <span style={{ color: col }}>{baht(Math.abs(d))}</span>}<span className="text-xs font-normal text-gray-400"> · {reconDateLabel(r.recon_date)}</span></p>
+                      <p className="text-xs text-gray-500 truncate">{r.reason || '—'}</p>
+                      <p className="text-[11px] text-gray-400">นับได้ {baht(r.counted_total)} / ระบบ {baht(r.system_balance)}{r.created_by?.name ? ` · โดย ${r.created_by.name}` : ''}</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ===================== ปิดยอดสิ้นเดือน (หน้าต่าง) =====================
+const PeriodCloseModal = ({ periodTitle, opening, income, expense, ending, thisClose, closes, reconciled, closing, onCloseMonth, onReopen, onClose }) => {
+  const op = thisClose ? Number(thisClose.opening_balance) : opening;
+  const inc = thisClose ? Number(thisClose.total_income) : income;
+  const exp = thisClose ? Number(thisClose.total_expense) : expense;
+  const end = thisClose ? Number(thisClose.ending_balance) : ending;
+  const monthLabel = (p) => { const d = new Date(p); return `${TH_MONTHS[d.getMonth()]} ${(d.getFullYear() + 543) % 100}`; };
+  return (
+    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-3xl w-full max-w-md max-h-[92vh] overflow-auto p-5 space-y-4" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="font-bold text-xl text-gray-900 flex items-center gap-2">ปิดยอดสิ้นเดือน {thisClose && <span className="text-[11px] font-bold text-white px-2 py-0.5 rounded-full" style={{ backgroundColor: EARTH.net }}>ปิดงวดแล้ว</span>}</h3>
+            <p className="text-xs text-gray-400">{periodTitle}{thisClose ? ` · ปิดเมื่อ ${reconDateLabel(thisClose.closed_at)}${thisClose.closed_by?.name ? ` โดย ${thisClose.closed_by.name}` : ''}` : ''}</p>
+          </div>
+          <button onClick={onClose} className="p-1.5 text-gray-400 hover:bg-gray-100 rounded-lg"><X size={18} /></button>
+        </div>
+
+        {/* สมการยกยอด */}
+        <div className="rounded-2xl border border-stone-200 divide-y divide-stone-100">
+          <div className="flex justify-between px-4 py-2.5"><span className="text-sm text-gray-500">ยอดยกมา</span><span className="font-bold" style={{ color: op < 0 ? EARTH.expense : '#44403c' }}>{baht(op)}</span></div>
+          <div className="flex justify-between px-4 py-2.5"><span className="text-sm text-gray-500">+ รายรับเดือนนี้</span><span className="font-bold" style={{ color: EARTH.income }}>{baht(inc)}</span></div>
+          <div className="flex justify-between px-4 py-2.5"><span className="text-sm text-gray-500">− รายจ่ายเดือนนี้</span><span className="font-bold" style={{ color: EARTH.expense }}>{baht(exp)}</span></div>
+          <div className="flex justify-between items-center px-4 py-3 rounded-b-2xl text-white" style={{ background: 'linear-gradient(135deg, #5b4a3c, #3d3833)' }}><span className="text-sm font-bold">= คงเหลือสิ้นเดือน</span><span className="text-xl font-black">{baht(end)}</span></div>
+        </div>
+
+        {thisClose
+          ? <p className="text-[11px] text-gray-400">ยอดคงเหลือถูกยกไปเป็นยอดต้นเดือนถัดไปแล้ว · แก้รายการย้อนหลังได้ ไม่กระทบเดือนปัจจุบัน</p>
+          : (!reconciled && <p className="text-[11px]" style={{ color: EARTH.expense }}>เดือนนี้ยังไม่ได้กระทบยอด — แนะนำกด “ปรับยอด” ให้ตรงเงินจริงก่อนปิดงวด</p>)}
+
+        {/* ปุ่มปิด/เปิดงวด */}
+        {thisClose
+          ? <button onClick={onReopen} disabled={closing} className="w-full py-2.5 rounded-xl text-sm font-bold border border-stone-300 text-stone-600 hover:bg-stone-50 flex items-center justify-center gap-2 disabled:opacity-50">{closing ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />} เปิดงวดเดือนนี้ใหม่</button>
+          : <button onClick={onCloseMonth} disabled={closing} className="w-full py-2.5 rounded-xl text-sm font-bold text-white flex items-center justify-center gap-2 disabled:opacity-50" style={{ backgroundColor: EARTH.net }}>{closing ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />} ปิดงวดเดือนนี้</button>}
+
+        {/* ประวัติการปิดงวด */}
+        {closes.length > 0 && (
+          <div>
+            <p className="text-xs font-bold text-gray-400 mb-2">ประวัติการปิดงวด</p>
+            <div className="space-y-1.5 max-h-48 overflow-auto pr-1">
+              {closes.map(c => (
+                <div key={c.id} className="flex items-center justify-between text-sm px-3 py-2 rounded-xl bg-stone-50">
+                  <span className="font-semibold text-gray-700">{monthLabel(c.period)}</span>
+                  <span className="text-xs text-gray-400">ยกมา {baht(c.opening_balance)} → คงเหลือ</span>
+                  <span className="font-bold" style={{ color: Number(c.ending_balance) < 0 ? EARTH.expense : '#44403c' }}>{baht(c.ending_balance)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

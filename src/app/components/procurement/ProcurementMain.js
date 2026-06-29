@@ -244,6 +244,8 @@ const emptyItem = () => ({
   quantity_ordered: 1,
   quantity_received: '',
   unit_cost_foreign: 0,
+  cost_thb_basis: null, // ต้นทุน THB ที่ใช้เดาราคาต่างประเทศ (auto)
+  cost_auto: false,     // true = ราคามาจากเดา (บาท ÷ เรต) → คำนวณใหม่เมื่อเรตเปลี่ยน
   new_sell_price_thb: '',
   location_id: '',
   note: '',
@@ -705,17 +707,44 @@ const OrderFormPanel = ({ order, suppliers, products, lastPurchases, profile, ca
     return map;
   }, [lastPurchases]);
   const getLastPurchase = useCallback((productId, variantId = '') => lastPurchaseMap[purchaseKey(productId, variantId || '')] || null, [lastPurchaseMap]);
-  const defaultUnitCost = useCallback((product, variant = null) => {
+  // คืน { foreign, basisThb, isForeignHistory }
+  // - ถ้าเคยซื้อสกุลเดียวกันมาก่อน → ใช้ราคาต่างประเทศจริง (ไม่ใช่ค่าเดา → ไม่คำนวณใหม่ตอนเรตเปลี่ยน)
+  // - ถ้าไม่มี → เดาจากต้นทุน THB ÷ เรต (basisThb เก็บไว้คำนวณใหม่เมื่อเรตเปลี่ยน)
+  const autoCost = useCallback((product, variant = null) => {
     const fx = num(form.fx_rate) || 1;
     const latestPurchase = getLastPurchase(product?.id, variant?.id || '');
     const latestCurrency = latestPurchase?.purchase_order?.currency || 'THB';
-    if (latestPurchase && latestCurrency === (form.currency || 'THB')) return num(latestPurchase.unit_cost_foreign);
+    if (latestPurchase && latestCurrency === (form.currency || 'THB')) {
+      return { foreign: num(latestPurchase.unit_cost_foreign), basisThb: null, isForeignHistory: true };
+    }
     const costThb = hasCostValue(latestPurchase?.unit_cost_thb)
-      ? latestPurchase.unit_cost_thb
-      : (hasCostValue(variant?.cost_price) ? variant.cost_price : product?.cost_price);
-    if (!hasCostValue(costThb)) return 0;
-    return (form.currency || 'THB') === 'THB' ? round2(costThb) : round2(num(costThb) / fx);
+      ? num(latestPurchase.unit_cost_thb)
+      : (hasCostValue(variant?.cost_price) ? num(variant.cost_price) : num(product?.cost_price));
+    if (!hasCostValue(costThb)) return { foreign: 0, basisThb: null, isForeignHistory: false };
+    const foreign = (form.currency || 'THB') === 'THB' ? round2(costThb) : round2(costThb / fx);
+    return { foreign, basisThb: round2(costThb), isForeignHistory: false };
   }, [form.currency, form.fx_rate, getLastPurchase]);
+  // ใส่ราคา auto ลงรายการ พร้อม flag เพื่อให้คำนวณใหม่เมื่อเรตเปลี่ยน
+  const withAutoCost = useCallback((item, product, variant = null) => {
+    const a = autoCost(product, variant);
+    return { ...item, unit_cost_foreign: a.foreign, cost_thb_basis: a.basisThb, cost_auto: !a.isForeignHistory && hasCostValue(a.basisThb) };
+  }, [autoCost]);
+  // เมื่อเปลี่ยนสกุลเงิน/อัตราแลกเปลี่ยน → คำนวณราคาต่างประเทศของรายการที่เป็น auto ใหม่ (บาท ÷ เรต)
+  useEffect(() => {
+    const fx = num(form.fx_rate) || 1;
+    const cur = form.currency || 'THB';
+    setForm(prev => {
+      let changed = false;
+      const items = prev.items.map(it => {
+        if (it.cost_auto && hasCostValue(it.cost_thb_basis)) {
+          const nv = cur === 'THB' ? round2(num(it.cost_thb_basis)) : round2(num(it.cost_thb_basis) / fx);
+          if (num(it.unit_cost_foreign) !== nv) { changed = true; return { ...it, unit_cost_foreign: nv }; }
+        }
+        return it;
+      });
+      return changed ? { ...prev, items } : prev;
+    });
+  }, [form.fx_rate, form.currency]); // eslint-disable-line
   const lastPurchaseText = (purchase) => {
     if (!purchase) return 'ซื้อครั้งล่าสุด: ยังไม่มีประวัติ';
     const currency = purchase.purchase_order?.currency || 'THB';
@@ -754,8 +783,9 @@ const OrderFormPanel = ({ order, suppliers, products, lastPurchases, profile, ca
       items[idx] = { ...items[idx], [field]: value };
       if (field === 'product_id') {
         const product = productById[value];
-        items[idx].variant_id = '';
-        items[idx].unit_cost_foreign = defaultUnitCost(product);
+        items[idx] = withAutoCost({ ...items[idx], variant_id: '' }, product);
+      } else if (field === 'unit_cost_foreign') {
+        items[idx].cost_auto = false; // ผู้ใช้แก้ราคาเอง → เลิกคำนวณอัตโนมัติ
       }
       return { ...prev, items };
     });
@@ -766,12 +796,11 @@ const OrderFormPanel = ({ order, suppliers, products, lastPurchases, profile, ca
       const items = [...prev.items];
       const product = productById[items[idx]?.product_id];
       const variant = (product?.product_variants || []).find(v => String(v.id) === String(variantId));
-      items[idx] = {
+      items[idx] = withAutoCost({
         ...items[idx],
         variant_id: variantId || '',
         spec: variant?.name || items[idx].spec || '',
-        unit_cost_foreign: variant ? defaultUnitCost(product, variant) : defaultUnitCost(product),
-      };
+      }, product, variant);
       return { ...prev, items };
     });
   };
@@ -786,13 +815,12 @@ const OrderFormPanel = ({ order, suppliers, products, lastPurchases, profile, ca
       ...prev,
       items: [
         ...prev.items,
-        {
+        withAutoCost({
           ...emptyItem(),
           product_id: product.id,
           variant_id: variant?.id || '',
           spec: variant?.name || '',
-          unit_cost_foreign: defaultUnitCost(product, variant),
-        },
+        }, product, variant),
       ],
     }));
   };
@@ -841,13 +869,12 @@ const OrderFormPanel = ({ order, suppliers, products, lastPurchases, profile, ca
     if (rowIndex !== null && rowIndex !== undefined) {
       setForm(prev => {
         const items = [...prev.items];
-        items[rowIndex] = {
+        items[rowIndex] = withAutoCost({
           ...items[rowIndex],
           product_id: product.id,
           variant_id: variant.id,
           spec: variant.name,
-          unit_cost_foreign: defaultUnitCost(updatedProduct, variant),
-        };
+        }, updatedProduct, variant);
         return { ...prev, items };
       });
     }
@@ -868,11 +895,10 @@ const OrderFormPanel = ({ order, suppliers, products, lastPurchases, profile, ca
         ...prev,
         items: [
           ...prev.items,
-          {
+          withAutoCost({
             ...emptyItem(),
             product_id: fullProduct.id,
-            unit_cost_foreign: defaultUnitCost(fullProduct),
-          },
+          }, fullProduct),
         ],
       }));
       setShowProductForm(false);
@@ -1114,6 +1140,19 @@ const OrderFormPanel = ({ order, suppliers, products, lastPurchases, profile, ca
             </div>
           );
         })}
+        {form.items.length > 0 && (
+          <div className="flex items-center justify-between pt-3 mt-1 border-t border-gray-100">
+            <span className="text-sm font-semibold text-gray-500">ยอดรวมสินค้า{form.currency && form.currency !== 'THB' ? ` (${form.currency})` : ''}</span>
+            <div className="text-right">
+              {form.currency && form.currency !== 'THB'
+                ? (<>
+                    <div className="text-xl font-black text-gray-800">{form.currency} {totals.subtotalForeign.toLocaleString()}</div>
+                    <div className="text-xs text-gray-400">≈ ฿{totals.subtotalThb.toLocaleString()} · FX {num(form.fx_rate) || 1}</div>
+                  </>)
+                : <div className="text-xl font-black text-gray-800">฿{totals.subtotalThb.toLocaleString()}</div>}
+            </div>
+          </div>
+        )}
       </div>
     </form>
       {specModal && (
