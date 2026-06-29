@@ -4,6 +4,8 @@ import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
 
 // รายการระบบและสิทธิ์ที่ทำได้
+// ⚠️ SINGLE SOURCE OF TRUTH ของสิทธิ์ — เพิ่ม resource/action ใหม่ "ที่นี่เสมอ" (ADR-005 / GOTCHA #8)
+//    ทุกครั้งที่โค้ดเช็ค can('x','y') ตัวใหม่ ต้องมาเพิ่มที่ RESOURCES/ACTIONS นี้ + เซ็ตค่าให้ครบทุก role ใน DB
 const RESOURCES = [
   { id: 'dashboard', label: 'ภาพรวม (Dashboard)' },
   { id: 'products', label: 'สินค้า (Products)' },

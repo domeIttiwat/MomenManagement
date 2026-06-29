@@ -10,6 +10,7 @@ import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
 import { logAction } from '@/lib/auditLog';
+import ImageLightbox from '@/app/components/common/ImageLightbox'; // แสดงรูปต้องใช้ตัวนี้เสมอ (GOTCHA #18)
 
 // สร้าง <optgroup> ของ "ชนิด" จัดตาม "หมวด" (ไม่โชว์ตัวที่เป็นหมวด)
 const renderCatOptions = (categories, type) => {
@@ -108,6 +109,7 @@ const FinanceMain = () => {
   const [closes, setCloses] = useState([]);              // การปิดงวดรายเดือน (snapshot)
   const [closing, setClosing] = useState(false);
   const [periodModalOpen, setPeriodModalOpen] = useState(false);
+  const [lightbox, setLightbox] = useState(null); // { images, index } เปิดรูปแบบ popup ในหน้าเดิม
   const postedRef = useRef(false);
   const canAdjust = can('finance', 'adjust'); // ปรับยอด: เฉพาะ role ที่ติ๊ก action "ปรับยอด" (ตอนนี้ Supervisor)
   const canClose = can('finance', 'close_period'); // ปิด/เปิดงวด: Supervisor + Admin
@@ -602,9 +604,10 @@ const FinanceMain = () => {
                     <p className="text-xs text-gray-400 mt-0.5">{fmtDateTime(t.txn_at || t.txn_date)} · {methodLabel(t.method)}</p>
                   </div>
                   {Array.isArray(t.images) && t.images[0] && (
-                    <a href={t.images[0].url || t.images[0]} target="_blank" rel="noopener noreferrer" className="w-9 h-9 rounded-lg overflow-hidden border border-gray-100 shrink-0 hidden sm:block">
+                    <button type="button" onClick={() => setLightbox({ images: t.images, index: 0 })} className="relative w-9 h-9 rounded-lg overflow-hidden border border-gray-100 shrink-0 hover:opacity-80 transition-opacity" title="ดูรูป">
                       <img src={t.images[0].url || t.images[0]} alt="" className="w-full h-full object-cover" />
-                    </a>
+                      {t.images.length > 1 && <span className="absolute bottom-0 right-0 bg-black/60 text-white text-[9px] font-bold px-1 rounded-tl">+{t.images.length - 1}</span>}
+                    </button>
                   )}
                   <span className="font-bold text-sm shrink-0" style={{ color: t.type === 'income' ? EARTH.income : EARTH.expense }}>{t.type === 'income' ? '+' : '-'}{baht(t.amount)}</span>
                   {(canEdit || canDelete) && (
@@ -628,6 +631,7 @@ const FinanceMain = () => {
       {budgetModal && <BudgetModal {...budgetModal} categories={pickCategories} profile={profile} onClose={() => setBudgetModal(null)} onSaved={() => { setBudgetModal(null); fetchBudgets(); fetchMonthSpent(); }} />}
       {reconOpen && <ReconcileModal systemBalance={shownBalance} recons={recons} categories={categories} profile={profile} onClose={() => setReconOpen(false)} onSaved={() => { setReconOpen(false); refreshAll(); fetchRecons(); }} />}
       {periodModalOpen && <PeriodCloseModal periodTitle={periodLabel('month', anchor)} opening={openingBalance} income={income} expense={expense} ending={endingThisMonth} thisClose={thisClose} closes={closes} reconciled={reconciledThisMonth} closing={closing} onCloseMonth={closeMonth} onReopen={reopenMonth} onClose={() => setPeriodModalOpen(false)} />}
+      {lightbox && <ImageLightbox images={lightbox.images} index={lightbox.index} onClose={() => setLightbox(null)} onIndex={(i) => setLightbox(p => ({ ...p, index: i }))} />}
     </div>
   );
 };
@@ -1044,6 +1048,7 @@ const QuickExpense = ({ categories, profile, onSaved }) => {
   const [dt, setDt] = useState(toLocalDT());
   const [files, setFiles] = useState([]);
   const [saving, setSaving] = useState(false);
+  const [savedFlash, setSavedFlash] = useState(false);
   const [showMore, setShowMore] = useState(false);
   useEffect(() => { if (!categoryId && expCats[0]) setCategoryId(String(expCats[0].id)); }, [expCats]); // eslint-disable-line
 
@@ -1063,6 +1068,7 @@ const QuickExpense = ({ categories, profile, onSaved }) => {
       await supabase.from('finance_transactions').insert([{ type: 'expense', category_id: categoryId || null, amount: amt, txn_at: new Date(dt).toISOString(), txn_date: dt.slice(0, 10), method, note: note.trim() || null, images, source: 'manual', created_by: meRef() }]);
       await logAction({ resource_type: 'finance', action: 'create', resource_label: `รายจ่าย ${baht(amt)}`, created_by: meRef() });
       setAmount(''); setNote(''); setFiles([]); setDt(toLocalDT()); // รีเซ็ตเวลาเป็นปัจจุบันสำหรับรายการถัดไป
+      setSavedFlash(true); setTimeout(() => setSavedFlash(false), 1900);
       onSaved();
     } catch (err) { alert('บันทึกไม่สำเร็จ: ' + err.message); }
     finally { setSaving(false); }
@@ -1075,6 +1081,7 @@ const QuickExpense = ({ categories, profile, onSaved }) => {
         <span className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ backgroundColor: EARTH.expense + '1f', color: EARTH.expense }}><ArrowDownCircle size={18} /></span>
         <h3 className="font-bold text-gray-800">บันทึกรายจ่ายด่วน</h3>
         <span className="text-xs text-gray-400">— กรอกแล้วกด Enter ได้เลย</span>
+        {savedFlash && <span className="ml-auto text-xs font-bold text-white px-2.5 py-1 rounded-full flex items-center gap-1 shadow-sm animate-bounce" style={{ backgroundColor: EARTH.income }}><Check size={13} /> บันทึกแล้ว</span>}
       </div>
       <div className="flex flex-col sm:flex-row gap-2">
         <input type="number" min="0" value={amount} onChange={e => setAmount(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') save(); }} placeholder="จำนวนเงิน" className={`${inputCls} sm:w-36 text-xl font-black`} style={{ color: EARTH.expense }} autoFocus />
