@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 
 // Import Components
@@ -26,8 +26,17 @@ const AppContent = () => {
   const [activeTab, setActiveTab] = useState<any>('dashboard');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [navData, setNavData] = useState<any>(null);
+  const landedRef = useRef(false);
 
-  // เมื่อ permissions โหลดเสร็จหรือเปลี่ยน ถ้าแท็บที่อยู่ไม่มีสิทธิ์ → ย้ายไปแท็บแรกที่เข้าถึงได้
+  // ตอนล็อกอินครั้งแรก: เปิดหน้า "การจัดการเงิน" เลย (ใช้บ่อย) ถ้ามีสิทธิ์ ไม่งั้นไปแท็บแรกที่เข้าถึงได้
+  useEffect(() => {
+    if (landedRef.current || permissions.length === 0) return;
+    landedRef.current = true;
+    const preferred = canView('finance') ? 'finance' : (ALL_TABS.find(t => canView(t)) || 'dashboard');
+    setActiveTab(preferred);
+  }, [permissions]);
+
+  // ถ้าแท็บที่อยู่ปัจจุบันไม่มีสิทธิ์ (เช่น permission เปลี่ยน) → ย้ายไปแท็บแรกที่เข้าถึงได้
   useEffect(() => {
     if (permissions.length > 0 && !canView(activeTab)) {
       const first = ALL_TABS.find(t => canView(t)) || 'dashboard';
