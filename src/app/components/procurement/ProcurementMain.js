@@ -936,12 +936,20 @@ const OrderFormPanel = ({ order, suppliers, products, lastPurchases, profile, ca
         if (error) throw error;
         await supabase.from('purchase_order_items').delete().eq('purchase_order_id', orderId);
       } else {
-        const { data, error } = await writePurchaseOrder(
-          nextPayload => supabase.from('purchase_orders').insert([{ ...nextPayload, created_by: profile?.id || null }]).select('id').single(),
-          payload
-        );
-        if (error) throw error;
-        orderId = data.id;
+        let createData = null;
+        for (let attempt = 0; attempt < 6; attempt += 1) {
+          const { data, error } = await writePurchaseOrder(
+            nextPayload => supabase.from('purchase_orders').insert([{ ...nextPayload, created_by: profile?.id || null }]).select('id').single(),
+            payload
+          );
+          if (!error) { createData = data; break; }
+          // เลขรอบซ้ำ (unique) → สุ่มเลขใหม่แล้วลองใหม่
+          const dupOrderNo = error.code === '23505' && /order_number/i.test(error.message || '');
+          if (!dupOrderNo || attempt === 5) throw error;
+          payload.order_number = makeOrderNumber();
+          setForm(prev => ({ ...prev, order_number: payload.order_number }));
+        }
+        orderId = createData.id;
       }
       const itemPayload = form.items.map(item => ({
         purchase_order_id: orderId,
