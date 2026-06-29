@@ -36,6 +36,10 @@ const methodLabel = (k) => METHODS.find(m => m.key === k)?.label || k || '—';
 const baht = (n) => `฿${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
 const pad = (n) => String(n).padStart(2, '0');
 const toStr = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+// ค่าใส่ input datetime-local (เวลาท้องถิ่น) "YYYY-MM-DDTHH:MM"
+const toLocalDT = (v) => { const d = v ? new Date(v) : new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+// แสดงวันที่+เวลาแบบไทย
+const fmtDateTime = (v) => { const d = new Date(v); return `${d.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' })} ${pad(d.getHours())}:${pad(d.getMinutes())} น.`; };
 const TH_MONTHS = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
 // พาเลตเอิร์ธโทน (รายรับ=เซจ, รายจ่าย=ดินเผา/ทองแดง, สุทธิ=น้ำตาลเทา)
 const EARTH = { income: '#5b7553', expense: '#b5651d', net: '#7d6b57', cogs: '#a47148', profit: '#606c38' };
@@ -127,7 +131,7 @@ const FinanceMain = () => {
     const { data } = await supabase.from('finance_transactions')
       .select('*, category:category_id(id, name, color, type)')
       .gte('txn_date', toStr(start)).lt('txn_date', toStr(end))
-      .order('txn_date', { ascending: false }).order('id', { ascending: false });
+      .order('txn_at', { ascending: false }).order('id', { ascending: false });
     setTxns(data || []);
     setLoading(false);
   }, [start, end]);
@@ -261,7 +265,8 @@ const FinanceMain = () => {
   }), [visibleTxns, typeFilter, search]);
 
   const deleteTx = async (t) => {
-    if (!confirm('ลบรายการนี้?')) return;
+    const warn = t.source !== 'manual' ? 'รายการนี้มาจากระบบอัตโนมัติ (ออเดอร์/บริการ) — ถ้าออเดอร์มีการอัปเดตยอดจ่ายอีก ระบบอาจสร้างรายการนี้กลับมา\n\nยืนยันลบ?' : 'ลบรายการนี้?';
+    if (!confirm(warn)) return;
     await supabase.from('finance_transactions').delete().eq('id', t.id);
     await logAction({ resource_type: 'finance', resource_id: t.id, action: 'delete', resource_label: `${t.type === 'income' ? 'รายรับ' : 'รายจ่าย'} ${baht(t.amount)}`, created_by: meRef() });
     refreshAll();
@@ -556,7 +561,7 @@ const FinanceMain = () => {
                       <span className="text-sm text-gray-700 truncate">{t.note || (t.type === 'income' ? 'รายรับ' : 'รายจ่าย')}</span>
                       {t.source === 'recurring' ? <span className="text-[10px] text-stone-500 bg-stone-100 px-1.5 py-0.5 rounded">ประจำ</span> : t.source !== 'manual' && <span className="text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">อัตโนมัติ</span>}
                     </div>
-                    <p className="text-xs text-gray-400 mt-0.5">{new Date(t.txn_date).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' })} · {methodLabel(t.method)}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">{fmtDateTime(t.txn_at || t.txn_date)} · {methodLabel(t.method)}</p>
                   </div>
                   {Array.isArray(t.images) && t.images[0] && (
                     <a href={t.images[0].url || t.images[0]} target="_blank" rel="noopener noreferrer" className="w-9 h-9 rounded-lg overflow-hidden border border-gray-100 shrink-0 hidden sm:block">
@@ -566,8 +571,8 @@ const FinanceMain = () => {
                   <span className="font-bold text-sm shrink-0" style={{ color: t.type === 'income' ? EARTH.income : EARTH.expense }}>{t.type === 'income' ? '+' : '-'}{baht(t.amount)}</span>
                   {(canEdit || canDelete) && (
                     <div className="flex items-center gap-1 shrink-0 sm:opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
-                      {canEdit && t.source === 'manual' && <button onClick={() => setTxModal(t)} className="p-1.5 text-gray-400 hover:text-stone-700"><Pencil size={15} /></button>}
-                      {canDelete && t.source === 'manual' && <button onClick={() => deleteTx(t)} className="p-1.5 text-gray-400 hover:text-red-500"><Trash2 size={15} /></button>}
+                      {canEdit && <button onClick={() => setTxModal(t)} className="p-1.5 text-gray-400 hover:text-stone-700"><Pencil size={15} /></button>}
+                      {canDelete && <button onClick={() => deleteTx(t)} className="p-1.5 text-gray-400 hover:text-red-500"><Trash2 size={15} /></button>}
                     </div>
                   )}
                 </div>
@@ -754,7 +759,7 @@ const TxModal = ({ txn, defaultType, categories, profile, onClose, onSaved }) =>
   const [type, setType] = useState(txn?.type || defaultType || 'expense');
   const [amount, setAmount] = useState(txn?.amount ?? '');
   const [categoryId, setCategoryId] = useState(txn?.category_id || '');
-  const [date, setDate] = useState(txn?.txn_date || toStr(new Date()));
+  const [dt, setDt] = useState(toLocalDT(txn?.txn_at || (txn?.txn_date ? txn.txn_date + 'T00:00' : null)));
   const [method, setMethod] = useState(txn?.method || 'cash');
   const [note, setNote] = useState(txn?.note || '');
   const [images, setImages] = useState(txn?.images || []);
@@ -778,7 +783,8 @@ const TxModal = ({ txn, defaultType, categories, profile, onClose, onSaved }) =>
         uploaded.push({ url: data.publicUrl });
       }
       const payload = {
-        type, category_id: categoryId || null, amount: amt, txn_date: date,
+        type, category_id: categoryId || null, amount: amt,
+        txn_at: new Date(dt).toISOString(), txn_date: dt.slice(0, 10),
         method, note: note.trim() || null, images: uploaded,
       };
       if (txn?.id) {
@@ -822,8 +828,8 @@ const TxModal = ({ txn, defaultType, categories, profile, onClose, onSaved }) =>
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="block text-xs font-bold text-gray-500 mb-1.5">วันที่</label>
-            <input type="date" value={date} onChange={e => setDate(e.target.value)} className={inputCls} />
+            <label className="block text-xs font-bold text-gray-500 mb-1.5">วันที่ &amp; เวลา</label>
+            <input type="datetime-local" value={dt} onChange={e => setDt(e.target.value)} className={inputCls} />
           </div>
           <div>
             <label className="block text-xs font-bold text-gray-500 mb-1.5">ช่องทาง</label>
@@ -987,7 +993,7 @@ const QuickExpense = ({ categories, profile, onSaved }) => {
   const [categoryId, setCategoryId] = useState('');
   const [method, setMethod] = useState('cash');
   const [note, setNote] = useState('');
-  const [date, setDate] = useState(toStr(new Date()));
+  const [dt, setDt] = useState(toLocalDT());
   const [files, setFiles] = useState([]);
   const [saving, setSaving] = useState(false);
   const [showMore, setShowMore] = useState(false);
@@ -1006,9 +1012,9 @@ const QuickExpense = ({ categories, profile, onSaved }) => {
         const { data: pu } = supabase.storage.from('finance').getPublicUrl(path);
         images.push({ url: pu.publicUrl });
       }
-      await supabase.from('finance_transactions').insert([{ type: 'expense', category_id: categoryId || null, amount: amt, txn_date: date, method, note: note.trim() || null, images, source: 'manual', created_by: meRef() }]);
+      await supabase.from('finance_transactions').insert([{ type: 'expense', category_id: categoryId || null, amount: amt, txn_at: new Date(dt).toISOString(), txn_date: dt.slice(0, 10), method, note: note.trim() || null, images, source: 'manual', created_by: meRef() }]);
       await logAction({ resource_type: 'finance', action: 'create', resource_label: `รายจ่าย ${baht(amt)}`, created_by: meRef() });
-      setAmount(''); setNote(''); setFiles([]); // คงหมวด/ช่องทาง/วันที่ ไว้กรอกรายการถัดไปเร็ว ๆ
+      setAmount(''); setNote(''); setFiles([]); setDt(toLocalDT()); // รีเซ็ตเวลาเป็นปัจจุบันสำหรับรายการถัดไป
       onSaved();
     } catch (err) { alert('บันทึกไม่สำเร็จ: ' + err.message); }
     finally { setSaving(false); }
@@ -1032,10 +1038,12 @@ const QuickExpense = ({ categories, profile, onSaved }) => {
         <button onClick={save} disabled={saving} className="px-5 py-2.5 rounded-xl font-bold text-white text-sm flex items-center justify-center gap-2 disabled:opacity-50 shrink-0" style={{ backgroundColor: EARTH.expense }}>{saving ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />} บันทึก</button>
       </div>
       <div className="flex items-center gap-3 mt-2.5 flex-wrap">
-        <button onClick={() => setShowMore(s => !s)} className="text-xs font-semibold text-stone-600 hover:underline">{showMore ? 'ซ่อน' : 'เพิ่มวันที่/ช่องทาง/แนบรูป'}</button>
+        <label className="text-xs text-gray-500 flex items-center gap-1.5">วันที่ &amp; เวลา
+          <input type="datetime-local" value={dt} onChange={e => setDt(e.target.value)} className="text-xs px-2 py-1.5 bg-gray-50 border border-gray-200 rounded-lg outline-none" />
+        </label>
+        <button onClick={() => setShowMore(s => !s)} className="text-xs font-semibold text-stone-600 hover:underline">{showMore ? 'ซ่อน' : 'เพิ่มช่องทาง/แนบรูป'}</button>
         {showMore && (
           <>
-            <input type="date" value={date} onChange={e => setDate(e.target.value)} className="text-xs px-2 py-1.5 bg-gray-50 border border-gray-200 rounded-lg outline-none" />
             <select value={method} onChange={e => setMethod(e.target.value)} className="text-xs px-2 py-1.5 bg-gray-50 border border-gray-200 rounded-lg outline-none">{METHODS.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}</select>
             <label className="text-xs px-2 py-1.5 bg-gray-50 border border-gray-200 rounded-lg cursor-pointer flex items-center gap-1 text-gray-500"><ImagePlus size={13} /> แนบรูป<input type="file" accept="image/*" multiple className="hidden" onChange={e => setFiles(prev => [...prev, ...Array.from(e.target.files || [])])} /></label>
             {files.length > 0 && <span className="text-xs text-gray-400">{files.length} รูป</span>}
