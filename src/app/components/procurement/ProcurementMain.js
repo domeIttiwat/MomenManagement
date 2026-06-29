@@ -234,6 +234,7 @@ const emptyOrder = {
   freight_currency: 'THB',
   freight_fx_rate: 1,
   thai_freight_thb: 0,
+  discount_amount: 0, // ส่วนลดจากโรงงาน (ในสกุลเงินของรอบ)
   note: '',
   items: [],
 };
@@ -662,6 +663,7 @@ const OrderFormPanel = ({ order, suppliers, products, lastPurchases, profile, ca
     supplier_id: order.supplier_id || '',
     freight_amount: order.freight_amount ?? 0,
     thai_freight_thb: order.thai_freight_thb ?? (order.currency === 'THB' ? (order.freight_thb ?? order.freight_amount ?? 0) : 0),
+    discount_amount: order.discount_amount ?? 0,
     items: (order.purchase_order_items || []).map(i => ({
       ...i,
       variant_id: i.variant_id || '',
@@ -757,8 +759,9 @@ const OrderFormPanel = ({ order, suppliers, products, lastPurchases, profile, ca
     const subtotalThb = subtotalForeign * fx;
     const localFreightThb = (form.currency || 'THB') === 'THB' ? 0 : num(form.freight_amount) * fx;
     const freightThb = localFreightThb + num(form.thai_freight_thb);
-    const grandTotalThb = round2(subtotalThb + freightThb);
-    return { subtotalForeign: round2(subtotalForeign), subtotalThb: round2(subtotalThb), freightThb: round2(freightThb), grandTotalThb, grandTotalForeign: round2(grandTotalThb / fx) };
+    const discountThb = (form.currency || 'THB') === 'THB' ? num(form.discount_amount) : num(form.discount_amount) * fx;
+    const grandTotalThb = round2(subtotalThb + freightThb - discountThb);
+    return { subtotalForeign: round2(subtotalForeign), subtotalThb: round2(subtotalThb), freightThb: round2(freightThb), discountThb: round2(discountThb), grandTotalThb, grandTotalForeign: round2(grandTotalThb / fx) };
   }, [form]);
 
   const updateItem = (idx, field, value) => {
@@ -914,6 +917,8 @@ const OrderFormPanel = ({ order, suppliers, products, lastPurchases, profile, ca
         freight_currency: form.currency || 'THB',
         freight_fx_rate: num(form.fx_rate) || 1,
         thai_freight_thb: num(form.thai_freight_thb),
+        discount_amount: num(form.discount_amount),
+        discount_thb: totals.discountThb,
         subtotal_foreign: totals.subtotalForeign,
         subtotal_thb: totals.subtotalThb,
         freight_thb: totals.freightThb,
@@ -989,7 +994,8 @@ const OrderFormPanel = ({ order, suppliers, products, lastPurchases, profile, ca
           <Field label={`ค่าส่ง local (${form.currency || 'THB'})`}><input type="number" step="0.01" min="0" value={form.freight_amount} onChange={e => setForm({ ...form, freight_amount: e.target.value })} className={inputClass} /></Field>
         )}
         <Field label="ค่าส่งในไทย (THB)"><input type="number" step="0.01" min="0" value={form.thai_freight_thb} onChange={e => setForm({ ...form, thai_freight_thb: e.target.value })} className={inputClass} /></Field>
-        <Field label="ยอดรวม THB"><div className="px-4 py-3 bg-gray-50 rounded-xl"><div className="font-bold text-gray-800">฿{totals.grandTotalThb.toLocaleString()}</div>{form.currency && form.currency !== 'THB' && <div className="text-xs font-semibold text-indigo-500 mt-0.5">≈ {form.currency} {totals.grandTotalForeign.toLocaleString()}</div>}</div></Field>
+        <Field label={`ส่วนลดจากโรงงาน (${form.currency || 'THB'})`}><input type="number" step="0.01" min="0" value={form.discount_amount} onChange={e => setForm({ ...form, discount_amount: e.target.value })} className={inputClass} placeholder="0" /></Field>
+        <Field label="ยอดรวม THB"><div className="px-4 py-3 bg-gray-50 rounded-xl"><div className="font-bold text-gray-800">฿{totals.grandTotalThb.toLocaleString()}</div>{form.currency && form.currency !== 'THB' && <div className="text-xs font-semibold text-indigo-500 mt-0.5">≈ {form.currency} {totals.grandTotalForeign.toLocaleString()}</div>}{num(form.discount_amount) > 0 && <div className="text-xs font-semibold text-emerald-600 mt-0.5">หักส่วนลด {form.currency !== 'THB' ? `${form.currency} ${num(form.discount_amount).toLocaleString()}` : `฿${num(form.discount_amount).toLocaleString()}`} แล้ว</div>}</div></Field>
         <div className="md:col-span-4"><Field label="หมายเหตุ"><textarea rows={2} value={form.note || ''} onChange={e => setForm({ ...form, note: e.target.value })} className={inputClass} /></Field></div>
       </div>
 
@@ -1017,28 +1023,32 @@ const OrderFormPanel = ({ order, suppliers, products, lastPurchases, profile, ca
               <button type="button" onClick={() => setShowProductForm(true)} className="mt-3 px-4 py-2 rounded-xl bg-indigo-600 text-white font-semibold text-sm inline-flex items-center gap-1"><Plus size={14}/> สร้างสินค้าใหม่</button>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3.5">
               {supplierProducts.map(product => {
                 const variants = product.product_variants || [];
                 const mustChooseVariant = product.has_variants || variants.length > 0;
                 const selectedVariantId = supplierVariantSelections[product.id] || '';
+                const qty = productStockQty(product);
                 return (
-                  <div key={product.id} className="border border-gray-100 rounded-2xl p-3 space-y-3">
-                    <div className="flex items-center gap-3">
+                  <div key={product.id} className="group flex flex-col border border-gray-150 rounded-2xl p-3.5 bg-white hover:border-indigo-200 hover:shadow-md transition-all" style={{ borderColor: '#f0f0f3' }}>
+                    <div className="flex gap-3">
                       <ProductMiniThumb product={product} />
                       <div className="flex-1 min-w-0">
-                        <p className="font-semibold text-gray-800 truncate">{product.name}</p>
-                        <p className="text-xs text-gray-400 font-mono">{product.sku || '-'}</p>
-                        <p className="text-xs text-amber-700 font-semibold mt-1">ทุนล่าสุด {productCostText(product)}</p>
-                        <p className="text-xs text-emerald-600 font-semibold mt-0.5">สต๊อก {productStockQty(product).toLocaleString()}</p>
+                        <p className="font-semibold text-gray-800 text-sm leading-snug line-clamp-2">{product.name}</p>
+                        <p className="text-[11px] text-gray-400 font-mono mt-0.5">{product.sku || '-'}</p>
+                        <div className="flex items-center gap-2 mt-1.5 text-[11px]">
+                          <span className="text-gray-400">ทุน <b className="text-gray-700 font-bold">{productCostText(product)}</b></span>
+                          <span className="text-gray-200">·</span>
+                          <span className={`font-semibold ${qty > 0 ? 'text-emerald-600' : 'text-gray-400'}`}>สต๊อก {qty.toLocaleString()}</span>
+                        </div>
                       </div>
                     </div>
                     {mustChooseVariant && (
-                      <div className="space-y-2">
+                      <div className="mt-3 space-y-1.5">
                         <select
                           value={selectedVariantId}
                           onChange={e => setSupplierVariantSelections(prev => ({ ...prev, [product.id]: e.target.value }))}
-                          className={inputClass}
+                          className={`${inputClass} !py-2 text-sm ${!selectedVariantId ? 'border-amber-300 bg-amber-50/40' : ''}`}
                         >
                           <option value="">เลือกสเปค *</option>
                           {variants.map(variant => (
@@ -1047,23 +1057,22 @@ const OrderFormPanel = ({ order, suppliers, products, lastPurchases, profile, ca
                             </option>
                           ))}
                         </select>
-                        <div className="flex flex-wrap gap-1.5">
-                          {variants.slice(0, 4).map(variant => (
-                            <button
-                              type="button"
-                              key={variant.id}
-                              onClick={() => setSupplierVariantSelections(prev => ({ ...prev, [product.id]: String(variant.id) }))}
-                              className={`px-2 py-1 rounded-lg text-xs font-semibold ${String(selectedVariantId) === String(variant.id) ? 'bg-indigo-600 text-white' : 'bg-gray-50 text-gray-600 hover:bg-indigo-50 hover:text-indigo-700'}`}
-                            >
-                              {variant.name}
-                            </button>
-                          ))}
-                        </div>
+                        {variants.length > 1 && (
+                          <div className="flex flex-wrap gap-1">
+                            {variants.slice(0, 4).map(variant => (
+                              <button type="button" key={variant.id}
+                                onClick={() => setSupplierVariantSelections(prev => ({ ...prev, [product.id]: String(variant.id) }))}
+                                className={`px-2 py-0.5 rounded-md text-[11px] font-semibold transition-colors ${String(selectedVariantId) === String(variant.id) ? 'bg-indigo-600 text-white' : 'bg-gray-50 text-gray-500 hover:bg-indigo-50 hover:text-indigo-700'}`}>
+                                {variant.name}
+                              </button>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     )}
-                    <div className="flex gap-2">
-                      <button type="button" onClick={() => setSpecModal({ product })} className="flex-1 px-3 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl text-sm font-semibold flex items-center justify-center gap-1"><Plus size={14}/> เพิ่มสเปคใหม่</button>
-                      <button type="button" onClick={() => addSupplierProduct(product, selectedVariantId)} className="flex-1 px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-semibold flex items-center justify-center gap-1"><Plus size={14}/> เพิ่ม</button>
+                    <div className="flex gap-2 mt-auto pt-3">
+                      <button type="button" onClick={() => setSpecModal({ product })} title="เพิ่มสเปคใหม่" className="px-2.5 py-2 rounded-xl text-gray-400 hover:bg-gray-50 hover:text-indigo-600 text-xs font-semibold flex items-center gap-1 shrink-0"><Plus size={14}/> สเปค</button>
+                      <button type="button" onClick={() => addSupplierProduct(product, selectedVariantId)} className="flex-1 px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-bold flex items-center justify-center gap-1.5 shadow-sm transition-colors"><Plus size={15}/> เพิ่มลงรอบ</button>
                     </div>
                   </div>
                 );
@@ -1337,10 +1346,19 @@ const OrderDetail = ({ order, profile, locations = [], onBack, onEdit, onRefresh
           )}
         </SummaryPanel>
         <SummaryPanel icon={DollarSign} title="ยอดเงิน" subtitle={`สกุลเงินหลัก: ${order.currency || 'THB'} · FX ${num(order.fx_rate) || 1}`}>
-          <SummaryLine label="ยอดสินค้า THB" value={`฿${goodsTotalThb.toLocaleString()}`} />
-          <SummaryLine label="ค่าส่งรวม" value={`฿${shipping.total.toLocaleString()}`} />
-          <SummaryLine label="ยอดรวม THB" value={`฿${num(order.grand_total_thb).toLocaleString()}`} emphasis />
-          <SummaryLine label="ยอดจ่ายจริง" value={paidAmountDisplay !== null ? `฿${num(paidAmountDisplay).toLocaleString()}` : '-'} />
+          {(() => {
+            const cur = order.currency || 'THB';
+            const fx = num(order.fx_rate) || 1;
+            const isForeign = cur !== 'THB';
+            const fgn = (thb) => isForeign ? `≈ ${cur} ${round2(num(thb) / fx).toLocaleString()}` : null;
+            return (<>
+              <SummaryLine label="ยอดสินค้า THB" value={`฿${goodsTotalThb.toLocaleString()}`} sub={isForeign ? `${cur} ${round2(num(order.subtotal_foreign) || (goodsTotalThb / fx)).toLocaleString()}` : null} />
+              <SummaryLine label="ค่าส่งรวม" value={`฿${shipping.total.toLocaleString()}`} />
+              {num(order.discount_thb) > 0 && <SummaryLine label="ส่วนลดโรงงาน" value={`-฿${num(order.discount_thb).toLocaleString()}`} sub={isForeign ? `-${cur} ${num(order.discount_amount).toLocaleString()}` : null} />}
+              <SummaryLine label={`ยอดรวม${isForeign ? '' : ' THB'}`} value={`฿${num(order.grand_total_thb).toLocaleString()}`} sub={fgn(order.grand_total_thb)} emphasis />
+              <SummaryLine label="ยอดจ่ายจริง" value={paidAmountDisplay !== null ? `฿${num(paidAmountDisplay).toLocaleString()}` : '-'} sub={paidAmountDisplay !== null ? fgn(paidAmountDisplay) : null} />
+            </>);
+          })()}
         </SummaryPanel>
         <SummaryPanel icon={Truck} title="ค่าส่งและต้นทุน" subtitle="ระบบกระจายค่าส่งเข้าต้นทุนตามมูลค่าสินค้า">
           <SummaryLine label={`ค่าส่ง local${order.currency === 'THB' ? '' : ` (${order.currency})`}`} value={order.currency === 'THB' ? 'ไม่ใช้กับ THB' : `${num(order.freight_amount).toLocaleString()} ${order.currency}`} />
