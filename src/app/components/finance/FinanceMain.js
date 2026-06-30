@@ -41,6 +41,9 @@ const toStr = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDat
 const toLocalDT = (v) => { const d = v ? new Date(v) : new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`; };
 // แสดงวันที่+เวลาแบบไทย
 const fmtDateTime = (v) => { const d = new Date(v); return `${d.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' })} ${pad(d.getHours())}:${pad(d.getMinutes())} น.`; };
+// ที่มาของรายการ: กรอกมือ → ชื่อคนกรอก, auto → ระบบต้นทาง
+const TXN_ORIGIN = { order: 'จากออเดอร์', service: 'จากงานบริการ', marketing: 'จากการตลาด', purchase: 'จากการสั่งของ', adjustment: 'จากการปรับยอด', recurring: 'รายการประจำ' };
+const txnOrigin = (t) => (!t.source || t.source === 'manual') ? (t.created_by?.name ? `โดย ${t.created_by.name}` : 'กรอกมือ') : (TXN_ORIGIN[t.source] || 'อัตโนมัติ');
 const TH_MONTHS = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
 // พาเลตเอิร์ธโทน (รายรับ=เซจ, รายจ่าย=ดินเผา/ทองแดง, สุทธิ=น้ำตาลเทา)
 const EARTH = { income: '#5b7553', expense: '#b5651d', net: '#7d6b57', cogs: '#a47148', profit: '#606c38' };
@@ -601,7 +604,7 @@ const FinanceMain = () => {
                       <span className="text-sm text-gray-700 truncate">{t.note || (t.type === 'income' ? 'รายรับ' : 'รายจ่าย')}</span>
                       {t.source === 'recurring' ? <span className="text-[10px] text-stone-500 bg-stone-100 px-1.5 py-0.5 rounded">ประจำ</span> : t.source !== 'manual' && <span className="text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">อัตโนมัติ</span>}
                     </div>
-                    <p className="text-xs text-gray-400 mt-0.5">{fmtDateTime(t.txn_at || t.txn_date)} · {methodLabel(t.method)}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">{fmtDateTime(t.txn_at || t.txn_date)} · {methodLabel(t.method)} · <span className="text-gray-500 font-medium">{txnOrigin(t)}</span></p>
                   </div>
                   {Array.isArray(t.images) && t.images[0] && (
                     <button type="button" onClick={() => setLightbox({ images: t.images, index: 0 })} className="relative w-9 h-9 rounded-lg overflow-hidden border border-gray-100 shrink-0 hover:opacity-80 transition-opacity" title="ดูรูป">
@@ -1050,6 +1053,7 @@ const QuickExpense = ({ categories, profile, onSaved }) => {
   const [saving, setSaving] = useState(false);
   const [savedFlash, setSavedFlash] = useState(false);
   const [showMore, setShowMore] = useState(false);
+  const [preview, setPreview] = useState(null); // ดูรูปที่แนบเป็น popup ก่อนบันทึก
   useEffect(() => { if (!categoryId && expCats[0]) setCategoryId(String(expCats[0].id)); }, [expCats]); // eslint-disable-line
 
   const save = async () => {
@@ -1102,9 +1106,9 @@ const QuickExpense = ({ categories, profile, onSaved }) => {
       {/* แนบรูปบิล — เห็นตัวอย่าง, หลายรูป, ถ่ายรูปได้ */}
       <div className="flex items-center gap-2 mt-2.5 flex-wrap">
         {files.map((f, i) => (
-          <div key={i} className="relative w-14 h-14 rounded-lg overflow-hidden border border-gray-200 group">
-            <img src={URL.createObjectURL(f)} alt="" className="w-full h-full object-cover" />
-            <button onClick={() => setFiles(prev => prev.filter((_, x) => x !== i))} className="absolute top-0.5 right-0.5 bg-black/55 text-white rounded-full p-0.5"><X size={11} /></button>
+          <div key={i} className="relative w-14 h-14 rounded-lg overflow-hidden border border-gray-200">
+            <img src={URL.createObjectURL(f)} alt="" onClick={() => setPreview({ images: files.map(x => ({ url: URL.createObjectURL(x) })), index: i })} className="w-full h-full object-cover cursor-zoom-in" title="กดดูรูป" />
+            <button onClick={(e) => { e.stopPropagation(); setFiles(prev => prev.filter((_, x) => x !== i)); }} className="absolute top-0.5 right-0.5 bg-black/55 text-white rounded-full p-0.5" title="เอารูปออก"><X size={11} /></button>
           </div>
         ))}
         <label className="w-14 h-14 rounded-lg border-2 border-dashed border-gray-300 flex flex-col items-center justify-center cursor-pointer hover:border-stone-400 text-gray-400 text-[9px] gap-0.5">
@@ -1115,8 +1119,9 @@ const QuickExpense = ({ categories, profile, onSaved }) => {
           <Camera size={16} /> ถ่ายรูป
           <input type="file" accept="image/*" capture="environment" className="hidden" onChange={e => { const picked = Array.from(e.target.files || []); e.target.value = ''; setFiles(prev => [...prev, ...picked]); }} />
         </label>
-        {files.length > 0 && <span className="text-xs text-gray-400">{files.length} รูป</span>}
+        {files.length > 0 && <span className="text-xs text-gray-400">{files.length} รูป · กดรูปเพื่อดูเต็ม</span>}
       </div>
+      {preview && <ImageLightbox images={preview.images} index={preview.index} onClose={() => setPreview(null)} onIndex={(i) => setPreview(p => ({ ...p, index: i }))} />}
     </div>
   );
 };
