@@ -902,11 +902,11 @@ const TxModal = ({ txn, defaultType, categories, profile, onClose, onSaved }) =>
             ))}
             <label className="w-16 h-16 rounded-xl border-2 border-dashed border-gray-300 flex flex-col items-center justify-center cursor-pointer hover:border-stone-400 text-gray-400 text-[9px] gap-0.5">
               <ImagePlus size={16} /> แนบรูป
-              <input type="file" accept="image/*" multiple className="hidden" onChange={e => { setFiles(prev => [...prev, ...Array.from(e.target.files || [])]); e.target.value = ''; }} />
+              <input type="file" accept="image/*" multiple className="hidden" onChange={e => { const picked = Array.from(e.target.files || []); e.target.value = ''; setFiles(prev => [...prev, ...picked]); }} />
             </label>
             <label className="w-16 h-16 rounded-xl border-2 border-dashed border-gray-300 flex flex-col items-center justify-center cursor-pointer hover:border-stone-400 text-gray-400 text-[9px] gap-0.5">
               <Camera size={16} /> ถ่ายรูป
-              <input type="file" accept="image/*" capture="environment" className="hidden" onChange={e => { setFiles(prev => [...prev, ...Array.from(e.target.files || [])]); e.target.value = ''; }} />
+              <input type="file" accept="image/*" capture="environment" className="hidden" onChange={e => { const picked = Array.from(e.target.files || []); e.target.value = ''; setFiles(prev => [...prev, ...picked]); }} />
             </label>
           </div>
         </div>
@@ -1109,11 +1109,11 @@ const QuickExpense = ({ categories, profile, onSaved }) => {
         ))}
         <label className="w-14 h-14 rounded-lg border-2 border-dashed border-gray-300 flex flex-col items-center justify-center cursor-pointer hover:border-stone-400 text-gray-400 text-[9px] gap-0.5">
           <ImagePlus size={16} /> แนบรูป
-          <input type="file" accept="image/*" multiple className="hidden" onChange={e => { setFiles(prev => [...prev, ...Array.from(e.target.files || [])]); e.target.value = ''; }} />
+          <input type="file" accept="image/*" multiple className="hidden" onChange={e => { const picked = Array.from(e.target.files || []); e.target.value = ''; setFiles(prev => [...prev, ...picked]); }} />
         </label>
         <label className="w-14 h-14 rounded-lg border-2 border-dashed border-gray-300 flex flex-col items-center justify-center cursor-pointer hover:border-stone-400 text-gray-400 text-[9px] gap-0.5">
           <Camera size={16} /> ถ่ายรูป
-          <input type="file" accept="image/*" capture="environment" className="hidden" onChange={e => { setFiles(prev => [...prev, ...Array.from(e.target.files || [])]); e.target.value = ''; }} />
+          <input type="file" accept="image/*" capture="environment" className="hidden" onChange={e => { const picked = Array.from(e.target.files || []); e.target.value = ''; setFiles(prev => [...prev, ...picked]); }} />
         </label>
         {files.length > 0 && <span className="text-xs text-gray-400">{files.length} รูป</span>}
       </div>
