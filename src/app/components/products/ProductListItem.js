@@ -109,6 +109,11 @@ const ProductListItem = ({ product, showCost, onClick }) => {
                   <Wrench size={10}/> น็อต
                 </span>
               )}
+              {product.requires_frame && (
+                <span className="flex items-center gap-1 text-[10px] text-sky-700 bg-sky-50 px-1.5 py-0.5 rounded font-medium border border-sky-100" title="ต้องทำโครง">
+                  <Wrench size={10}/> ทำโครง
+                </span>
+              )}
             </div>
           </div>
         </div>

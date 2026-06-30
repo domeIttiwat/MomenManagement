@@ -13,6 +13,44 @@ import OrderUpdateManager from './OrderUpdateManager';
 import OrderTeamSelector from './OrderTeamSelector';
 import AccessorySuggestionModal from './AccessorySuggestionModal';
 import { allocateFifoStockOut } from '@/lib/stockLots';
+import {
+  FRAME_STATUS,
+  FRAME_STATUS_OPTIONS,
+  getFrameStatusLabel,
+  hasFrameRequiredItems,
+  normalizeFrameStatus,
+} from './frameStatus';
+
+const enrichItemsFrameRequirement = async (items = []) => {
+  const productIds = [...new Set(items.map(item => item.product_id).filter(Boolean))];
+  if (productIds.length === 0) return items;
+
+  const { data } = await supabase
+    .from('products')
+    .select('id, requires_frame')
+    .in('id', productIds);
+
+  const frameByProductId = {};
+  (data || []).forEach(product => {
+    frameByProductId[product.id] = product.requires_frame === true;
+  });
+
+  return items.map(item => ({
+    ...item,
+    requires_frame: item.requires_frame === true || frameByProductId[item.product_id] === true,
+  }));
+};
+
+const fetchLiveCustomer = async (customerId, fallbackCustomer) => {
+  if (!customerId) return fallbackCustomer || null;
+  const { data } = await supabase
+    .from('customers')
+    .select('*')
+    .eq('id', customerId)
+    .maybeSingle();
+
+  return data ? { ...(fallbackCustomer || {}), ...data } : (fallbackCustomer || null);
+};
 
 const OrderForm = ({ onCancel, onSuccess, initialData }) => {
   const { profile } = useAuth();
@@ -61,7 +99,8 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
         invoice_number: initialData.invoice_number || '',
         notes: initialData.notes || '',
         order_date: initialData.order_date ? initialData.order_date.split('T')[0] : getLocalDate(),
-        completed_at: initialData.completed_at ? initialData.completed_at.split('T')[0] : ''
+        completed_at: initialData.completed_at ? initialData.completed_at.split('T')[0] : '',
+        frame_status: initialData.frame_status || FRAME_STATUS.NOT_REQUIRED
       };
     }
     return {
@@ -80,7 +119,8 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
       vat_type: 'no_vat',
       show_tax_id: false,
       invoice_number: '',
-      notes: ''
+      notes: '',
+      frame_status: FRAME_STATUS.NOT_REQUIRED
     };
   });
 
@@ -102,14 +142,16 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
           .single();
 
         if (data && !error) {
+          const enrichedItems = await enrichItemsFrameRequirement(data.order_items || []);
+          const liveCustomer = await fetchLiveCustomer(data.customer_id, data.customer_cache);
           setFormData(prev => ({
             ...prev,
             // อัปเดตข้อมูลสถานะและลูกค้าล่าสุด
             status: data.status,
-            customer: data.customer_cache,
+            customer: liveCustomer,
             
             // อัปเดตรายการต่างๆ ให้เป็นปัจจุบัน
-            items: data.order_items || [],
+            items: enrichedItems,
             assignees: data.order_assignees || [],
             payments: (data.order_payments || []).map(p => ({
               ...p,
@@ -133,7 +175,8 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
             invoice_number: data.invoice_number || '',
             notes: data.notes || '',
             order_date: data.order_date ? data.order_date.split('T')[0] : prev.order_date,
-            completed_at: data.completed_at ? data.completed_at.split('T')[0] : prev.completed_at
+            completed_at: data.completed_at ? data.completed_at.split('T')[0] : prev.completed_at,
+            frame_status: data.frame_status || FRAME_STATUS.NOT_REQUIRED
           }));
         }
       };
@@ -143,6 +186,8 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
   // -----------------------------------------------------------
 
   const subtotal = formData.items.reduce((sum, item) => sum + (item.sell_price * item.quantity), 0);
+  const orderRequiresFrame = hasFrameRequiredItems(formData.items);
+  const normalizedFrameStatus = normalizeFrameStatus(formData.frame_status, orderRequiresFrame);
   const discountVal = parseFloat(formData.discount) || 0;
   const shippingVal = parseFloat(formData.shipping_cost) || 0;
   const taxableAmount = Math.max(0, subtotal - discountVal);
@@ -196,6 +241,7 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
         cost_price: acc.cost_price, 
         sell_price: acc.sell_price,
         quantity: 1,
+        requires_frame: acc.requires_frame === true,
         is_custom: false
     }));
     setFormData(prev => ({...prev, items: [...prev.items, ...newItems]}));
@@ -232,6 +278,13 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
   // --- FIX: สร้าง Array ของ Product IDs ที่มีอยู่แล้ว เพื่อส่งไปเช็คใน Modal ---
   // แปลงทุกอย่างเป็น String เพื่อความชัวร์ในการเทียบ
   const existingProductIds = formData.items.map(item => String(item.product_id || item.id));
+
+  useEffect(() => {
+    setFormData(prev => {
+      const nextStatus = normalizeFrameStatus(prev.frame_status, hasFrameRequiredItems(prev.items));
+      return prev.frame_status === nextStatus ? prev : { ...prev, frame_status: nextStatus };
+    });
+  }, [formData.items]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -272,6 +325,7 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
         customer_id: formData.customer.id,
         customer_cache: formData.customer,
         status: formData.status,
+        frame_status: normalizedFrameStatus,
         order_date: formData.order_date || getLocalDate(),
         completed_at: formData.status === 'Completed' ? formData.completed_at : null,
         show_tax_id: formData.show_tax_id,
@@ -311,7 +365,8 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
         variant_name: item.variant_name,
         cost_price: item.cost_price,
         sell_price: item.sell_price,
-        quantity: item.quantity
+        quantity: item.quantity,
+        requires_frame: item.requires_frame === true
       }));
 
       // ตัดสต๊อกอัตโนมัติ (เฉพาะออเดอร์ใหม่ หรือสร้างครั้งแรก)
@@ -386,7 +441,7 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
       }
 
       const logFields = (d, total) => ({
-        order_number: d?.order_number, status: d?.status,
+        order_number: d?.order_number, status: d?.status, frame_status: d?.frame_status,
         customer_name: d?.customer ? `${d.customer.first_name || ''} ${d.customer.last_name || ''}`.trim() : (d?.customer_cache ? `${d.customer_cache.first_name || ''} ${d.customer_cache.last_name || ''}`.trim() : null),
         grand_total: total ?? d?.grand_total,
         order_date: d?.order_date, notes: d?.notes,
@@ -458,6 +513,28 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
                   </select>
                 </div>
               </div>
+              <div className={`p-4 rounded-2xl border ${orderRequiresFrame ? 'bg-sky-50/70 border-sky-100' : 'bg-gray-50 border-gray-100'}`}>
+                <div className="flex flex-col md:flex-row md:items-center gap-3 justify-between">
+                  <div>
+                    <label className={labelClass}>สถานะงานโครง</label>
+                    <p className={`text-sm font-semibold ${orderRequiresFrame ? 'text-sky-900' : 'text-gray-500'}`}>
+                      {orderRequiresFrame ? 'ออเดอร์นี้มีสินค้าที่ต้องทำโครง' : 'ออเดอร์นี้ไม่มีสินค้าที่ต้องทำโครง'}
+                    </p>
+                  </div>
+                  <select
+                    className={`${inputClass} md:max-w-xs ${!orderRequiresFrame ? 'text-gray-500 cursor-not-allowed' : ''}`}
+                    value={normalizedFrameStatus}
+                    disabled={!orderRequiresFrame}
+                    onChange={e => setFormData({...formData, frame_status: e.target.value})}
+                  >
+                    {!orderRequiresFrame ? (
+                      <option value={FRAME_STATUS.NOT_REQUIRED}>{getFrameStatusLabel(FRAME_STATUS.NOT_REQUIRED)}</option>
+                    ) : FRAME_STATUS_OPTIONS.map(option => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
               {formData.status === 'Completed' && (
                 <div className="bg-green-50 p-4 rounded-xl border border-green-100 flex items-center gap-4 animate-in fade-in slide-in-from-top-2">
                   <div className="font-bold text-green-700 text-sm whitespace-nowrap">วันที่เสร็จสิ้น:</div>
@@ -503,6 +580,9 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
                           <div>
                             <div className="flex items-center gap-2">
                                 <p className="font-bold text-gray-800 text-base">{item.product_name}</p>
+                                {item.requires_frame && (
+                                  <span className="text-[10px] text-sky-700 bg-sky-50 border border-sky-100 px-1.5 py-0.5 rounded font-bold">ทำโครง</span>
+                                )}
                                 <button 
                                     type="button" 
                                     onClick={() => handleManualOpenSuggestion(item)} 

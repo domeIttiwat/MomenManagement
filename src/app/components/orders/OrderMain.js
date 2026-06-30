@@ -10,6 +10,66 @@ import OrderDetail from './OrderDetail';
 import OrderCard from './OrderCard';
 import OrderPrepCard from './OrderPrepCard';
 
+const enrichOrdersFrameRequirement = async (orders) => {
+  const productIds = [...new Set(
+    orders
+      .flatMap(order => order.order_items || [])
+      .map(item => item.product_id)
+      .filter(Boolean)
+  )];
+  if (productIds.length === 0) return orders;
+
+  const { data } = await supabase
+    .from('products')
+    .select('id, requires_frame')
+    .in('id', productIds);
+
+  const frameByProductId = {};
+  (data || []).forEach(product => {
+    frameByProductId[product.id] = product.requires_frame === true;
+  });
+
+  return orders.map(order => ({
+    ...order,
+    order_items: (order.order_items || []).map(item => ({
+      ...item,
+      requires_frame: item.requires_frame === true || frameByProductId[item.product_id] === true,
+    })),
+  }));
+};
+
+const enrichOrdersCustomerCache = async (orders) => {
+  const customerIds = [...new Set(orders.map(order => order.customer_id).filter(Boolean))];
+  if (customerIds.length === 0) return orders;
+
+  const { data } = await supabase
+    .from('customers')
+    .select('*')
+    .in('id', customerIds);
+
+  const customerById = {};
+  (data || []).forEach(customer => {
+    customerById[customer.id] = customer;
+  });
+
+  return orders.map(order => {
+    const liveCustomer = customerById[order.customer_id];
+    if (!liveCustomer) return order;
+    return {
+      ...order,
+      customer_cache: {
+        ...(order.customer_cache || {}),
+        ...liveCustomer,
+      },
+    };
+  });
+};
+
+const enrichOrdersLiveData = async (orders) => {
+  const frameEnriched = await enrichOrdersFrameRequirement(orders);
+  return enrichOrdersCustomerCache(frameEnriched);
+};
+
 const OrderMain = ({ initialNavData, onViewCustomer }) => {
   const { can, profile } = useAuth();
   const meRef = () => profile ? { id: profile.id, name: `${profile.first_name} ${profile.last_name}` } : null;
@@ -28,6 +88,10 @@ const OrderMain = ({ initialNavData, onViewCustomer }) => {
   const [detailScrollTo, setDetailScrollTo] = useState(null);
 
   const openOrder = (o, scrollTo = null) => { setSelectedOrder(o); setDetailScrollTo(scrollTo); setView('detail'); };
+  const patchOrder = (updatedOrder) => {
+    setSelectedOrder(updatedOrder);
+    setOrders(prev => prev.map(o => o.id === updatedOrder.id ? { ...o, ...updatedOrder } : o));
+  };
 
   const fetchOrders = async () => {
     setLoading(true);
@@ -35,7 +99,7 @@ const OrderMain = ({ initialNavData, onViewCustomer }) => {
       // --- FIX: เพิ่ม user_id ใน order_assignees ---
       .select('*, order_items(*), order_payments(*), order_updates(*), order_assignees(user_id, job_role, user:user_id(first_name, last_name, avatar_url))')
       .order('created_at', { ascending: false });
-    let list = data || [];
+    let list = await enrichOrdersLiveData(data || []);
     // แนบสถานะการเตรียมของ (เฉพาะออเดอร์ที่กดเริ่มเตรียมแล้ว) → ใช้โชว์บาร์ในหน้ารวม + โหมด "ตามการจัดเตรียม"
     try {
       const { data: preps } = await supabase.from('order_preps').select('id, order_id, status, updated_at');
@@ -82,13 +146,19 @@ const OrderMain = ({ initialNavData, onViewCustomer }) => {
     setLoading(false);
   };
 
-  useEffect(() => { fetchOrders(); }, []);
+  useEffect(() => {
+    queueMicrotask(() => { fetchOrders(); });
+  }, []);
 
   // ... (Code ส่วนที่เหลือเหมือนเดิมทุกประการ)
   useEffect(() => {
     if (initialNavData && initialNavData.target === 'order' && initialNavData.data) {
-      setSelectedOrder(initialNavData.data);
-      setView('detail');
+      queueMicrotask(() => {
+        enrichOrdersLiveData([initialNavData.data]).then(([enriched]) => {
+          setSelectedOrder(enriched || initialNavData.data);
+          setView('detail');
+        });
+      });
     }
   }, [initialNavData]);
 
@@ -189,6 +259,7 @@ const OrderMain = ({ initialNavData, onViewCustomer }) => {
       setShowProfit={setShowProfit}
       onViewCustomer={onViewCustomer}
       scrollTo={detailScrollTo}
+      onOrderUpdated={patchOrder}
     />
   );
 

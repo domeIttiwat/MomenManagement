@@ -5,7 +5,7 @@
 > เก็บ "Changelog" และ "TODO" ให้ทันสมัย เพื่อให้ AI รุ่นไหนก็อ่านแล้วทำงานต่อได้ทันที
 > เรื่อง DB/security ที่ใช้ร่วมกับ storefront อยู่ที่ `../SHARED_CONTEXT.md`
 
-Last updated: 2026-06-27
+Last updated: 2026-06-30
 
 ---
 
@@ -191,6 +191,19 @@ resource ที่ใช้อยู่ (เห็นจากโค้ด): `pr
 
 ## 11. Changelog
 
+- **2026-06-30 (สถานะงานโครงในออเดอร์)** — เพิ่มฟิลด์งานโครงแยกจาก `orders.status`:
+  `products.requires_frame` (กำหนดใน ProductForm), `order_items.requires_frame` (snapshot ตอนเพิ่มสินค้าใน order),
+  และ `orders.frame_status` (`not_required`/`not_started`/`ordered`/`making`/`completed`) ผ่าน migration
+  `supabase/migrations/20260630_order_frame_status.sql`. OrderForm ตั้งสถานะได้ตอนสร้าง/แก้ไข, OrderDetail
+  อัปเดตสถานะงานโครงได้ทันทีโดยไม่ต้องกดแก้ไขและเขียน `logAction()` หลัง update สำเร็จ, OrderList/OrderCard
+  แสดง badge สถานะโครง. สินค้าที่ไม่ require frame จะล็อกเป็น “ไม่ต้องทำโครง”; สินค้าที่ require frame
+  จะเริ่มที่ “ยังไม่ทำโครง”. Storefront checkout snapshot `requires_frame` และตั้ง `frame_status` ตั้งแต่สร้าง
+  order เช่นกัน. สำหรับออเดอร์เก่าที่ `order_items.requires_frame=false` เพราะสร้างก่อน migration, OrderMain/
+  OrderForm จะ fallback ไปอ่าน `products.requires_frame` ของสินค้าจริง เพื่อให้ยังอัปเดตสถานะโครงได้.
+- **2026-06-30 (order customer cache refresh)** — หน้า OrderMain/OrderDetail/OrderForm ไม่แสดง
+  `orders.customer_cache` แบบ stale ล้วนแล้ว: ตอนโหลดออเดอร์จะดึง `customers` ตาม `customer_id` มา merge ทับ
+  cache เพื่อให้ชื่อ/เบอร์/ที่อยู่ที่แก้ในฐานลูกค้าแสดงล่าสุดใน order list, detail, form และบิล preview
+  (cache ยังใช้เป็น fallback สำหรับ order ที่ไม่มี customer row).
 - **2026-06-28 (การเงิน — รายจ่าย manual + เป้าหมายโฟกัส)** — **รายจ่ายเลิก auto** (ปิด trigger
   PO/marketing/fee + ลบรายการ auto ฝั่งจ่ายทิ้ง) ให้กรอกเองล้วน — คงเฉพาะ **รายรับ auto** (order/service
   payments). เพิ่ม `finance_budgets` (เป้าหมายต่อหมวด รายเดือน) + **การ์ดโฟกัส** บนภาพรวม (1 คอลัมน์/แถว:

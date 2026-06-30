@@ -33,11 +33,9 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
     if (product) {
       // FIX: ตั้งค่ารูปเริ่มต้นอย่างปลอดภัย
       const imgs = product.images || [];
-      if (imgs.length > 0) {
-        setSelectedImg(getImageUrl(imgs[0]));
-      } else {
-        setSelectedImg(null);
-      }
+      queueMicrotask(() => {
+        setSelectedImg(imgs.length > 0 ? getImageUrl(imgs[0]) : null);
+      });
       
       const fetchData = async () => {
         // 1. Fetch Variants
@@ -272,6 +270,11 @@ const ProductDetail = ({ product, onBack, onEdit, onDelete, showCost, setShowCos
               {hasFastenersData && (
                 <span className="text-xs font-bold text-orange-600 bg-orange-50 border border-orange-100 px-2 py-1 rounded-md flex items-center gap-1">
                    <Wrench size={12}/> มีข้อมูลน็อต (Fasteners)
+                </span>
+              )}
+              {product.requires_frame && (
+                <span className="text-xs font-bold text-sky-700 bg-sky-50 border border-sky-100 px-2 py-1 rounded-md flex items-center gap-1">
+                  <Wrench size={12}/> ต้องทำโครง
                 </span>
               )}
             </div>

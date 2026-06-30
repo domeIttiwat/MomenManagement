@@ -39,6 +39,7 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
     cost_price: '', 
     sell_price: 0, 
     has_variants: false,
+    requires_frame: false,
     stock_quantity: 0
   });
   
@@ -139,6 +140,7 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
         cost_price: formData.has_variants ? null : moneyOrNull(formData.cost_price),
         sell_price: formData.has_variants ? 0 : Number(formData.sell_price || 0),
         has_variants: formData.has_variants,
+        requires_frame: formData.requires_frame === true,
       };
 
       let productId = initialData?.id;
@@ -288,7 +290,7 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
       // Audit log
       const logFields = (d) => ({
         name: d?.name, sku: d?.sku, sell_price: d?.sell_price,
-        cost_price: d?.cost_price, has_variants: d?.has_variants, description: d?.description,
+        cost_price: d?.cost_price, has_variants: d?.has_variants, requires_frame: d?.requires_frame === true, description: d?.description,
       });
       await logAction({
         resource_type: 'product',
@@ -382,6 +384,22 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
                       <label className={labelClass}>รายละเอียด</label>
                       <textarea placeholder="คำอธิบายสินค้าเพิ่มเติม..." className={inputClass} rows="4" value={formData.description || ''} onChange={e => setFormData({...formData, description: e.target.value})} />
                     </div>
+                    <label className="flex items-start gap-3 p-4 rounded-2xl border border-sky-100 bg-sky-50/50 cursor-pointer hover:bg-sky-50 transition-colors">
+                      <input
+                        type="checkbox"
+                        className="mt-1 w-4 h-4 accent-sky-600 rounded"
+                        checked={formData.requires_frame === true}
+                        onChange={e => setFormData({...formData, requires_frame: e.target.checked})}
+                      />
+                      <span>
+                        <span className="font-bold text-sky-900 flex items-center gap-2">
+                          <Wrench size={16} className="text-sky-600"/> สินค้านี้ต้องทำโครง
+                        </span>
+                        <span className="text-xs text-sky-700 mt-1 block">
+                          เมื่อนำสินค้านี้ไปใส่ออเดอร์ ระบบจะเปิดสถานะงานโครงให้ติดตามได้
+                        </span>
+                      </span>
+                    </label>
                   </div>
                </div>
 
@@ -448,7 +466,7 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
                  <div className="text-center py-12 text-gray-400">
                    <FolderOpen size={40} className="mx-auto mb-3 opacity-30" />
                    <p className="font-medium text-gray-500">บันทึกสินค้าก่อนเพิ่มไฟล์</p>
-                   <p className="text-sm mt-1">กรุณากดปุ่ม "บันทึกข้อมูล" ด้านบน แล้วกลับมาที่แท็บนี้</p>
+                   <p className="text-sm mt-1">กรุณากดปุ่มบันทึกข้อมูลด้านบน แล้วกลับมาที่แท็บนี้</p>
                  </div>
                )}
              </div>

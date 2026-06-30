@@ -1,10 +1,17 @@
 import React from 'react';
-import { Package, Calendar, User, FileText, Clock, Banknote, Landmark, CreditCard, Facebook, Instagram, MessageCircle, Phone } from 'lucide-react';
+import { Package, Calendar, User, FileText, Clock, Banknote, Landmark, CreditCard, Facebook, Instagram, MessageCircle, Phone, Wrench } from 'lucide-react';
+import {
+  getFrameStatusLabel,
+  getFrameStatusStyle,
+  hasFrameRequiredItems,
+  normalizeFrameStatus,
+} from './frameStatus';
 
 const OrderCard = ({ order, showProfit, onClick }) => {
   const totalCost = order.order_items?.reduce((sum, item) => sum + (item.cost_price * item.quantity), 0) || 0;
   const totalProfit = (order.subtotal - order.discount) - totalCost;
   const paymentMethods = [...new Set(order.order_payments?.map(p => p.payment_method) || [])];
+  const frameStatus = normalizeFrameStatus(order.frame_status, hasFrameRequiredItems(order.order_items || []));
 
   const statusColors = {
     Quotation: 'bg-gray-100 text-gray-600',
@@ -127,6 +134,9 @@ const OrderCard = ({ order, showProfit, onClick }) => {
             <Package size={12}/> 
             <span className="truncate">{order.order_items?.[0]?.product_name}</span>
             {order.order_items?.length > 1 && <span className="text-[10px] bg-gray-100 px-1 rounded">+{order.order_items.length-1}</span>}
+          </div>
+          <div className={`mt-2 inline-flex items-center gap-1 px-2 py-1 rounded-lg border text-[10px] font-bold ${getFrameStatusStyle(frameStatus)}`}>
+            <Wrench size={10}/> {getFrameStatusLabel(frameStatus)}
           </div>
         </div>
 

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Search, Plus, Package, Layers, Box, Keyboard } from 'lucide-react';
+import { Search, Plus, Package, Layers, Box, Wrench } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import ProductForm from '../products/ProductForm';
 
@@ -17,11 +17,6 @@ const ProductSelector = ({ onAddProduct }) => {
   const [activeIndex, setActiveIndex] = useState(-1);
   const listRef = useRef(null);
 
-  useEffect(() => {
-    setMounted(true);
-    fetchCategories();
-  }, []);
-
   const fetchCategories = async () => {
     try {
       const { data } = await supabase.from('categories').select('*').order('name');
@@ -30,6 +25,13 @@ const ProductSelector = ({ onAddProduct }) => {
       console.error(err);
     }
   };
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      setMounted(true);
+      fetchCategories();
+    });
+  }, []);
 
   useEffect(() => {
     if (!isOpen && !search) return;
@@ -109,6 +111,7 @@ const ProductSelector = ({ onAddProduct }) => {
       cost_price: variant ? variant.cost_price : product.cost_price,
       sell_price: variant ? variant.sell_price : product.sell_price,
       quantity: 1,
+      requires_frame: product.requires_frame === true,
       is_custom: false
     };
     onAddProduct(item);
@@ -209,6 +212,11 @@ const ProductSelector = ({ onAddProduct }) => {
                     <div>
                       <div className="p-2 bg-gray-50/50 text-xs font-bold text-gray-500 px-3 flex items-center gap-2">
                         <Package size={12}/> {p.name}
+                        {p.requires_frame && (
+                          <span className="ml-1 text-[10px] text-sky-700 bg-sky-50 border border-sky-100 px-1.5 py-0.5 rounded inline-flex items-center gap-1">
+                            <Wrench size={10}/> ทำโครง
+                          </span>
+                        )}
                         {activeIndex === idx && <span className="ml-auto text-[10px] text-indigo-500">กด Enter เพื่อดูตัวเลือก</span>}
                       </div>
                       {p.product_variants?.map(v => (
@@ -229,7 +237,14 @@ const ProductSelector = ({ onAddProduct }) => {
                         </div>
                         <div>
                           <p className="text-sm font-bold text-gray-800">{p.name}</p>
-                          <p className="text-[10px] text-gray-400 font-mono">{p.sku}</p>
+                          <div className="flex flex-wrap items-center gap-1 mt-0.5">
+                            <p className="text-[10px] text-gray-400 font-mono">{p.sku}</p>
+                            {p.requires_frame && (
+                              <span className="text-[10px] text-sky-700 bg-sky-50 border border-sky-100 px-1.5 rounded inline-flex items-center gap-1">
+                                <Wrench size={9}/> ทำโครง
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
                       <span className="text-sm font-bold text-indigo-600">฿{(p.sell_price ?? 0).toLocaleString()}</span>

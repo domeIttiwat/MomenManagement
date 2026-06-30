@@ -1,18 +1,30 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, Edit, Trash2, Printer, FileText, User, Package, Clock, MapPin, Phone, CreditCard, DollarSign, X, Eye, EyeOff, Banknote, Landmark, MessageCircle, Facebook, Instagram, History, Calendar, Send, Paperclip, Loader2, Image as ImageIcon } from 'lucide-react';
+import { ArrowLeft, Edit, Trash2, Printer, FileText, User, Package, Clock, MapPin, Phone, CreditCard, DollarSign, X, Eye, EyeOff, Banknote, Landmark, MessageCircle, Facebook, Instagram, History, Calendar, Send, Paperclip, Loader2, Image as ImageIcon, Wrench } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
+import { logAction } from '@/lib/auditLog';
 import BillPreview from './BillPreview';
 import ImageUploader from './ImageUploader';
 import AuditLogPanel from '@/app/components/common/AuditLogPanel';
 import OrderPrep from './OrderPrep';
+import {
+  FRAME_STATUS,
+  FRAME_STATUS_OPTIONS,
+  getFrameStatusLabel,
+  getFrameStatusStyle,
+  hasFrameRequiredItems,
+  normalizeFrameStatus,
+} from './frameStatus';
 
-const OrderDetail = ({ order, onBack, onEdit, onDelete, showProfit, setShowProfit, onViewCustomer, scrollTo }) => {
+const OrderDetail = ({ order, onBack, onEdit, onDelete, showProfit, setShowProfit, onViewCustomer, scrollTo, onOrderUpdated }) => {
   const { can, profile } = useAuth();
   const prepSectionRef = useRef(null);
   const author = () => (profile ? { id: profile.id, name: `${profile.first_name || ''} ${profile.last_name || ''}`.trim(), avatar_url: profile.avatar_url || null } : null);
+  const meRef = () => profile ? { id: profile.id, name: `${profile.first_name} ${profile.last_name}` } : null;
   const [showBill, setShowBill] = useState(false);
   const [lightboxImg, setLightboxImg] = useState(null);
+  const [frameSaving, setFrameSaving] = useState(false);
+  const [frameStatus, setFrameStatus] = useState(order?.frame_status || FRAME_STATUS.NOT_REQUIRED);
   
   // Timeline State (Code Timeline เดิม...)
   const [updates, setUpdates] = useState(order?.order_updates || []);
@@ -25,6 +37,10 @@ const OrderDetail = ({ order, onBack, onEdit, onDelete, showProfit, setShowProfi
   useEffect(() => {
     if (order?.id) fetchUpdates();
   }, [order?.id]);
+
+  useEffect(() => {
+    setFrameStatus(order?.frame_status || FRAME_STATUS.NOT_REQUIRED);
+  }, [order?.id, order?.frame_status]);
 
   // มาจากโหมด "ตามการจัดเตรียม" → เลื่อนไปยังส่วนจัดเตรียมของ
   useEffect(() => {
@@ -135,6 +151,57 @@ const OrderDetail = ({ order, onBack, onEdit, onDelete, showProfit, setShowProfi
      } catch(err) {
          alert('Error updating: ' + err.message);
      }
+  };
+
+  const orderRequiresFrame = hasFrameRequiredItems(order?.order_items || []);
+  const currentFrameStatus = normalizeFrameStatus(frameStatus, orderRequiresFrame);
+
+  const handleFrameStatusChange = async (nextStatus) => {
+    if (!orderRequiresFrame || !can('orders', 'edit')) return;
+    const normalizedNext = normalizeFrameStatus(nextStatus, true);
+    const previous = currentFrameStatus;
+    if (normalizedNext === previous) return;
+
+    setFrameSaving(true);
+    try {
+      const updatePayload = {
+        frame_status: normalizedNext,
+        updated_by: meRef(),
+      };
+      const { data, error } = await supabase
+        .from('orders')
+        .update(updatePayload)
+        .eq('id', order.id)
+        .select()
+        .single();
+      if (error) throw error;
+
+      const updatedOrder = {
+        ...order,
+        ...data,
+        customer_cache: order.customer_cache,
+        order_items: order.order_items,
+        order_payments: order.order_payments,
+        order_updates: order.order_updates,
+        order_assignees: order.order_assignees,
+      };
+      setFrameStatus(normalizedNext);
+      onOrderUpdated?.(updatedOrder);
+      await logAction({
+        resource_type: 'order',
+        resource_id: order.id,
+        action: 'update',
+        resource_label: order.order_number,
+        old_data: { frame_status: previous },
+        new_data: { frame_status: normalizedNext },
+        created_by: meRef(),
+      });
+    } catch (err) {
+      alert('อัปเดตสถานะงานโครงไม่สำเร็จ: ' + err.message);
+      setFrameStatus(previous);
+    } finally {
+      setFrameSaving(false);
+    }
   };
 
 
@@ -308,6 +375,30 @@ const OrderDetail = ({ order, onBack, onEdit, onDelete, showProfit, setShowProfi
                   </div>
                 </div>
               </div>
+              <div className={`p-4 rounded-2xl border ${orderRequiresFrame ? 'bg-sky-50/70 border-sky-100' : 'bg-gray-50 border-gray-100'}`}>
+                <div className="flex items-center gap-2 mb-3">
+                  <Wrench size={18} className={orderRequiresFrame ? 'text-sky-600' : 'text-gray-400'} />
+                  <div>
+                    <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wide">สถานะงานโครง</h3>
+                    <p className="text-xs text-gray-500">
+                      {orderRequiresFrame ? 'อัปเดตได้ทันทีโดยไม่ต้องกดแก้ไข' : 'สินค้าชุดนี้ไม่ต้องทำโครง'}
+                    </p>
+                  </div>
+                </div>
+                <select
+                  className={`w-full px-3 py-2.5 rounded-xl border text-sm font-bold outline-none transition-all ${getFrameStatusStyle(currentFrameStatus)} ${(!orderRequiresFrame || !can('orders', 'edit')) ? 'cursor-not-allowed opacity-80' : 'focus:ring-2 focus:ring-sky-500/20 bg-white'}`}
+                  value={currentFrameStatus}
+                  disabled={!orderRequiresFrame || !can('orders', 'edit') || frameSaving}
+                  onChange={e => handleFrameStatusChange(e.target.value)}
+                >
+                  {!orderRequiresFrame ? (
+                    <option value={FRAME_STATUS.NOT_REQUIRED}>{getFrameStatusLabel(FRAME_STATUS.NOT_REQUIRED)}</option>
+                  ) : FRAME_STATUS_OPTIONS.map(option => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+                {frameSaving && <p className="text-xs text-sky-600 mt-2 flex items-center gap-1"><Loader2 size={12} className="animate-spin"/> กำลังบันทึก</p>}
+              </div>
             </div>
           </div>
 
@@ -332,6 +423,11 @@ const OrderDetail = ({ order, onBack, onEdit, onDelete, showProfit, setShowProfi
                     <tr key={i} className="hover:bg-gray-50/50 transition-colors">
                       <td className="py-4 px-8">
                         <p className="font-bold text-gray-900 text-base">{item.product_name}</p>
+                        {item.requires_frame && (
+                          <span className="inline-flex items-center gap-1 text-[10px] text-sky-700 bg-sky-50 border border-sky-100 px-1.5 py-0.5 rounded font-bold mt-1">
+                            <Wrench size={10}/> ต้องทำโครง
+                          </span>
+                        )}
                         {item.variant_name && <p className="text-xs text-gray-500 bg-gray-100 inline-block px-2 py-0.5 rounded mt-1">{item.variant_name}</p>}
                         {item.sku && <p className="text-[10px] text-gray-400 font-mono mt-0.5">{item.sku}</p>}
                       </td>

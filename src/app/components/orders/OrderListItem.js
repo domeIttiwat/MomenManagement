@@ -1,5 +1,11 @@
 import React from 'react';
-import { Package, User, Clock, CheckCircle2, MessageCircle, Facebook, Instagram, Phone } from 'lucide-react';
+import { Package, User, Clock, CheckCircle2, MessageCircle, Facebook, Instagram, Phone, Wrench } from 'lucide-react';
+import {
+  getFrameStatusLabel,
+  getFrameStatusStyle,
+  hasFrameRequiredItems,
+  normalizeFrameStatus,
+} from './frameStatus';
 
 const OrderListItem = ({ order, showProfit, onClick }) => {
   const getStatusColor = (s) => {
@@ -56,6 +62,7 @@ const OrderListItem = ({ order, showProfit, onClick }) => {
   const totalQty = order.order_items?.reduce((sum, item) => sum + item.quantity, 0) || 0;
   const totalCost = order.order_items?.reduce((sum, item) => sum + (item.cost_price * item.quantity), 0) || 0;
   const totalProfit = (order.subtotal - order.discount) - totalCost;
+  const frameStatus = normalizeFrameStatus(order.frame_status, hasFrameRequiredItems(order.order_items || []));
 
   // Social info
   const social = order.customer_cache?.social_channels?.[0];
@@ -115,6 +122,11 @@ const OrderListItem = ({ order, showProfit, onClick }) => {
             <span className="text-[9px] text-gray-400">เตรียม {order._prep.progress}%</span>
           </div>
         )}
+      </td>
+      <td className="px-6 py-4 text-center align-top">
+        <span className={`inline-flex items-center justify-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold border whitespace-nowrap ${getFrameStatusStyle(frameStatus)}`}>
+          <Wrench size={10}/> {getFrameStatusLabel(frameStatus)}
+        </span>
       </td>
       <td className="px-6 py-4 text-right align-top">
         <span className="font-bold text-gray-900">฿{order.grand_total.toLocaleString()}</span>

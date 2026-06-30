@@ -50,6 +50,11 @@ const ProductCard = ({ product, showCost, onClick }) => {
               <Wrench size={10}/> น็อต
             </span>
           )}
+          {product.requires_frame && (
+            <span className="bg-white/90 backdrop-blur-md text-sky-700 px-2 py-1 rounded-lg text-[10px] font-bold shadow-sm flex items-center gap-1 border border-sky-100">
+              <Wrench size={10}/> ทำโครง
+            </span>
+          )}
         </div>
       </div>
 
