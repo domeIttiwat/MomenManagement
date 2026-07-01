@@ -199,9 +199,16 @@ const FinanceMain = () => {
 
   const income = scoped.filter(t => t.type === 'income').reduce((s, t) => s + Number(t.amount || 0), 0);
   const baseExpense = scoped.filter(t => t.type === 'expense').reduce((s, t) => s + Number(t.amount || 0), 0);
-  const expense = baseExpense + (offsetHidden ? offsetPeriodSum : 0); // ยอดรายจ่ายรวม = บวก offset เสมอ
-  const net = income - expense;
+  const expense = baseExpense + (offsetHidden ? offsetPeriodSum : 0); // ยอดรายจ่ายรวม(กระแสเงินสด) = บวก offset เสมอ
   const shownBalance = systemBalance + (offsetHidden ? offsetBalanceEffect : 0); // ยอดคงเหลือที่แสดง = บวก offset เสมอ
+  // แยก "การปรับยอด/ตั้งต้น" (source=adjustment) ออกจากรายรับ-รายจ่าย "ดำเนินงาน" — ไม่ให้ก้อนปรับยอดไปปนกราฟ/KPI
+  const adjIncome = scoped.filter(t => t.type === 'income' && t.source === 'adjustment').reduce((s, t) => s + Number(t.amount || 0), 0);
+  const adjExpense = scoped.filter(t => t.type === 'expense' && t.source === 'adjustment').reduce((s, t) => s + Number(t.amount || 0), 0);
+  const adjNet = adjIncome - adjExpense; // + = ปรับเพิ่มเงิน, − = ปรับลด/ถอน
+  const opIncome = income - adjIncome;   // รายรับดำเนินงาน (ไม่รวมปรับยอด)
+  const opExpense = expense - adjExpense; // รายจ่ายดำเนินงาน (ไม่รวมปรับยอด)
+  const net = opIncome - opExpense;       // กำไร/ขาดทุนจากการดำเนินงาน
+  const flowTxns = useMemo(() => visibleTxns.filter(t => t.source !== 'adjustment'), [visibleTxns]); // สำหรับกราฟ (ตัดปรับยอดออก)
 
   // ---- ปิดยอดสิ้นเดือน (เฉพาะมุมมองรายเดือน) ----
   const periodKey = toStr(new Date(anchor.getFullYear(), anchor.getMonth(), 1));
@@ -212,23 +219,27 @@ const FinanceMain = () => {
   const endingThisMonth = openingBalance + income - expense; // คงเหลือสิ้นเดือน (รวม offset)
   const reconciledThisMonth = recons.some(r => String(r.recon_date).slice(0, 7) === periodKey.slice(0, 7));
 
-  const closeMonth = async () => {
-    if (!reconciledThisMonth && !window.confirm('เดือนนี้ยังไม่ได้กระทบยอด (ปรับให้ตรงเงินจริง)\nแนะนำให้กระทบยอดก่อนปิดงวด — ยืนยันปิดงวดเลย?')) return;
-    if (reconciledThisMonth && !window.confirm(`ปิดงวด ${periodLabel('month', anchor)} ?\nยอดปลายงวด ${baht(endingThisMonth)} จะถูกยกไปเป็นยอดต้นเดือนถัดไป`)) return;
+  // ปิดงวด: ระบุเดือน (pKey = 'YYYY-MM-01') + ยอดยกไปเดือนใหม่เอง (endingVal, null = คำนวณอัตโนมัติ)
+  const closeMonth = async (pKey, endingVal) => {
+    const key = pKey || periodKey;
+    const lbl = periodLabel('month', new Date(key + 'T00:00:00'));
+    if (!window.confirm(`ปิดงวด ${lbl}\nยอดยกไปเดือนถัดไป = ${baht(Number(endingVal))}\n\nยืนยัน?`)) return;
     setClosing(true);
     try {
-      await supabase.rpc('finance_close_period', { p_period: periodKey, p_by: meRef() });
-      await logAction({ resource_type: 'finance', action: 'create', resource_label: `ปิดงวด ${periodLabel('month', anchor)} (คงเหลือ ${baht(endingThisMonth)})`, created_by: meRef() });
+      await supabase.rpc('finance_close_period', { p_period: key, p_by: meRef(), p_ending: endingVal === null || endingVal === undefined ? null : Number(endingVal) });
+      await logAction({ resource_type: 'finance', action: 'create', resource_label: `ปิดงวด ${lbl} (ยกไป ${baht(Number(endingVal))})`, created_by: meRef() });
       fetchCloses();
     } catch (err) { alert('ปิดงวดไม่สำเร็จ: ' + err.message); }
     finally { setClosing(false); }
   };
-  const reopenMonth = async () => {
-    if (!window.confirm(`เปิดงวด ${periodLabel('month', anchor)} ใหม่?\n(ยอดยกมาของเดือนถัดไปที่ปิดไปแล้วจะไม่เปลี่ยน เพื่อไม่ให้กระทบเดือนปัจจุบัน)`)) return;
+  const reopenMonth = async (pKey) => {
+    const key = pKey || periodKey;
+    const lbl = periodLabel('month', new Date(key + 'T00:00:00'));
+    if (!window.confirm(`เปิดงวด ${lbl} ใหม่?\n(ยอดยกมาของเดือนถัดไปที่ปิดไปแล้วจะไม่เปลี่ยน เพื่อไม่ให้กระทบเดือนปัจจุบัน)`)) return;
     setClosing(true);
     try {
-      await supabase.rpc('finance_reopen_period', { p_period: periodKey });
-      await logAction({ resource_type: 'finance', action: 'update', resource_label: `เปิดงวด ${periodLabel('month', anchor)}`, created_by: meRef() });
+      await supabase.rpc('finance_reopen_period', { p_period: key });
+      await logAction({ resource_type: 'finance', action: 'update', resource_label: `เปิดงวด ${lbl}`, created_by: meRef() });
       fetchCloses();
     } catch (err) { alert('เปิดงวดไม่สำเร็จ: ' + err.message); }
     finally { setClosing(false); }
@@ -292,13 +303,13 @@ const FinanceMain = () => {
       return mode === 'month' ? d.getDate() : d.getMonth();
     };
     const labelOf = (k) => mode === 'month' ? String(k) : TH_MONTHS[k];
-    visibleTxns.forEach(t => {
+    flowTxns.forEach(t => {
       const k = keyOf(t.txn_date);
       if (!buckets[k]) buckets[k] = { k, label: labelOf(k), income: 0, expense: 0 };
       buckets[k][t.type] += Number(t.amount || 0);
     });
     return Object.values(buckets).sort((a, b) => a.k - b.k);
-  }, [visibleTxns, mode]);
+  }, [flowTxns, mode]);
 
   // ---- list (search + type) — ซ่อนรายการ Offset จากคนที่ไม่มีสิทธิ์ ----
   const list = useMemo(() => visibleTxns.filter(t => {
@@ -380,21 +391,59 @@ const FinanceMain = () => {
         </div>
       </div>
 
-      {/* KPI */}
+      {/* KPI — มุมมองไตรมาส/ปี/กำหนดเอง (มุมมองเดือนใช้แถบสมการด้านล่างแทน ไม่ให้ซ้ำ) */}
+      {mode !== 'month' && (
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="bg-white rounded-3xl border border-stone-100 shadow-sm p-5">
           <div className="flex items-center gap-2 mb-1" style={{ color: EARTH.income }}><TrendingUp size={18} /><span className="text-xs font-bold uppercase tracking-wider">รายรับ</span></div>
-          <p className="text-2xl font-black" style={{ color: EARTH.income }}>{baht(income)}</p>
+          <p className="text-2xl font-black" style={{ color: EARTH.income }}>{baht(opIncome)}</p>
         </div>
         <div className="bg-white rounded-3xl border border-stone-100 shadow-sm p-5">
           <div className="flex items-center gap-2 mb-1" style={{ color: EARTH.expense }}><TrendingDown size={18} /><span className="text-xs font-bold uppercase tracking-wider">รายจ่าย</span></div>
-          <p className="text-2xl font-black" style={{ color: EARTH.expense }}>{baht(expense)}</p>
+          <p className="text-2xl font-black" style={{ color: EARTH.expense }}>{baht(opExpense)}</p>
         </div>
         <div className="rounded-3xl border border-stone-200 bg-stone-50 shadow-sm p-5">
-          <div className="flex items-center gap-2 mb-1" style={{ color: EARTH.net }}><Wallet size={18} /><span className="text-xs font-bold uppercase tracking-wider">คงเหลือสุทธิ</span></div>
+          <div className="flex items-center gap-2 mb-1" style={{ color: EARTH.net }}><Wallet size={18} /><span className="text-xs font-bold uppercase tracking-wider">กำไร/ขาดทุน</span></div>
           <p className="text-2xl font-black" style={{ color: net >= 0 ? EARTH.net : EARTH.expense }}>{baht(net)}</p>
+          <p className="text-[11px] text-gray-400 mt-0.5">รายรับ − รายจ่าย</p>
         </div>
       </div>
+      )}
+
+      {/* แถบเงินสดของเดือน: ยอดยกมา → +รับ −จ่าย = คงเหลือสิ้นเดือน (เฉพาะมุมมองเดือน) */}
+      {mode === 'month' && (
+        <div className="rounded-3xl border border-stone-200 bg-white shadow-sm p-4 sm:p-5">
+          <div className="flex items-center flex-wrap gap-x-4 gap-y-2">
+            <div className="flex-1 min-w-[120px]">
+              <p className="text-[11px] text-gray-400">ยอดยกมาจากเดือนก่อน</p>
+              <p className="text-lg font-black" style={{ color: openingBalance < 0 ? EARTH.expense : '#44403c' }}>{baht(openingBalance)}</p>
+            </div>
+            <span className="text-gray-300 font-black">+</span>
+            <div className="flex-1 min-w-[100px]">
+              <p className="text-[11px] text-gray-400">รายรับเดือนนี้</p>
+              <p className="text-lg font-black" style={{ color: EARTH.income }}>{baht(opIncome)}</p>
+            </div>
+            <span className="text-gray-300 font-black">−</span>
+            <div className="flex-1 min-w-[100px]">
+              <p className="text-[11px] text-gray-400">รายจ่ายเดือนนี้</p>
+              <p className="text-lg font-black" style={{ color: EARTH.expense }}>{baht(opExpense)}</p>
+            </div>
+            {Math.round(adjNet * 100) !== 0 && (<>
+              <span className="text-gray-300 font-black">{adjNet >= 0 ? '+' : '−'}</span>
+              <div className="flex-1 min-w-[90px]">
+                <p className="text-[11px] text-gray-400">ปรับยอด</p>
+                <p className="text-lg font-black" style={{ color: adjNet >= 0 ? EARTH.income : EARTH.expense }}>{baht(Math.abs(adjNet))}</p>
+              </div>
+            </>)}
+            <span className="text-gray-300 font-black">=</span>
+            <div className="flex-1 min-w-[130px] rounded-2xl px-3 py-2 text-white" style={{ background: 'linear-gradient(135deg, #5b4a3c, #3d3833)' }}>
+              <p className="text-[11px] text-white/55">คงเหลือสิ้นเดือน (เงินจริงที่ควรมี)</p>
+              <p className="text-xl font-black">{baht(endingThisMonth)}</p>
+            </div>
+          </div>
+          <p className="text-[11px] text-gray-400 mt-2.5 pt-2.5 border-t border-stone-100">กำไร/ขาดทุนจากการดำเนินงานเดือนนี้ (รับ − จ่าย): <span className="font-bold" style={{ color: net >= 0 ? EARTH.net : EARTH.expense }}>{baht(net)}</span></p>
+        </div>
+      )}
 
       {/* เป้าหมายโฟกัส — แสดงเฉพาะมุมมองรายเดือน */}
       {mode === 'month' && (
@@ -515,8 +564,8 @@ const FinanceMain = () => {
       )}
 
       {/* กราฟวิเคราะห์รายจ่าย (อัปเดตตามช่วงที่เลือก) */}
-      <ExpenseTrendCard scoped={visibleTxns} categories={pickCategories} mode={mode} start={start} end={end} />
-      <ExpenseBreakdownCard scoped={visibleTxns} categories={pickCategories} canEdit={canEdit} budgetByCat={budgetByCat} setBudgetModal={setBudgetModal} />
+      <ExpenseTrendCard scoped={flowTxns} categories={pickCategories} mode={mode} start={start} end={end} />
+      <ExpenseBreakdownCard scoped={flowTxns} categories={pickCategories} canEdit={canEdit} budgetByCat={budgetByCat} setBudgetModal={setBudgetModal} />
 
       {/* Analytics: COGS + gross profit (วิเคราะห์ ไม่ใช่กระแสเงินสด) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -632,8 +681,8 @@ const FinanceMain = () => {
       {catModalOpen && <CategoryModal categories={pickCategories} onClose={() => setCatModalOpen(false)} onChanged={fetchCategories} canDelete={canDelete} />}
       {recurOpen && <RecurringModal categories={pickCategories} profile={profile} onClose={() => setRecurOpen(false)} onChanged={fetchTxns} canDelete={canDelete} />}
       {budgetModal && <BudgetModal {...budgetModal} categories={pickCategories} profile={profile} onClose={() => setBudgetModal(null)} onSaved={() => { setBudgetModal(null); fetchBudgets(); fetchMonthSpent(); }} />}
-      {reconOpen && <ReconcileModal systemBalance={shownBalance} recons={recons} categories={categories} profile={profile} onClose={() => setReconOpen(false)} onSaved={() => { setReconOpen(false); refreshAll(); fetchRecons(); }} />}
-      {periodModalOpen && <PeriodCloseModal periodTitle={periodLabel('month', anchor)} opening={openingBalance} income={income} expense={expense} ending={endingThisMonth} thisClose={thisClose} closes={closes} reconciled={reconciledThisMonth} closing={closing} onCloseMonth={closeMonth} onReopen={reopenMonth} onClose={() => setPeriodModalOpen(false)} />}
+      {reconOpen && <ReconcileModal systemBalance={mode === 'month' ? endingThisMonth : shownBalance} monthCtx={mode === 'month' ? { label: periodLabel('month', anchor), opening: openingBalance, income, expense } : null} recons={recons} categories={categories} profile={profile} onClose={() => setReconOpen(false)} onSaved={() => { setReconOpen(false); refreshAll(); fetchRecons(); }} />}
+      {periodModalOpen && <PeriodCloseModal periodKey={periodKey} periodTitle={periodLabel('month', anchor)} opening={openingBalance} income={income} expense={expense} ending={endingThisMonth} thisClose={thisClose} closesByPeriod={closesByPeriod} closes={closes} reconciled={reconciledThisMonth} closing={closing} onCloseMonth={closeMonth} onReopen={reopenMonth} onClose={() => setPeriodModalOpen(false)} />}
       {lightbox && <ImageLightbox images={lightbox.images} index={lightbox.index} onClose={() => setLightbox(null)} onIndex={(i) => setLightbox(p => ({ ...p, index: i }))} />}
     </div>
   );
@@ -1357,7 +1406,7 @@ const ExpenseBreakdownCard = ({ scoped, categories, canEdit, budgetByCat, setBud
 // ===================== กระทบยอดเงินสด (สถิติเห็นทุกคน / ปรับยอดเฉพาะ Supervisor) =====================
 const reconDateLabel = (s) => { const d = new Date(s); return `${d.getDate()} ${TH_MONTHS[d.getMonth()]} ${(d.getFullYear() + 543) % 100}`; };
 
-const ReconcileModal = ({ systemBalance, recons = [], categories, profile, onClose, onSaved }) => {
+const ReconcileModal = ({ systemBalance, monthCtx = null, recons = [], categories, profile, onClose, onSaved }) => {
   const totalOver = recons.filter(r => Number(r.diff) > 0).reduce((s, r) => s + Number(r.diff), 0);
   const totalShort = recons.filter(r => Number(r.diff) < 0).reduce((s, r) => s + Math.abs(Number(r.diff)), 0);
   const meRef = () => (profile ? { id: profile.id, name: `${profile.first_name} ${profile.last_name}` } : null);
@@ -1422,8 +1471,11 @@ const ReconcileModal = ({ systemBalance, recons = [], categories, profile, onClo
         </div>
 
         <div className="rounded-2xl p-4 text-white" style={{ background: 'linear-gradient(135deg, #5b4a3c, #3d3833)' }}>
-          <p className="text-[11px] uppercase tracking-wider text-white/50">ยอดคงเหลือในระบบ</p>
+          <p className="text-[11px] uppercase tracking-wider text-white/50">{monthCtx ? `ยอดที่ควรมีสิ้นเดือน (${monthCtx.label})` : 'ยอดคงเหลือในระบบ'}</p>
           <p className="text-2xl font-black">{baht(systemBalance)}</p>
+          {monthCtx && (
+            <p className="text-[11px] text-white/55 mt-1">ยกมา {baht(monthCtx.opening)} + รับ {baht(monthCtx.income)} − จ่าย {baht(monthCtx.expense)}</p>
+          )}
           <div className="flex gap-4 mt-2 pt-2 border-t border-white/10 text-xs">
             <span className="text-white/60">ปรับเกินสะสม <span className="font-bold text-white">{baht(totalOver)}</span></span>
             <span className="text-white/60">ปรับขาดสะสม <span className="font-bold text-white">{baht(totalShort)}</span></span>
@@ -1505,39 +1557,68 @@ const ReconcileModal = ({ systemBalance, recons = [], categories, profile, onClo
 };
 
 // ===================== ปิดยอดสิ้นเดือน (หน้าต่าง) =====================
-const PeriodCloseModal = ({ periodTitle, opening, income, expense, ending, thisClose, closes, reconciled, closing, onCloseMonth, onReopen, onClose }) => {
-  const op = thisClose ? Number(thisClose.opening_balance) : opening;
-  const inc = thisClose ? Number(thisClose.total_income) : income;
-  const exp = thisClose ? Number(thisClose.total_expense) : expense;
-  const end = thisClose ? Number(thisClose.ending_balance) : ending;
+const PeriodCloseModal = ({ periodKey, periodTitle, opening, income, expense, ending, thisClose, closesByPeriod = {}, closes, reconciled, closing, onCloseMonth, onReopen, onClose }) => {
   const monthLabel = (p) => { const d = new Date(p); return `${TH_MONTHS[d.getMonth()]} ${(d.getFullYear() + 543) % 100}`; };
+  const [selMonth, setSelMonth] = useState(periodKey.slice(0, 7)); // 'YYYY-MM' เดือนที่จะปิด
+  const selKey = selMonth + '-01';
+  const selClose = closesByPeriod[selKey] || null;
+  const isAnchored = selKey === periodKey; // เดือนที่กำลังดูอยู่หน้าหลัก (มีตัวเลขให้)
+  const [endInput, setEndInput] = useState(selClose ? Number(selClose.ending_balance) : (isAnchored ? ending : ''));
+  useEffect(() => {
+    const sc = closesByPeriod[selMonth + '-01'] || null;
+    const anch = (selMonth + '-01') === periodKey;
+    setEndInput(sc ? Number(sc.ending_balance) : (anch ? ending : ''));
+  }, [selMonth]); // eslint-disable-line
+  const op = selClose ? Number(selClose.opening_balance) : (isAnchored ? opening : null);
+  const inc = selClose ? Number(selClose.total_income) : (isAnchored ? income : null);
+  const exp = selClose ? Number(selClose.total_expense) : (isAnchored ? expense : null);
+  const hasFigures = op !== null;
+
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white rounded-3xl w-full max-w-md max-h-[92vh] overflow-auto p-5 space-y-4" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="font-bold text-xl text-gray-900 flex items-center gap-2">ปิดยอดสิ้นเดือน {thisClose && <span className="text-[11px] font-bold text-white px-2 py-0.5 rounded-full" style={{ backgroundColor: EARTH.net }}>ปิดงวดแล้ว</span>}</h3>
-            <p className="text-xs text-gray-400">{periodTitle}{thisClose ? ` · ปิดเมื่อ ${reconDateLabel(thisClose.closed_at)}${thisClose.closed_by?.name ? ` โดย ${thisClose.closed_by.name}` : ''}` : ''}</p>
+            <h3 className="font-bold text-xl text-gray-900 flex items-center gap-2">ปิดยอดสิ้นเดือน {selClose && <span className="text-[11px] font-bold text-white px-2 py-0.5 rounded-full" style={{ backgroundColor: EARTH.net }}>ปิดงวดแล้ว</span>}</h3>
+            <p className="text-xs text-gray-400">{selClose ? `ปิดเมื่อ ${reconDateLabel(selClose.closed_at)}${selClose.closed_by?.name ? ` โดย ${selClose.closed_by.name}` : ''}` : 'เลือกเดือน แล้วตั้งยอดยกไปเดือนใหม่'}</p>
           </div>
           <button onClick={onClose} className="p-1.5 text-gray-400 hover:bg-gray-100 rounded-lg"><X size={18} /></button>
         </div>
 
-        {/* สมการยกยอด */}
-        <div className="rounded-2xl border border-stone-200 divide-y divide-stone-100">
-          <div className="flex justify-between px-4 py-2.5"><span className="text-sm text-gray-500">ยอดยกมา</span><span className="font-bold" style={{ color: op < 0 ? EARTH.expense : '#44403c' }}>{baht(op)}</span></div>
-          <div className="flex justify-between px-4 py-2.5"><span className="text-sm text-gray-500">+ รายรับเดือนนี้</span><span className="font-bold" style={{ color: EARTH.income }}>{baht(inc)}</span></div>
-          <div className="flex justify-between px-4 py-2.5"><span className="text-sm text-gray-500">− รายจ่ายเดือนนี้</span><span className="font-bold" style={{ color: EARTH.expense }}>{baht(exp)}</span></div>
-          <div className="flex justify-between items-center px-4 py-3 rounded-b-2xl text-white" style={{ background: 'linear-gradient(135deg, #5b4a3c, #3d3833)' }}><span className="text-sm font-bold">= คงเหลือสิ้นเดือน</span><span className="text-xl font-black">{baht(end)}</span></div>
+        {/* เลือกเดือนที่จะปิด */}
+        <div>
+          <label className="block text-xs font-bold text-gray-500 mb-1.5">เดือนที่จะปิดงวด</label>
+          <input type="month" value={selMonth} onChange={e => setSelMonth(e.target.value)} className="w-full px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm outline-none focus:border-stone-500" />
         </div>
 
-        {thisClose
-          ? <p className="text-[11px] text-gray-400">ยอดคงเหลือถูกยกไปเป็นยอดต้นเดือนถัดไปแล้ว · แก้รายการย้อนหลังได้ ไม่กระทบเดือนปัจจุบัน</p>
-          : (!reconciled && <p className="text-[11px]" style={{ color: EARTH.expense }}>เดือนนี้ยังไม่ได้กระทบยอด — แนะนำกด “ปรับยอด” ให้ตรงเงินจริงก่อนปิดงวด</p>)}
+        {/* สมการยกยอด (ถ้ามีตัวเลขของเดือนนั้น) */}
+        {hasFigures ? (
+          <div className="rounded-2xl border border-stone-200 divide-y divide-stone-100">
+            <div className="flex justify-between px-4 py-2.5"><span className="text-sm text-gray-500">ยอดยกมา</span><span className="font-bold" style={{ color: op < 0 ? EARTH.expense : '#44403c' }}>{baht(op)}</span></div>
+            <div className="flex justify-between px-4 py-2.5"><span className="text-sm text-gray-500">+ รายรับเดือนนี้</span><span className="font-bold" style={{ color: EARTH.income }}>{baht(inc)}</span></div>
+            <div className="flex justify-between px-4 py-2.5"><span className="text-sm text-gray-500">− รายจ่ายเดือนนี้</span><span className="font-bold" style={{ color: EARTH.expense }}>{baht(exp)}</span></div>
+            <div className="flex justify-between items-center px-4 py-2.5 bg-stone-50"><span className="text-xs text-gray-400">คำนวณได้</span><span className="font-bold text-gray-600">{baht(op + inc - exp)}</span></div>
+          </div>
+        ) : (
+          <p className="text-[11px] text-gray-400">* ดูสมการรายรับ-รายจ่ายได้เฉพาะเดือนที่เปิดอยู่หน้าหลัก — เดือนอื่นกรอกยอดยกไปเองด้านล่าง</p>
+        )}
+
+        {/* ยอดยกไปเดือนใหม่ (ตั้งเองได้) */}
+        <div>
+          <label className="block text-xs font-bold text-gray-500 mb-1.5">ยอดยกไปเดือนใหม่ (เงินจริงสิ้นเดือน)</label>
+          <input type="number" step="0.01" value={endInput} onChange={e => setEndInput(e.target.value)} disabled={!!selClose} placeholder="0" className="w-full px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-lg font-black outline-none focus:border-stone-500 disabled:opacity-60" />
+          {hasFigures && !selClose && Math.round((Number(endInput) - (op + inc - exp)) * 100) !== 0 && (
+            <p className="text-[11px] text-gray-400 mt-1">ต่างจากยอดคำนวณ {baht(Number(endInput) - (op + inc - exp))} (ปรับยอดยกมาตามเงินจริง)</p>
+          )}
+        </div>
+
+        {!selClose && !reconciled && isAnchored && <p className="text-[11px]" style={{ color: EARTH.expense }}>เดือนนี้ยังไม่ได้กระทบยอด — แนะนำกด “ปรับยอด” ให้ตรงเงินจริงก่อน</p>}
+        {selClose && <p className="text-[11px] text-gray-400">ปิดงวดแล้ว · ยอด {baht(Number(selClose.ending_balance))} ยกไปเป็นต้นเดือนถัดไป · แก้รายการย้อนหลังได้ ไม่กระทบเดือนปัจจุบัน</p>}
 
         {/* ปุ่มปิด/เปิดงวด */}
-        {thisClose
-          ? <button onClick={onReopen} disabled={closing} className="w-full py-2.5 rounded-xl text-sm font-bold border border-stone-300 text-stone-600 hover:bg-stone-50 flex items-center justify-center gap-2 disabled:opacity-50">{closing ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />} เปิดงวดเดือนนี้ใหม่</button>
-          : <button onClick={onCloseMonth} disabled={closing} className="w-full py-2.5 rounded-xl text-sm font-bold text-white flex items-center justify-center gap-2 disabled:opacity-50" style={{ backgroundColor: EARTH.net }}>{closing ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />} ปิดงวดเดือนนี้</button>}
+        {selClose
+          ? <button onClick={() => onReopen(selKey)} disabled={closing} className="w-full py-2.5 rounded-xl text-sm font-bold border border-stone-300 text-stone-600 hover:bg-stone-50 flex items-center justify-center gap-2 disabled:opacity-50">{closing ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />} เปิดงวด {monthLabel(selKey)} ใหม่</button>
+          : <button onClick={() => onCloseMonth(selKey, endInput === '' ? (op + inc - exp) : Number(endInput))} disabled={closing || (endInput === '' && !hasFigures)} className="w-full py-2.5 rounded-xl text-sm font-bold text-white flex items-center justify-center gap-2 disabled:opacity-50" style={{ backgroundColor: EARTH.net }}>{closing ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />} ปิดงวด {monthLabel(selKey)} · ยกไป {baht(endInput === '' ? (hasFigures ? op + inc - exp : 0) : Number(endInput))}</button>}
 
         {/* ประวัติการปิดงวด */}
         {closes.length > 0 && (
