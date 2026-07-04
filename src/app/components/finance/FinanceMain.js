@@ -5,7 +5,7 @@ import {
   Pencil, Trash2, ImagePlus, Tags, ArrowUpCircle, ArrowDownCircle, RefreshCw, Package, Percent, Repeat, ToggleLeft, ToggleRight,
   GripVertical, FolderPlus, Check, Camera,
 } from 'lucide-react';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend, ComposedChart, Line } from 'recharts';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend, ComposedChart, Line, ReferenceLine } from 'recharts';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
@@ -80,6 +80,24 @@ const periodLabel = (mode, a) => {
   if (mode === 'month') return `${TH_MONTHS[a.getMonth()]} ${y}`;
   if (mode === 'quarter') return `ไตรมาส ${Math.floor(a.getMonth() / 3) + 1}/${y}`;
   return `ปี ${y}`;
+};
+// สร้างชุด "แกนเวลาเต็มช่วง" — เดือน = ทุกวันในเดือน (1..N), ไม่ใช่เดือน = ทุกเดือนในช่วง
+// คืน seed(): buckets เปล่าครบทุกช่อง, และ today = ช่อง/ป้ายของวันนี้ (ถ้าวันนี้อยู่ในช่วงที่ดู)
+const axisFull = (mode, start, end) => {
+  const s = new Date(start), e = new Date(end);
+  const isMonth = mode === 'month';
+  const keys = [];
+  if (isMonth) {
+    const days = new Date(s.getFullYear(), s.getMonth() + 1, 0).getDate();
+    for (let d = 1; d <= days; d++) keys.push({ k: d, label: String(d) });
+  } else {
+    const cur = new Date(s.getFullYear(), s.getMonth(), 1);
+    while (cur < e) { const m = cur.getMonth(); keys.push({ k: m, label: TH_MONTHS[m] }); cur.setMonth(cur.getMonth() + 1); }
+  }
+  const now = new Date();
+  const inRange = now >= s && now < e;
+  const tk = !inRange ? null : (isMonth ? now.getDate() : now.getMonth());
+  return { keys, todayKey: tk, todayLabel: tk == null ? null : (isMonth ? String(tk) : TH_MONTHS[tk]) };
 };
 
 const FinanceMain = () => {
@@ -296,8 +314,11 @@ const FinanceMain = () => {
   const budgetByCat = Object.fromEntries(budgets.map(b => [b.category_id, b]));
 
   // ---- trend: income vs expense by sub-bucket ----
+  // seed ทุกวัน/ทุกเดือนในช่วง เพื่อให้แกน x ครบทั้งเดือน (แม้วันไหนไม่มีรายการ)
+  const trendAxis = useMemo(() => axisFull(mode, start, end), [mode, start, end]);
   const trend = useMemo(() => {
     const buckets = {};
+    trendAxis.keys.forEach(({ k, label }) => { buckets[k] = { k, label, income: 0, expense: 0 }; });
     const keyOf = (dateStr) => {
       const d = new Date(dateStr);
       return mode === 'month' ? d.getDate() : d.getMonth();
@@ -309,7 +330,7 @@ const FinanceMain = () => {
       buckets[k][t.type] += Number(t.amount || 0);
     });
     return Object.values(buckets).sort((a, b) => a.k - b.k);
-  }, [flowTxns, mode]);
+  }, [flowTxns, mode, trendAxis]);
 
   // ---- list (search + type) — ซ่อนรายการ Offset จากคนที่ไม่มีสิทธิ์ ----
   const list = useMemo(() => visibleTxns.filter(t => {
@@ -584,15 +605,16 @@ const FinanceMain = () => {
       {/* รายรับ vs รายจ่าย */}
       <div className="bg-white rounded-3xl border border-gray-100 shadow-sm p-5">
         <h3 className="font-bold text-gray-800 mb-3">รายรับ vs รายจ่าย ({mode === 'month' ? 'รายวัน' : 'รายเดือน'})</h3>
-        {trend.length === 0 ? <p className="text-center text-gray-400 py-16 text-sm">ไม่มีข้อมูลในช่วงนี้</p> : (
+        {trend.every(r => !r.income && !r.expense) ? <p className="text-center text-gray-400 py-16 text-sm">ไม่มีข้อมูลในช่วงนี้</p> : (
           <div className="h-56">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={trend} margin={{ top: 5, right: 5, left: -10, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                <XAxis dataKey="label" tick={{ fontSize: 11 }} stroke="#94a3b8" />
+                <XAxis dataKey="label" tick={{ fontSize: 11 }} stroke="#94a3b8" interval="preserveStartEnd" minTickGap={4} />
                 <YAxis tick={{ fontSize: 11 }} stroke="#94a3b8" tickFormatter={(v) => v >= 1000 ? `${v / 1000}k` : v} />
                 <Tooltip formatter={(v) => baht(v)} />
                 <Legend wrapperStyle={{ fontSize: 12 }} />
+                {trendAxis.todayLabel != null && <ReferenceLine x={trendAxis.todayLabel} stroke="#78716c" strokeDasharray="4 3" label={{ value: 'วันนี้', position: 'top', fontSize: 10, fill: '#78716c' }} />}
                 <Bar dataKey="income" name="รายรับ" fill={EARTH.income} radius={[4, 4, 0, 0]} />
                 <Bar dataKey="expense" name="รายจ่าย" fill={EARTH.expense} radius={[4, 4, 0, 0]} />
               </BarChart>
@@ -1189,7 +1211,7 @@ const ExpenseTrendCard = ({ scoped, categories, mode, start, end }) => {
   const [chartType, setChartType] = useState('bar');
   const [sel, setSel] = useState([]); // group ids; ว่าง = ภาพรวมรวมทุกหมวด
   const [compare, setCompare] = useState(false);
-  const [prevArr, setPrevArr] = useState([]);
+  const [prevArr, setPrevArr] = useState({});
 
   const catById = useMemo(() => Object.fromEntries((categories || []).map(c => [c.id, c])), [categories]);
   const grp = (catId) => {
@@ -1209,22 +1231,24 @@ const ExpenseTrendCard = ({ scoped, categories, mode, start, end }) => {
     ? [{ key: 'total', name: 'รายจ่ายรวม', color: EARTH.expense }]
     : sel.map((gid, i) => { const g = catById[gid]; return { key: `g${gid}`, name: g?.name || 'หมวด', color: g?.color || CAT_COLORS[i % CAT_COLORS.length] }; });
 
+  // seed ทุกวัน/ทุกเดือนในช่วง เพื่อให้แกน x ครบทั้งเดือน + จุดบอกว่า "วันนี้" คือช่องไหน
+  const axis = useMemo(() => axisFull(mode, start, end), [mode, start, end]);
   const data = useMemo(() => {
     const keyOf = (d) => mode === 'month' ? new Date(d).getDate() : new Date(d).getMonth();
-    const labelOf = (k) => mode === 'month' ? String(k) : TH_MONTHS[k];
     const buckets = {};
+    axis.keys.forEach(({ k, label }) => { buckets[k] = { k, label, total: 0 }; });
     expTxns.forEach(t => {
       const k = keyOf(t.txn_date);
-      if (!buckets[k]) buckets[k] = { k, label: labelOf(k), total: 0 };
+      if (!buckets[k]) buckets[k] = { k, label: mode === 'month' ? String(k) : TH_MONTHS[k], total: 0 };
       const amt = Number(t.amount || 0);
       buckets[k].total += amt;
       if (sel.length > 0) { const gid = grp(t.category_id).id; if (sel.includes(gid)) buckets[k][`g${gid}`] = (buckets[k][`g${gid}`] || 0) + amt; }
     });
     return Object.values(buckets).sort((a, b) => a.k - b.k);
-  }, [expTxns, mode, sel.join(',')]); // eslint-disable-line
+  }, [expTxns, mode, sel.join(','), axis]); // eslint-disable-line
 
   useEffect(() => {
-    if (!compare) { setPrevArr([]); return; }
+    if (!compare) { setPrevArr({}); return; }
     const s = new Date(start), e = new Date(end); const dur = e - s;
     const ps = new Date(s.getTime() - dur), pe = new Date(s.getTime());
     let cancelled = false;
@@ -1232,12 +1256,12 @@ const ExpenseTrendCard = ({ scoped, categories, mode, start, end }) => {
       if (cancelled) return;
       const keyOf = (x) => mode === 'month' ? new Date(x).getDate() : new Date(x).getMonth();
       const m = {}; (d || []).forEach(t => { const k = keyOf(t.txn_date); m[k] = (m[k] || 0) + Number(t.amount || 0); });
-      setPrevArr(Object.keys(m).map(Number).sort((a, b) => a - b).map(k => m[k]));
+      setPrevArr(m); // เก็บเป็น map ตาม key (วัน/เดือน) เพื่อจับคู่กับช่วงปัจจุบันให้ตรงช่อง
     });
     return () => { cancelled = true; };
   }, [compare, start, end, mode]);
 
-  const chartData = compare ? data.map((r, i) => ({ ...r, prev: prevArr[i] ?? 0 })) : data;
+  const chartData = compare ? data.map(r => ({ ...r, prev: prevArr[r.k] ?? 0 })) : data;
 
   return (
     <div className="bg-white rounded-3xl border border-gray-100 shadow-sm p-5">
@@ -1265,15 +1289,16 @@ const ExpenseTrendCard = ({ scoped, categories, mode, start, end }) => {
         </div>
       )}
 
-      {chartData.length === 0 ? <p className="text-center text-gray-400 py-16 text-sm">ไม่มีรายจ่ายในช่วงนี้</p> : (
+      {chartData.every(r => !r.total) ? <p className="text-center text-gray-400 py-16 text-sm">ไม่มีรายจ่ายในช่วงนี้</p> : (
         <div className="h-72">
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart data={chartData} margin={{ top: 5, right: 5, left: -8, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-              <XAxis dataKey="label" tick={{ fontSize: 11 }} stroke="#94a3b8" />
+              <XAxis dataKey="label" tick={{ fontSize: 11 }} stroke="#94a3b8" interval="preserveStartEnd" minTickGap={4} />
               <YAxis tick={{ fontSize: 11 }} stroke="#94a3b8" tickFormatter={(v) => v >= 1000 ? `${v / 1000}k` : v} />
               <Tooltip formatter={(v) => baht(v)} contentStyle={{ borderRadius: 12, border: '1px solid #e7e5e4', fontSize: 12 }} />
               <Legend wrapperStyle={{ fontSize: 12 }} />
+              {axis.todayLabel != null && <ReferenceLine x={axis.todayLabel} stroke="#78716c" strokeDasharray="4 3" label={{ value: 'วันนี้', position: 'top', fontSize: 10, fill: '#78716c' }} />}
               {chartType === 'bar'
                 ? series.map(s => <Bar key={s.key} dataKey={s.key} name={s.name} fill={s.color} radius={[4, 4, 0, 0]} animationDuration={500} maxBarSize={46} />)
                 : series.map(s => <Line key={s.key} type="monotone" dataKey={s.key} name={s.name} stroke={s.color} strokeWidth={2.5} dot={false} activeDot={{ r: 5 }} animationDuration={500} />)}
