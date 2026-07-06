@@ -63,6 +63,11 @@ const OrderPrepCard = ({ order, onClick }) => {
       list: items.filter(i => i.status === 'done'),
       dot: 'bg-emerald-500', headChip: 'bg-emerald-100 text-emerald-700', text: 'text-gray-400 line-through',
     },
+    {
+      key: 'skipped', label: 'ไม่ต้องเตรียม',
+      list: items.filter(i => i.status === 'skipped'),
+      dot: 'bg-gray-200', headChip: 'bg-gray-50 text-gray-400', text: 'text-gray-300',
+    },
   ];
 
   return (
@@ -139,7 +144,12 @@ const OrderPrepCard = ({ order, onClick }) => {
               </div>
               <div className="flex flex-col gap-0.5 pl-3.5">
                 {g.list.map((it, i) => (
-                  <span key={i} className={`text-xs truncate ${g.text}`}>{it.title}</span>
+                  <div key={i} className="flex items-baseline gap-2 min-w-0">
+                    <span className={`text-xs truncate min-w-0 ${g.text}`}>{it.title}</span>
+                    {it.from && (
+                      <span className="ml-auto text-[10px] text-gray-300 truncate max-w-[45%]" title={it.from}>{it.from}</span>
+                    )}
+                  </div>
                 ))}
               </div>
             </div>

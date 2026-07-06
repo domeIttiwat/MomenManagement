@@ -112,23 +112,27 @@ const OrderMain = ({ initialNavData, onViewCustomer }) => {
         preps.forEach((p) => {
           const its = byPrep[p.id] || [];
           const parents = new Set(its.filter((x) => x.parent_item_id).map((x) => x.parent_item_id));
+          const titleById = {};
+          its.forEach((x) => { titleById[x.id] = x.title; });
           const leaves = its.filter((x) => x.kind !== 'product' || !parents.has(x.id));
-          const total = leaves.length;
-          const done = leaves.filter((x) => x.status === 'done').length;
+          const active = leaves.filter((x) => x.status !== 'skipped'); // ไม่นับรายการที่ไม่ต้องเตรียม
+          const total = active.length;
+          const done = active.filter((x) => x.status === 'done').length;
           // รายการที่ยังค้าง (กำลังทำมาก่อน แล้วค่อยรอ) → ใช้โชว์ตัวอย่างในการ์ด
-          const pending = leaves
+          const pending = active
             .filter((x) => x.status !== 'done')
             .sort((a, b) => (b.status === 'in_progress' ? 1 : 0) - (a.status === 'in_progress' ? 1 : 0))
-            .map((x) => ({ title: x.title, status: x.status }));
+            .map((x) => ({ title: x.title, status: x.status, from: x.parent_item_id ? titleById[x.parent_item_id] : null }));
           // นับแยกตามแหล่งของ
           const source = { stock: 0, buy: 0, none: 0 };
-          leaves.forEach((x) => {
+          active.forEach((x) => {
             if (x.source === 'stock') source.stock += 1;
             else if (x.source === 'buy') source.buy += 1;
             else source.none += 1;
           });
           // รายชิ้นทั้งหมด (เรียง: ยังไม่เตรียม → กำลังทำ → เตรียมแล้ว) → ใช้แยกแถบในการ์ด
-          const items = leaves.map((x) => ({ title: x.title, status: x.status, source: x.source }));
+          // from = ชื่อสินค้า/ชุดแต่งต้นทาง (product node แม่) — null ถ้าเป็นสินค้าทั้งชิ้นหรือรายการ manual
+          const items = leaves.map((x) => ({ title: x.title, status: x.status, source: x.source, from: x.parent_item_id ? titleById[x.parent_item_id] : (x.kind === 'manual' ? 'เพิ่มเอง' : null) }));
           prepByOrder[p.order_id] = {
             total, done,
             progress: total ? Math.round((done / total) * 100) : 0,

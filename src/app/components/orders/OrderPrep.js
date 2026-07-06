@@ -8,9 +8,10 @@ const STATUS = {
   pending:     { label: 'ยังไม่เตรียม',   chip: 'bg-gray-100 text-gray-500',     dot: 'bg-gray-300' },
   in_progress: { label: 'กำลังดำเนินการ', chip: 'bg-amber-100 text-amber-700',   dot: 'bg-amber-400' },
   done:        { label: 'เตรียมแล้ว',     chip: 'bg-emerald-100 text-emerald-700', dot: 'bg-emerald-500' },
+  skipped:     { label: 'ไม่ต้องเตรียม',  chip: 'bg-gray-50 text-gray-400 border border-gray-200', dot: 'bg-gray-200' },
 };
 const SOURCE_LABEL = { stock: 'ดึงจากสต๊อก', buy: 'สั่งซื้อเพิ่ม' };
-const STATUS_ORDER = ['pending', 'in_progress', 'done'];
+const STATUS_ORDER = ['pending', 'in_progress', 'done', 'skipped'];
 const SOURCE_ORDER = [null, 'buy', 'stock'];
 const nextStatus = (s) => STATUS_ORDER[(STATUS_ORDER.indexOf(s) + 1) % STATUS_ORDER.length];
 const nextSource = (s) => SOURCE_ORDER[(SOURCE_ORDER.indexOf(s ?? null) + 1) % SOURCE_ORDER.length];
@@ -126,7 +127,8 @@ const OrderPrep = ({ order }) => {
     const { data: its } = await supabase.from('order_prep_items').select('id,kind,parent_item_id,status').eq('prep_id', prep.id);
     const all = its || [];
     const hasChild = (id) => all.some((x) => x.parent_item_id === id);
-    const lv = all.filter((x) => x.kind !== 'product' || !hasChild(x.id));
+    // นับเฉพาะ leaf ที่ต้องเตรียมจริง (ข้าม skipped)
+    const lv = all.filter((x) => (x.kind !== 'product' || !hasChild(x.id)) && x.status !== 'skipped');
     let st = 'in_progress';
     if (lv.length) { const done = lv.filter((x) => x.status === 'done').length; st = done === lv.length ? 'done' : 'in_progress'; }
     await supabase.from('order_preps').update({ status: st, updated_at: new Date().toISOString() }).eq('id', prep.id);
@@ -174,9 +176,10 @@ const OrderPrep = ({ order }) => {
   const productNodes = items.filter((it) => it.kind === 'product');
   const manualItems = items.filter((it) => it.kind === 'manual');
   const leaves = items.filter(isLeaf);
-  const doneCount = leaves.filter((it) => it.status === 'done').length;
-  const progress = leaves.length ? Math.round((doneCount / leaves.length) * 100) : 0;
-  const totalCost = leaves.reduce((s, it) => s + ((Number(it.unit_price) || 0) * (Number(it.qty) || 1)), 0);
+  const activeLeaves = leaves.filter((it) => it.status !== 'skipped'); // ไม่นับรายการที่ไม่ต้องเตรียม
+  const doneCount = activeLeaves.filter((it) => it.status === 'done').length;
+  const progress = activeLeaves.length ? Math.round((doneCount / activeLeaves.length) * 100) : 0;
+  const totalCost = activeLeaves.reduce((s, it) => s + ((Number(it.unit_price) || 0) * (Number(it.qty) || 1)), 0);
 
   const card = 'bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden';
 
@@ -203,16 +206,19 @@ const OrderPrep = ({ order }) => {
   }
 
   // ---- read-only row (หน้าออเดอร์) ----
-  const RoRow = ({ it, indent }) => (
-    <div className={`flex flex-wrap items-center gap-2 py-1.5 ${indent ? 'pl-7' : 'pl-3'} pr-3`}>
-      <span className={`w-2 h-2 rounded-full shrink-0 ${STATUS[it.status]?.dot}`} />
-      <span className="text-sm text-gray-800 flex-1 min-w-[120px]">{it.title}</span>
-      {it.source && <span className="text-[10px] text-indigo-600 bg-indigo-50 rounded px-1.5 py-0.5">{SOURCE_LABEL[it.source]}</span>}
-      <span className="flex items-baseline gap-1 bg-gray-100 rounded-md px-2 py-0.5 shrink-0"><span className="text-[10px] text-gray-400">จำนวน</span><span className="text-sm font-bold text-gray-800">{it.qty}</span></span>
-      {Number(it.unit_price) > 0 && <span className="text-xs text-amber-600 font-medium w-20 text-right">฿{Number(it.unit_price).toLocaleString()}</span>}
-      <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${STATUS[it.status]?.chip}`}>{STATUS[it.status]?.label}</span>
-    </div>
-  );
+  const RoRow = ({ it, indent }) => {
+    const off = it.status === 'skipped';
+    return (
+      <div className={`flex flex-wrap items-center gap-2 py-1.5 ${indent ? 'pl-7' : 'pl-3'} pr-3 ${off ? 'opacity-60' : ''}`}>
+        <span className={`w-2 h-2 rounded-full shrink-0 ${STATUS[it.status]?.dot}`} />
+        <span className={`text-sm flex-1 min-w-[120px] ${off ? 'text-gray-300' : 'text-gray-800'}`}>{it.title}</span>
+        {!off && it.source && <span className="text-[10px] text-indigo-600 bg-indigo-50 rounded px-1.5 py-0.5">{SOURCE_LABEL[it.source]}</span>}
+        <span className={`flex items-baseline gap-1 rounded-md px-2 py-0.5 shrink-0 ${off ? 'bg-gray-50' : 'bg-gray-100'}`}><span className="text-[10px] text-gray-400">จำนวน</span><span className={`text-sm font-bold ${off ? 'text-gray-300' : 'text-gray-800'}`}>{it.qty}</span></span>
+        {!off && Number(it.unit_price) > 0 && <span className="text-xs text-amber-600 font-medium w-20 text-right">฿{Number(it.unit_price).toLocaleString()}</span>}
+        <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${STATUS[it.status]?.chip}`}>{STATUS[it.status]?.label}</span>
+      </div>
+    );
+  };
 
   // ===== หน้าออเดอร์: tree อ่านง่าย + ปุ่มเปิด popup =====
   return (
@@ -238,7 +244,7 @@ const OrderPrep = ({ order }) => {
               <div className="h-full bg-indigo-500 transition-all" style={{ width: `${progress}%` }} />
             </div>
             <span className="text-sm font-bold text-gray-700">{progress}%</span>
-            <span className="text-xs text-gray-400">({doneCount}/{leaves.length})</span>
+            <span className="text-xs text-gray-400">({doneCount}/{activeLeaves.length})</span>
             <span className="text-sm font-bold text-amber-600 ml-2">฿{totalCost.toLocaleString()}</span>
           </div>
         </div>
@@ -378,32 +384,33 @@ const OrderPrep = ({ order }) => {
 
   // ---------- editable row (ในป๊อปอัพ) ----------
   function renderEditRow(it) {
+    const off = it.status === 'skipped'; // ไม่ต้องเตรียม — จางทั้งแถว เหลือปุ่มสถานะไว้กดวนกลับ
     return (
-      <div key={it.id} className="flex flex-wrap items-center gap-2 py-2.5 px-2 border-b border-gray-50 last:border-0">
-        <Box size={13} className="text-gray-300 shrink-0" />
-        <span className="text-sm text-gray-800 flex-1 min-w-[110px]">{it.title}{it._whole && <span className="text-[10px] text-gray-400"> (ทั้งชิ้น)</span>}</span>
+      <div key={it.id} className={`flex flex-wrap items-center gap-2 py-2.5 px-2 border-b border-gray-50 last:border-0 ${off ? 'bg-gray-50/50' : ''}`}>
+        <Box size={13} className={`shrink-0 ${off ? 'text-gray-200' : 'text-gray-300'}`} />
+        <span className={`text-sm flex-1 min-w-[110px] ${off ? 'text-gray-300' : 'text-gray-800'}`}>{it.title}{it._whole && <span className="text-[10px] text-gray-400"> (ทั้งชิ้น)</span>}</span>
 
         {/* จำนวน — เด่นชัด */}
-        <span className="flex items-baseline gap-1 bg-gray-900 text-white rounded-lg px-2.5 py-1 shrink-0">
+        <span className={`flex items-baseline gap-1 rounded-lg px-2.5 py-1 shrink-0 ${off ? 'bg-gray-200 text-gray-400' : 'bg-gray-900 text-white'}`}>
           <span className="text-[10px] opacity-60">จำนวน</span><span className="text-base font-black leading-none">{it.qty}</span>
         </span>
 
-        {/* ที่มา — คลิกวน */}
-        <button type="button" disabled={!canEdit} onClick={() => cycleSource(it)} title="คลิกเพื่อเปลี่ยนที่มา"
+        {/* ที่มา — คลิกวน (ซ่อนเมื่อไม่ต้องเตรียม) */}
+        {!off && <button type="button" disabled={!canEdit} onClick={() => cycleSource(it)} title="คลิกเพื่อเปลี่ยนที่มา"
           className={`text-xs rounded-lg px-2.5 py-1.5 font-semibold border transition-colors w-28 text-center whitespace-nowrap shrink-0 ${it.source ? 'bg-indigo-50 text-indigo-700 border-indigo-100' : 'bg-white text-gray-400 border-gray-200'} disabled:opacity-60`}>
           {it.source ? SOURCE_LABEL[it.source] : '— เลือกที่มา —'}
-        </button>
-        {it.source === 'stock' && (it.stock_product_id
+        </button>}
+        {!off && it.source === 'stock' && (it.stock_product_id
           ? <button disabled={!canEdit} onClick={() => setPickerFor(it.id)} title="เปลี่ยนสินค้า" className="text-[11px] text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-lg px-2 py-1 flex items-center gap-1 max-w-[130px] disabled:opacity-60"><Link2 size={11} className="shrink-0" /><span className="truncate">{linkedNames[it.stock_product_id] || `#${it.stock_product_id}`}</span></button>
           : canEdit && <button onClick={() => setPickerFor(it.id)} className="text-[11px] text-indigo-600 border border-indigo-200 rounded-lg px-2 py-1 flex items-center gap-1"><Search size={11} /> เลือก</button>)}
 
-        {/* ราคา */}
-        <div className="flex items-center gap-1 border border-gray-200 rounded-lg px-1.5 py-1 bg-white">
+        {/* ราคา (ซ่อนเมื่อไม่ต้องเตรียม) */}
+        {!off && <div className="flex items-center gap-1 border border-gray-200 rounded-lg px-1.5 py-1 bg-white">
           <span className="text-[10px] text-gray-400">฿</span>
           <input type="number" min="0" disabled={!canEdit} value={it.unit_price ?? ''} placeholder="0"
             onChange={(e) => patchItem(it.id, { unit_price: e.target.value === '' ? null : Number(e.target.value) })}
             className="w-14 text-right text-xs outline-none bg-transparent disabled:opacity-60" />
-        </div>
+        </div>}
 
         {/* สถานะ — คลิกวน */}
         <button type="button" disabled={!canEdit} onClick={() => patchItem(it.id, { status: nextStatus(it.status) })} title="คลิกเพื่อเปลี่ยนสถานะ"
