@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Save, Loader2, Trash2, Receipt, Truck, Printer, PackagePlus, DollarSign, Calculator, History, Sparkles } from 'lucide-react';
+import { ArrowLeft, Save, Loader2, Trash2, Receipt, Truck, Printer, PackagePlus, DollarSign, Calculator, History, Sparkles, Paintbrush } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
 import { logAction } from '@/lib/auditLog';
@@ -12,7 +12,10 @@ import NumericInput from '../products/NumericInput';
 import OrderUpdateManager from './OrderUpdateManager';
 import OrderTeamSelector from './OrderTeamSelector';
 import AccessorySuggestionModal from './AccessorySuggestionModal';
+import PaintEditor from './PaintEditor';
+import PaintBadge from '@/app/components/common/PaintBadge';
 import { allocateFifoStockOut } from '@/lib/stockLots';
+import { dtLocalInput, localToISO } from '@/lib/datetime';
 import {
   FRAME_STATUS,
   FRAME_STATUS_OPTIONS,
@@ -61,6 +64,10 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
 
   // State for Suggestion Modal
   const [suggestionProduct, setSuggestionProduct] = useState(null);
+
+  // ---- ระบบสั่งทำสี ----
+  const [paintEditorIdx, setPaintEditorIdx] = useState(null); // index ของ item ที่กำลังใส่สี
+  const [paintCfgMap, setPaintCfgMap] = useState({}); // product_id → paint_config
   
   const getLocalDate = () => {
     const d = new Date();
@@ -82,7 +89,7 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
         assignees: initialData.order_assignees || [],
         payments: (initialData.order_payments || []).map(p => ({
           ...p,
-          date: p.payment_date ? p.payment_date.split('T')[0] : p.date,
+          date: p.payment_date ? dtLocalInput(p.payment_date) : p.date,
           method: p.payment_method || 'Transfer',
           fee_percent: p.fee_percent || 0,
           fee_amount: p.fee_amount || 0
@@ -247,6 +254,61 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
     setFormData(prev => ({...prev, items: [...prev.items, ...newItems]}));
   };
 
+  // โหลด paint_config ของสินค้าใน items (รู้ว่ารุ่นไหนสั่งทำสีได้ + ราคาเท่าไหร่)
+  useEffect(() => {
+    const ids = [...new Set(formData.items.map(i => i.product_id).filter(Boolean))];
+    const missing = ids.filter(id => !(id in paintCfgMap));
+    if (!missing.length) return;
+    supabase.from('products').select('id, paint_config').in('id', missing).then(({ data }) => {
+      setPaintCfgMap(prev => {
+        const m = { ...prev };
+        (data || []).forEach(p => { m[p.id] = p.paint_config; });
+        missing.forEach(id => { if (!(id in m)) m[id] = null; });
+        return m;
+      });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formData.items]);
+
+  // ใส่/แก้/ลบการทำสีของ item + จัดการบรรทัด "ค่าทำสี" ให้อัตโนมัติ
+  const applyPaint = (idx, paint) => {
+    setFormData(prev => {
+      const items = [...prev.items];
+      const veh = { ...items[idx] };
+      const customization = { ...(veh.customization || {}) };
+      if (paint) customization.paint = paint;
+      else delete customization.paint;
+      veh.customization = Object.keys(customization).length ? customization : null;
+      items[idx] = veh;
+
+      const feeIdx = items.findIndex(
+        it => it.customization?.paint_fee === true && it.customization?.for_product === veh.product_id
+      );
+      if (!paint) {
+        if (feeIdx >= 0) items.splice(feeIdx, 1);
+      } else {
+        const cfg = paintCfgMap[veh.product_id] || {};
+        const price = paint.twoTone ? Number(cfg.two_tone_price ?? 6900) : Number(cfg.single_price ?? 4900);
+        const feeItem = {
+          product_id: null,
+          product_name: paint.twoTone ? 'ค่าทำสี — Two-Tone' : 'ค่าทำสี — สีเดียว',
+          sku: '',
+          variant_name: '',
+          cost_price: 0,
+          sell_price: price,
+          quantity: 1,
+          requires_frame: false,
+          is_custom: true,
+          customization: { paint_fee: true, for_product: veh.product_id, paint },
+        };
+        if (feeIdx >= 0) items[feeIdx] = { ...items[feeIdx], ...feeItem };
+        else items.push(feeItem);
+      }
+      return { ...prev, items };
+    });
+    setPaintEditorIdx(null);
+  };
+
   const handleRemoveItem = (idx) => setFormData({...formData, items: formData.items.filter((_, i) => i !== idx)});
   const updateItem = (idx, field, value) => {
     const newItems = [...formData.items];
@@ -366,7 +428,9 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
         cost_price: item.cost_price,
         sell_price: item.sell_price,
         quantity: item.quantity,
-        requires_frame: item.requires_frame === true
+        requires_frame: item.requires_frame === true,
+        // เก็บ customization ไว้เสมอ — ไม่งั้นข้อมูลสีจากลิงก์ใบเสนอราคาจะหายตอนแอดมินแก้ออเดอร์
+        customization: item.customization || null
       }));
 
       // ตัดสต๊อกอัตโนมัติ (เฉพาะออเดอร์ใหม่ หรือสร้างครั้งแรก)
@@ -431,7 +495,7 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
         const paymentsPayload = formData.payments.map(p => ({
           order_id: orderId,
           amount: p.amount,
-          payment_date: p.date, 
+          payment_date: localToISO(p.date),
           type: p.type,
           payment_method: p.method || 'Transfer',
           fee_percent: p.fee_percent || 0,
@@ -583,19 +647,30 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
                                 {item.requires_frame && (
                                   <span className="text-[10px] text-sky-700 bg-sky-50 border border-sky-100 px-1.5 py-0.5 rounded font-bold">ทำโครง</span>
                                 )}
-                                <button 
-                                    type="button" 
-                                    onClick={() => handleManualOpenSuggestion(item)} 
+                                <button
+                                    type="button"
+                                    onClick={() => handleManualOpenSuggestion(item)}
                                     className="text-pink-500 hover:text-pink-700 bg-pink-50 hover:bg-pink-100 p-1.5 rounded-full transition-colors"
                                     title="เพิ่มชุดแต่ง"
                                 >
                                     <Sparkles size={14}/>
                                 </button>
+                                {paintCfgMap[item.product_id]?.enabled === true && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setPaintEditorIdx(idx)}
+                                    className={`p-1.5 rounded-full transition-colors ${item.customization?.paint ? 'text-amber-600 bg-amber-100 hover:bg-amber-200' : 'text-amber-500 bg-amber-50 hover:bg-amber-100'}`}
+                                    title={item.customization?.paint ? 'แก้ไขการทำสี' : 'สั่งทำสี'}
+                                  >
+                                    <Paintbrush size={14}/>
+                                  </button>
+                                )}
                             </div>
                             <div className="flex items-center gap-2 text-xs text-gray-500 mt-1">
                               {item.variant_name && <span className="bg-white px-2 py-0.5 rounded border">{item.variant_name}</span>}
                               {item.sku && <span className="font-mono text-[10px] bg-gray-100 px-1.5 rounded">{item.sku}</span>}
                             </div>
+                            <PaintBadge paint={item.customization?.paint} />
                           </div>
                         )}
                       </div>
@@ -687,6 +762,16 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
               onClose={() => setSuggestionProduct(null)} 
               onAdd={handleAddAccessories}
               existingItems={formData.items} // FIX: ส่ง existingItems ไปด้วย
+          />
+      )}
+
+      {paintEditorIdx !== null && formData.items[paintEditorIdx] && (
+          <PaintEditor
+              productName={formData.items[paintEditorIdx].product_name}
+              config={paintCfgMap[formData.items[paintEditorIdx].product_id]}
+              initialPaint={formData.items[paintEditorIdx].customization?.paint || null}
+              onSave={(paint) => applyPaint(paintEditorIdx, paint)}
+              onClose={() => setPaintEditorIdx(null)}
           />
       )}
     </form>

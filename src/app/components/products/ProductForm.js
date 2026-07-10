@@ -141,6 +141,15 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
         sell_price: formData.has_variants ? 0 : Number(formData.sell_price || 0),
         has_variants: formData.has_variants,
         requires_frame: formData.requires_frame === true,
+        paint_config: formData.paint_config
+          ? {
+              enabled: formData.paint_config.enabled === true,
+              stock_color: formData.paint_config.stock_color || '#000000',
+              stock_color_name: formData.paint_config.stock_color_name || 'ดำ',
+              single_price: Number(formData.paint_config.single_price || 0),
+              two_tone_price: Number(formData.paint_config.two_tone_price || 0),
+            }
+          : null,
       };
 
       let productId = initialData?.id;
@@ -400,6 +409,72 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
                         </span>
                       </span>
                     </label>
+
+                    {/* ระบบสั่งทำสี (paint_config) — ใช้โดยหน้า quote link + paint editor ในออเดอร์ */}
+                    <div className="p-4 rounded-2xl border border-amber-100 bg-amber-50/50">
+                      <label className="flex items-start gap-3 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          className="mt-1 w-4 h-4 accent-amber-600 rounded"
+                          checked={formData.paint_config?.enabled === true}
+                          onChange={e => setFormData({
+                            ...formData,
+                            paint_config: {
+                              stock_color: '#000000', stock_color_name: 'ดำ',
+                              single_price: 4900, two_tone_price: 6900,
+                              ...(formData.paint_config || {}),
+                              enabled: e.target.checked,
+                            },
+                          })}
+                        />
+                        <span>
+                          <span className="font-bold text-amber-900">รุ่นนี้สั่งทำสีได้ (เฟรม/สวิงอาม)</span>
+                          <span className="text-xs text-amber-700 mt-1 block">
+                            ลูกค้าเลือกทำสีจากลิงก์ใบเสนอราคาได้ และแอดมินใส่สีให้ในออเดอร์ได้
+                          </span>
+                        </span>
+                      </label>
+                      {formData.paint_config?.enabled === true && (
+                        <div className="grid grid-cols-2 gap-3 mt-3 pl-7">
+                          <div>
+                            <label className={labelClass}>สีเดิมจากโรงงาน</label>
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="color"
+                                className="w-9 h-9 rounded border border-gray-200 cursor-pointer"
+                                value={formData.paint_config?.stock_color || '#000000'}
+                                onChange={e => setFormData({...formData, paint_config: {...formData.paint_config, stock_color: e.target.value}})}
+                              />
+                              <input
+                                className={inputClass}
+                                placeholder="ชื่อสี เช่น ดำ"
+                                value={formData.paint_config?.stock_color_name || ''}
+                                onChange={e => setFormData({...formData, paint_config: {...formData.paint_config, stock_color_name: e.target.value}})}
+                              />
+                            </div>
+                          </div>
+                          <div></div>
+                          <div>
+                            <label className={labelClass}>ราคาทำสี — สีเดียว</label>
+                            <NumericInput
+                              className={inputClass}
+                              value={formData.paint_config?.single_price}
+                              onChange={v => setFormData({...formData, paint_config: {...formData.paint_config, single_price: v}})}
+                              placeholder="4900"
+                            />
+                          </div>
+                          <div>
+                            <label className={labelClass}>ราคาทำสี — Two-Tone</label>
+                            <NumericInput
+                              className={inputClass}
+                              value={formData.paint_config?.two_tone_price}
+                              onChange={v => setFormData({...formData, paint_config: {...formData.paint_config, two_tone_price: v}})}
+                              placeholder="6900"
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
                </div>
 

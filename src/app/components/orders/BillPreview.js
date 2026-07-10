@@ -1,6 +1,23 @@
 import React, { useState, useRef } from 'react';
 import { X, Download, Share2, Printer, Loader2, FileText, MessageCircle, Tag, Facebook, Instagram, Phone, Globe } from 'lucide-react';
 import html2canvas from 'html2canvas-pro';
+import { paintParts } from '@/app/components/common/PaintBadge';
+
+// จุดสี+label สำหรับพิมพ์ลงบิล (ใช้ inline style ให้ html2canvas/print เก็บสีได้ชัวร์)
+const BillPaintLine = ({ paint, size = 10 }) => {
+  const parts = paintParts(paint);
+  if (!parts.length) return null;
+  return (
+    <span style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 10px', marginTop: '2px' }}>
+      {parts.map(([label, hex]) => (
+        <span key={label} style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', fontSize: `${size}px`, color: '#374151' }}>
+          <span style={{ width: `${size}px`, height: `${size}px`, borderRadius: '9999px', background: hex, border: '1px solid #9ca3af', display: 'inline-block', flexShrink: 0 }} />
+          {label} <span style={{ fontFamily: 'monospace', color: '#6b7280' }}>{hex}</span>
+        </span>
+      ))}
+    </span>
+  );
+};
 
 const BillPreview = ({ order, onClose }) => {
   const [mode, setMode] = useState('official'); // 'official' | 'chat' | 'tag' (S1)
@@ -231,6 +248,7 @@ const BillPreview = ({ order, onClose }) => {
                                     <td className="py-2 px-3 align-top border-r border-gray-200">
                                         <p className="font-bold text-gray-900">{item.product_name}</p>
                                         {item.variant_name && <p className="text-[10px] text-gray-500">{item.variant_name}</p>}
+                                        <BillPaintLine paint={item.customization?.paint} size={10} />
                                         {item.sku && <p className="text-[10px] text-gray-400 font-mono">SKU: {item.sku}</p>}
                                     </td>
                                     <td className="py-2 px-3 text-center align-top border-r border-gray-200">{item.quantity}</td>
@@ -357,6 +375,7 @@ const BillPreview = ({ order, onClose }) => {
                                           <td className="p-2 align-top">
                                               <p className="font-bold text-sm text-gray-900">{item.product_name}</p>
                                               {item.variant_name && <span className="text-[10px] bg-gray-100 px-1 py-0.5 rounded text-gray-600 mt-0.5 inline-block border border-gray-300">{item.variant_name}</span>}
+                                              <BillPaintLine paint={item.customization?.paint} size={12} />
                                               {item.sku && <p className="text-[10px] text-gray-400 font-mono mt-0.5">SKU: {item.sku}</p>}
                                           </td>
                                           <td className="p-2 text-center align-top font-bold">{item.quantity}</td>
@@ -410,9 +429,10 @@ const BillPreview = ({ order, onClose }) => {
                             <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px dashed #e5e7eb' }}>
                                 <div style={{ flex: 1 }}>
                                     <p style={{ fontSize: '14px', fontWeight: '500', color: '#374151', margin: 0 }}>
-                                      {item.product_name} 
+                                      {item.product_name}
                                       {item.variant_name && <span style={{ fontSize: '12px', color: '#6b7280', marginLeft: '4px' }}>({item.variant_name})</span>}
                                     </p>
+                                    <BillPaintLine paint={item.customization?.paint} size={10} />
                                     <p style={{ fontSize: '10px', color: '#9ca3af', margin: 0 }}>x{item.quantity}</p>
                                 </div>
                                 <div style={{ fontWeight: 'bold', color: '#1f2937' }}>฿{(item.sell_price * item.quantity).toLocaleString()}</div>

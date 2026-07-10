@@ -3,6 +3,7 @@ import { ArrowLeft, Save, Loader2, Plus, Trash2, Search, X, UserPlus, Phone, Map
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
 import { logAction } from '@/lib/auditLog';
+import { paintSummaryText } from '@/app/components/common/PaintBadge';
 
 // หาสินค้า/บริการที่แพงที่สุดจาก order
 const getMostExpensiveOrderItem = (order) => {
@@ -105,9 +106,12 @@ const AssemblyForm = ({ initialData, onCancel, onSuccess }) => {
   });
 
   const populateItemsFromOrder = (order) => {
-    setItems((order.order_items || []).map(oi =>
-      makeItem(oi.product_name || oi.name || '', oi.quantity || 1, 'main')
-    ));
+    // แนบรายละเอียดสั่งทำสี (customization.paint จากลิงก์ใบเสนอราคา/แอดมิน) ให้ช่างเห็นในใบงาน
+    setItems((order.order_items || []).map(oi => {
+      const paintNote = paintSummaryText(oi.customization?.paint);
+      const name = (oi.product_name || oi.name || '') + (paintNote ? ` — ${paintNote}` : '');
+      return makeItem(name, oi.quantity || 1, 'main');
+    }));
   };
 
   const populateItemsFromService = (service) => {
