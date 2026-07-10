@@ -39,10 +39,11 @@ export default function PaintEditor({ productName, config, initialPaint, initial
   const [twoTone, setTwoTone] = useState(initialPaint?.twoTone === true);
   const [mainColor, setMainColor] = useState(initialPaint?.mainColor || '#c81e1e');
   const [secondColor, setSecondColor] = useState(initialPaint?.secondColor || '#1e3a8a');
-  const [seatOn, setSeatOn] = useState(!!initialPaint?.seatColor);
-  const [seatColor, setSeatColor] = useState(initialPaint?.seatColor || '#4a2c17');
-  const [bagOn, setBagOn] = useState(!!initialPaint?.bagColor);
-  const [bagColor, setBagColor] = useState(initialPaint?.bagColor || '#4a2c17');
+  // เบาะ + กระเป๋า = ชุดเดียวกัน (สีเดียว หรือ Two-Tone ทั้งชุด) — รองรับข้อมูลเก่า seatColor
+  const [seatBagOn, setSeatBagOn] = useState(!!(initialPaint?.seatBag || initialPaint?.seatColor || initialPaint?.bagColor));
+  const [sbTwoTone, setSbTwoTone] = useState(initialPaint?.seatBag?.twoTone === true);
+  const [sbColorA, setSbColorA] = useState(initialPaint?.seatBag?.mainColor || initialPaint?.seatColor || initialPaint?.bagColor || '#4a2c17');
+  const [sbColorB, setSbColorB] = useState(initialPaint?.seatBag?.secondColor || '#111111');
 
   const singlePrice = Number(config?.single_price ?? 4900);
   const twoTonePrice = Number(config?.two_tone_price ?? 6900);
@@ -56,8 +57,9 @@ export default function PaintEditor({ productName, config, initialPaint, initial
           twoTone: isTwoTone,
           mainColor,
           secondColor: isTwoTone ? secondColor : null,
-          seatColor: seatOn ? seatColor : null,
-          bagColor: bagOn ? bagColor : null,
+          seatBag: seatBagOn
+            ? { twoTone: sbTwoTone, mainColor: sbColorA, secondColor: sbTwoTone ? sbColorB : null }
+            : null,
         }
       : null;
     onSave({
@@ -158,16 +160,21 @@ export default function PaintEditor({ productName, config, initialPaint, initial
           </div>
 
           <div>
-            <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">เบาะ / กระเป๋า (รวมในราคา)</p>
+            <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">เบาะ + กระเป๋า (ชุดเดียวกัน · รวมในราคา)</p>
             <div className="flex flex-wrap gap-2 mb-1">
-              <button type="button" onClick={() => setSeatOn(!seatOn)} className={pill(seatOn)}>เปลี่ยนสีเบาะ</button>
-              <button type="button" onClick={() => setBagOn(!bagOn)} className={pill(bagOn)}>เปลี่ยนสีกระเป๋า</button>
+              <button type="button" onClick={() => setSeatBagOn(!seatBagOn)} className={pill(seatBagOn)}>ทำสีเบาะ + กระเป๋า</button>
             </div>
-            {(seatOn || bagOn) && (
-              <div className="border border-gray-100 rounded-xl px-3 divide-y divide-gray-50">
-                {seatOn && <ColorRow label="สีเบาะ" value={seatColor} onChange={setSeatColor} />}
-                {bagOn && <ColorRow label="สีกระเป๋า" value={bagColor} onChange={setBagColor} />}
-              </div>
+            {seatBagOn && (
+              <>
+                <div className="flex flex-wrap gap-2 mb-2 mt-2">
+                  <button type="button" onClick={() => setSbTwoTone(false)} className={pill(!sbTwoTone)}>สีเดียว</button>
+                  <button type="button" onClick={() => setSbTwoTone(true)} className={pill(sbTwoTone)}>Two-Tone</button>
+                </div>
+                <div className="border border-gray-100 rounded-xl px-3 divide-y divide-gray-50">
+                  <ColorRow label="สีเบาะ + กระเป๋า" value={sbColorA} onChange={setSbColorA} />
+                  {sbTwoTone && <ColorRow label="สีที่ 2 (เบาะ + กระเป๋า)" value={sbColorB} onChange={setSbColorB} />}
+                </div>
+              </>
             )}
           </div>
 

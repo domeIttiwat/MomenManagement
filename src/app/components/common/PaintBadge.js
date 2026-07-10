@@ -14,6 +14,13 @@ export function paintParts(paint) {
     parts.push(['เฟรม', paint.mainColor]);
     parts.push(['สวิงอาม', paint.secondColor]);
   } else parts.push(['เฟรม+สวิงอาม', paint.mainColor]);
+  // เบาะ + กระเป๋า = ชุดเดียวกัน (สีเดียว หรือ Two-Tone ทั้งชุด)
+  if (paint.seatBag) {
+    parts.push(['เบาะ+กระเป๋า', paint.seatBag.mainColor]);
+    if (paint.seatBag.twoTone && paint.seatBag.secondColor)
+      parts.push(['เบาะ+กระเป๋า (สี 2)', paint.seatBag.secondColor]);
+  }
+  // รูปแบบเก่า (ก่อนรวมเบาะ/กระเป๋าเป็นชุดเดียว)
   if (paint.seatColor) parts.push(['เบาะ', paint.seatColor]);
   if (paint.bagColor) parts.push(['กระเป๋า', paint.bagColor]);
   return parts;
