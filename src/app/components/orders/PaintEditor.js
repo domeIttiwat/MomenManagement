@@ -26,7 +26,15 @@ const ColorRow = ({ label, value, onChange }) => (
   </div>
 );
 
-export default function PaintEditor({ productName, config, initialPaint, onSave, onClose }) {
+const stockColorsFrom = (config) =>
+  Array.isArray(config?.stock_colors) && config.stock_colors.length
+    ? config.stock_colors
+    : [{ name: config?.stock_color_name || 'ดำ', hex: config?.stock_color || '#000000' }];
+
+export default function PaintEditor({ productName, config, initialPaint, initialStock, onSave, onClose }) {
+  const stockColors = stockColorsFrom(config);
+  const [paintOn, setPaintOn] = useState(!!initialPaint);
+  const [stockColor, setStockColor] = useState(initialStock || stockColors[0]);
   const [scope, setScope] = useState(initialPaint?.scope || 'both');
   const [twoTone, setTwoTone] = useState(initialPaint?.twoTone === true);
   const [mainColor, setMainColor] = useState(initialPaint?.mainColor || '#c81e1e');
@@ -42,13 +50,20 @@ export default function PaintEditor({ productName, config, initialPaint, onSave,
   const fee = isTwoTone ? twoTonePrice : singlePrice;
 
   const handleSave = () => {
+    const paint = paintOn
+      ? {
+          scope,
+          twoTone: isTwoTone,
+          mainColor,
+          secondColor: isTwoTone ? secondColor : null,
+          seatColor: seatOn ? seatColor : null,
+          bagColor: bagOn ? bagColor : null,
+        }
+      : null;
     onSave({
-      scope,
-      twoTone: isTwoTone,
-      mainColor,
-      secondColor: isTwoTone ? secondColor : null,
-      seatColor: seatOn ? seatColor : null,
-      bagColor: bagOn ? bagColor : null,
+      paint,
+      // สีโรงงานไม่จำเป็นเฉพาะกรณีทำสีทั้งเฟรม+สวิงอาม
+      stockColor: paint && paint.scope === 'both' ? null : stockColor,
     });
   };
 
@@ -73,6 +88,41 @@ export default function PaintEditor({ productName, config, initialPaint, onSave,
         </div>
 
         <div className="p-4 space-y-4">
+          {/* สีโรงงานของตัวรถ (ยังจำเป็นแม้ทำสีบางส่วน — ส่วนที่ไม่ได้ทำยังเป็นสีโรงงาน) */}
+          {!(paintOn && scope === 'both') && (
+            <div>
+              <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">สีโรงงานของรถ</p>
+              <div className="flex flex-wrap gap-2">
+                {stockColors.map((c, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => setStockColor(c)}
+                    className={pill(stockColor?.name === c.name && stockColor?.hex === c.hex)}
+                  >
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="w-3 h-3 rounded-full border border-gray-300 inline-block" style={{ background: c.hex }} />
+                      {c.name}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div>
+            <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">การทำสี</p>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" onClick={() => setPaintOn(false)} className={pill(!paintOn)}>
+                สีเดิมอย่างเดียว (ฟรี)
+              </button>
+              <button type="button" onClick={() => setPaintOn(true)} className={pill(paintOn)}>
+                สั่งทำสี
+              </button>
+            </div>
+          </div>
+
+          {paintOn && (<>
           <div>
             <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">ส่วนที่ทำสี</p>
             <div className="flex flex-wrap gap-2">
@@ -125,20 +175,10 @@ export default function PaintEditor({ productName, config, initialPaint, onSave,
             <span className="text-sm font-bold text-amber-900">ค่าทำสี{isTwoTone ? ' (Two-Tone)' : ' (สีเดียว)'}</span>
             <span className="font-bold text-amber-700">฿{fee.toLocaleString()}</span>
           </div>
+          </>)}
         </div>
 
-        <div className="flex items-center justify-between gap-2 p-4 border-t border-gray-100">
-          {initialPaint ? (
-            <button
-              type="button"
-              onClick={() => onSave(null)}
-              className="text-sm text-red-500 hover:text-red-700 px-3 py-2 rounded-lg hover:bg-red-50 transition-colors"
-            >
-              ยกเลิกการทำสี
-            </button>
-          ) : (
-            <span />
-          )}
+        <div className="flex items-center justify-end gap-2 p-4 border-t border-gray-100">
           <div className="flex gap-2">
             <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-500 hover:bg-gray-100 rounded-xl">
               ปิด
@@ -148,7 +188,7 @@ export default function PaintEditor({ productName, config, initialPaint, onSave,
               onClick={handleSave}
               className="px-5 py-2 text-sm font-bold bg-amber-500 hover:bg-amber-600 text-white rounded-xl transition-colors"
             >
-              บันทึกการทำสี
+              บันทึกสีรถ
             </button>
           </div>
         </div>

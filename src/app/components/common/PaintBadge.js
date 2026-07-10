@@ -19,15 +19,31 @@ export function paintParts(paint) {
   return parts;
 }
 
-/** สรุปเป็นข้อความบรรทัดเดียว เช่น "ทำสี: เฟรม #c81e1e · สวิงอาม #1e3a8a · เบาะ #4a2c17" */
+/** รวมสีโรงงานที่เลือก (customization.stock_color) + สีสั่งทำ → [[label, hex], ...] */
+export function customizationParts(customization) {
+  const parts = [];
+  if (customization?.stock_color?.hex) {
+    parts.push([`สีเดิม ${customization.stock_color.name || ''}`.trim(), customization.stock_color.hex]);
+  }
+  return [...parts, ...paintParts(customization?.paint)];
+}
+
+/** สรุปเป็นข้อความบรรทัดเดียว เช่น "ทำสี: เฟรม #c81e1e · เบาะ #4a2c17" */
 export function paintSummaryText(paint) {
   const parts = paintParts(paint);
   if (!parts.length) return '';
   return 'ทำสี: ' + parts.map(([label, hex]) => `${label} ${hex}`).join(' · ');
 }
 
-export default function PaintBadge({ paint, size = 'sm' }) {
-  const parts = paintParts(paint);
+/** สรุป customization ทั้งก้อน (สีเดิม + สีสั่งทำ) เป็นข้อความ ใช้ในใบงานประกอบ */
+export function customizationSummaryText(customization) {
+  const parts = customizationParts(customization);
+  if (!parts.length) return '';
+  return 'สี: ' + parts.map(([label, hex]) => `${label} ${hex}`).join(' · ');
+}
+
+export default function PaintBadge({ paint, customization, size = 'sm' }) {
+  const parts = customization ? customizationParts(customization) : paintParts(paint);
   if (!parts.length) return null;
   const text = size === 'lg' ? 'text-xs' : 'text-[10px]';
   const dot = size === 'lg' ? 'w-3.5 h-3.5' : 'w-2.5 h-2.5';

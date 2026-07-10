@@ -270,14 +270,18 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [formData.items]);
 
-  // ใส่/แก้/ลบการทำสีของ item + จัดการบรรทัด "ค่าทำสี" ให้อัตโนมัติ
-  const applyPaint = (idx, paint) => {
+  // ใส่/แก้สีรถของ item (สีโรงงาน + สั่งทำสี) + จัดการบรรทัด "ค่าทำสี" ให้อัตโนมัติ
+  const applyPaint = (idx, result) => {
+    const paint = result?.paint || null;
+    const stockColor = result?.stockColor || null;
     setFormData(prev => {
       const items = [...prev.items];
       const veh = { ...items[idx] };
       const customization = { ...(veh.customization || {}) };
       if (paint) customization.paint = paint;
       else delete customization.paint;
+      if (stockColor) customization.stock_color = stockColor;
+      else delete customization.stock_color;
       veh.customization = Object.keys(customization).length ? customization : null;
       items[idx] = veh;
 
@@ -670,7 +674,7 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
                               {item.variant_name && <span className="bg-white px-2 py-0.5 rounded border">{item.variant_name}</span>}
                               {item.sku && <span className="font-mono text-[10px] bg-gray-100 px-1.5 rounded">{item.sku}</span>}
                             </div>
-                            <PaintBadge paint={item.customization?.paint} />
+                            <PaintBadge customization={item.customization} />
                           </div>
                         )}
                       </div>
@@ -770,7 +774,8 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
               productName={formData.items[paintEditorIdx].product_name}
               config={paintCfgMap[formData.items[paintEditorIdx].product_id]}
               initialPaint={formData.items[paintEditorIdx].customization?.paint || null}
-              onSave={(paint) => applyPaint(paintEditorIdx, paint)}
+              initialStock={formData.items[paintEditorIdx].customization?.stock_color || null}
+              onSave={(result) => applyPaint(paintEditorIdx, result)}
               onClose={() => setPaintEditorIdx(null)}
           />
       )}

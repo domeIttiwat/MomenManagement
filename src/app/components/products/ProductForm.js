@@ -142,13 +142,21 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
         has_variants: formData.has_variants,
         requires_frame: formData.requires_frame === true,
         paint_config: formData.paint_config
-          ? {
-              enabled: formData.paint_config.enabled === true,
-              stock_color: formData.paint_config.stock_color || '#000000',
-              stock_color_name: formData.paint_config.stock_color_name || 'ดำ',
-              single_price: Number(formData.paint_config.single_price || 0),
-              two_tone_price: Number(formData.paint_config.two_tone_price || 0),
-            }
+          ? (() => {
+              const colors = (Array.isArray(formData.paint_config.stock_colors) && formData.paint_config.stock_colors.length
+                ? formData.paint_config.stock_colors
+                : [{ name: formData.paint_config.stock_color_name || 'ดำ', hex: formData.paint_config.stock_color || '#000000' }]
+              ).map(c => ({ name: (c.name || '').trim() || 'ไม่ระบุ', hex: c.hex || '#000000' }));
+              return {
+                enabled: formData.paint_config.enabled === true,
+                stock_colors: colors,
+                // เก็บสีแรกไว้ในคีย์เดี่ยวเดิมด้วย (backward compat กับโค้ดที่อ่าน stock_color)
+                stock_color: colors[0].hex,
+                stock_color_name: colors[0].name,
+                single_price: Number(formData.paint_config.single_price || 0),
+                two_tone_price: Number(formData.paint_config.two_tone_price || 0),
+              };
+            })()
           : null,
       };
 
@@ -320,6 +328,23 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
   const inputClass = "w-full px-4 py-3 bg-gray-50 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 rounded-xl transition-all outline-none font-medium text-gray-700 placeholder:text-gray-400";
   const labelClass = "block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 ml-1";
 
+  // ---- สีโรงงานหลายสี (paint_config.stock_colors, fallback จาก stock_color เดี่ยวของเดิม) ----
+  const getStockColorList = (pc) =>
+    Array.isArray(pc?.stock_colors) && pc.stock_colors.length
+      ? pc.stock_colors
+      : [{ name: pc?.stock_color_name || 'ดำ', hex: pc?.stock_color || '#000000' }];
+  const setStockColorList = (list) =>
+    setFormData({ ...formData, paint_config: { ...formData.paint_config, stock_colors: list } });
+  const updateStockColor = (idx, color) => {
+    const list = [...getStockColorList(formData.paint_config)];
+    list[idx] = color;
+    setStockColorList(list);
+  };
+  const removeStockColor = (idx) =>
+    setStockColorList(getStockColorList(formData.paint_config).filter((_, i) => i !== idx));
+  const addStockColor = () =>
+    setStockColorList([...getStockColorList(formData.paint_config), { name: '', hex: '#ffffff' }]);
+
   return (
     <form onSubmit={handleSubmit} className="max-w-6xl mx-auto pb-20 animate-in slide-in-from-bottom-4 fade-in duration-500">
       <div className="flex justify-between items-center bg-white/80 backdrop-blur-md p-4 rounded-2xl sticky top-2 z-20 shadow-sm border border-gray-100 mb-6">
@@ -436,24 +461,42 @@ const ProductForm = ({ onCancel, onSuccess, initialData }) => {
                       </label>
                       {formData.paint_config?.enabled === true && (
                         <div className="grid grid-cols-2 gap-3 mt-3 pl-7">
-                          <div>
-                            <label className={labelClass}>สีเดิมจากโรงงาน</label>
-                            <div className="flex items-center gap-2">
-                              <input
-                                type="color"
-                                className="w-9 h-9 rounded border border-gray-200 cursor-pointer"
-                                value={formData.paint_config?.stock_color || '#000000'}
-                                onChange={e => setFormData({...formData, paint_config: {...formData.paint_config, stock_color: e.target.value}})}
-                              />
-                              <input
-                                className={inputClass}
-                                placeholder="ชื่อสี เช่น ดำ"
-                                value={formData.paint_config?.stock_color_name || ''}
-                                onChange={e => setFormData({...formData, paint_config: {...formData.paint_config, stock_color_name: e.target.value}})}
-                              />
+                          <div className="col-span-2">
+                            <label className={labelClass}>สีเดิมจากโรงงาน (เพิ่มได้หลายสี)</label>
+                            <div className="space-y-2">
+                              {getStockColorList(formData.paint_config).map((c, ci) => (
+                                <div key={ci} className="flex items-center gap-2">
+                                  <input
+                                    type="color"
+                                    className="w-9 h-9 rounded border border-gray-200 cursor-pointer shrink-0"
+                                    value={c.hex || '#000000'}
+                                    onChange={e => updateStockColor(ci, { ...c, hex: e.target.value })}
+                                  />
+                                  <input
+                                    className={inputClass}
+                                    placeholder="ชื่อสี เช่น ดำ"
+                                    value={c.name || ''}
+                                    onChange={e => updateStockColor(ci, { ...c, name: e.target.value })}
+                                  />
+                                  {getStockColorList(formData.paint_config).length > 1 && (
+                                    <button
+                                      type="button"
+                                      onClick={() => removeStockColor(ci)}
+                                      className="text-gray-400 hover:text-red-500 p-2 shrink-0"
+                                      title="ลบสีนี้"
+                                    >✕</button>
+                                  )}
+                                </div>
+                              ))}
+                              <button
+                                type="button"
+                                onClick={addStockColor}
+                                className="text-xs font-bold text-amber-700 hover:text-amber-900 bg-amber-100 hover:bg-amber-200 px-3 py-1.5 rounded-lg transition-colors"
+                              >
+                                + เพิ่มสีโรงงาน
+                              </button>
                             </div>
                           </div>
-                          <div></div>
                           <div>
                             <label className={labelClass}>ราคาทำสี — สีเดียว</label>
                             <NumericInput

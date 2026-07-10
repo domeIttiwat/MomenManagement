@@ -430,7 +430,7 @@ const OrderDetail = ({ order, onBack, onEdit, onDelete, showProfit, setShowProfi
                           </span>
                         )}
                         {item.variant_name && <p className="text-xs text-gray-500 bg-gray-100 inline-block px-2 py-0.5 rounded mt-1">{item.variant_name}</p>}
-                        <PaintBadge paint={item.customization?.paint} />
+                        <PaintBadge customization={item.customization} />
                         {item.sku && <p className="text-[10px] text-gray-400 font-mono mt-0.5">{item.sku}</p>}
                       </td>
                       <td className="py-4 px-6 text-center">
