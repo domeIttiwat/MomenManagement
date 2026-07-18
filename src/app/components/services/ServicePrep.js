@@ -72,7 +72,29 @@ const ServicePrep = ({ service, onItemsChange, openSignal }) => {
       let q = supabase.from('products').select('id, name, sku, cost_price').limit(20);
       q = search.trim() ? q.ilike('name', `%${search}%`) : q.order('created_at', { ascending: false });
       const { data } = await q;
-      setResults(data || []);
+      const products = data || [];
+      // แนบข้อมูลสต๊อก: เหลือกี่ชิ้น เก็บอยู่ที่ไหนบ้าง
+      const stockByProduct = {};
+      try {
+        const ids = products.map((p) => p.id);
+        if (ids.length) {
+          const [{ data: items }, { data: locs }, { data: strs }] = await Promise.all([
+            supabase.from('stock_items').select('product_id, quantity, location_id').in('product_id', ids).gt('quantity', 0),
+            supabase.from('storage_locations').select('id, code, store_id'),
+            supabase.from('stores').select('id, name'),
+          ]);
+          const storeById = {}; (strs || []).forEach((s) => { storeById[s.id] = s.name; });
+          const locById = {}; (locs || []).forEach((l) => { locById[l.id] = `${storeById[l.store_id] || ''} ${l.code}`.trim(); });
+          (items || []).forEach((it) => {
+            const cur = (stockByProduct[it.product_id] = stockByProduct[it.product_id] || { total: 0, places: {} });
+            const qty = Number(it.quantity) || 0;
+            cur.total += qty;
+            const label = it.location_id ? (locById[it.location_id] || 'ไม่ทราบที่เก็บ') : 'รอจัดเก็บ';
+            cur.places[label] = (cur.places[label] || 0) + qty;
+          });
+        }
+      } catch { /* โชว์สต๊อกไม่ได้ก็ไม่เป็นไร */ }
+      setResults(products.map((p) => ({ ...p, _stock: stockByProduct[p.id] || null })));
     }, 250);
     return () => clearTimeout(t);
   }, [search, pickerFor]);
@@ -329,7 +351,18 @@ const ServicePrep = ({ service, onItemsChange, openSignal }) => {
             <div className="flex-1 overflow-y-auto p-2 space-y-1">
               {results.length ? results.map((p) => (
                 <button key={p.id} onClick={() => selectStock(p)} className="w-full flex items-center justify-between gap-2 p-3 hover:bg-gray-50 rounded-xl text-left border border-transparent hover:border-gray-200">
-                  <div className="min-w-0"><p className="text-sm font-bold text-gray-800 truncate">{p.name}</p><p className="text-[10px] text-gray-400 font-mono">{p.sku}</p></div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-bold text-gray-800 truncate">{p.name}</p>
+                    <p className="text-[10px] text-gray-400 font-mono">{p.sku}</p>
+                    {p._stock ? (
+                      <p className="text-[10px] mt-0.5 truncate">
+                        <span className="font-bold text-emerald-600">เหลือ {p._stock.total} ชิ้น</span>
+                        <span className="text-gray-400"> · {Object.entries(p._stock.places).map(([place, qty]) => `${place} ×${qty}`).join(', ')}</span>
+                      </p>
+                    ) : (
+                      <p className="text-[10px] mt-0.5 text-red-400">ไม่มีของในสต๊อก</p>
+                    )}
+                  </div>
                   <span className="text-xs font-bold text-amber-600 shrink-0">฿{(p.cost_price || 0).toLocaleString()}</span>
                 </button>
               )) : <p className="text-center text-gray-400 text-sm py-6">— ไม่พบสินค้า —</p>}
