@@ -83,6 +83,11 @@ const ServiceCard = ({ service, onClick, focused = false, onToggleFocus = null }
   const payStatus = getPaymentStatus();
   const mainItem = service.service_items?.[0]?.description || 'ไม่มีรายการ';
 
+  // รูปลูกค้า + รูปแนบของงาน
+  const custImgRaw = service.customer_cache?.images?.[0];
+  const custImgUrl = typeof custImgRaw === 'string' ? custImgRaw : custImgRaw?.url;
+  const jobImages = (service.images || []).map(img => (typeof img === 'string' ? img : img?.url)).filter(Boolean);
+
   return (
     <div onClick={onClick} className={`rounded-2xl p-4 shadow-sm border transition-all cursor-pointer group flex flex-col h-full ${focused ? 'bg-emerald-50 border-emerald-400 ring-2 ring-emerald-300 hover:shadow-md' : 'bg-white border-gray-100 hover:shadow-md hover:border-indigo-200'}`}>
       {/* Header Image */}
@@ -109,6 +114,11 @@ const ServiceCard = ({ service, onClick, focused = false, onToggleFocus = null }
             <statusInfo.icon size={12}/> {statusInfo.label}
           </span>
         </div>
+        {jobImages.length > 1 && (
+          <span className="absolute bottom-2 right-2 text-[10px] font-bold text-white bg-black/50 backdrop-blur-sm px-2 py-0.5 rounded-md">
+            +{jobImages.length - 1} รูป
+          </span>
+        )}
       </div>
 
       <div className="flex-1 flex flex-col">
@@ -140,8 +150,8 @@ const ServiceCard = ({ service, onClick, focused = false, onToggleFocus = null }
 
         {/* Customer */}
         <div className="flex items-center gap-2 mb-3 bg-gray-50 p-2 rounded-lg mt-2">
-          <div className="w-6 h-6 rounded-full bg-white flex items-center justify-center text-gray-400 shadow-sm border border-gray-100">
-            <User size={12}/>
+          <div className="w-6 h-6 rounded-full bg-white flex items-center justify-center text-gray-400 shadow-sm border border-gray-100 overflow-hidden shrink-0">
+            {custImgUrl ? <img src={custImgUrl} alt="" className="w-full h-full object-cover" /> : <User size={12}/>}
           </div>
           <p className="text-xs font-medium text-gray-700 truncate">
             {service.customer_cache?.first_name} {service.customer_cache?.last_name}

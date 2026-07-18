@@ -86,6 +86,11 @@ const ServiceListItem = ({ service, onClick, focused = false, onToggleFocus = nu
   const technicians = service.service_assignees?.map(a => a.user?.first_name).join(', ') || '-';
   const mainItem = service.service_items?.[0]?.description || 'ไม่มีรายการ';
 
+  // รูปลูกค้า (จาก customer_cache ที่ enrich แล้ว) + รูปแนบของงาน
+  const custImgRaw = service.customer_cache?.images?.[0];
+  const custImgUrl = typeof custImgRaw === 'string' ? custImgRaw : custImgRaw?.url;
+  const jobImages = (service.images || []).map(img => (typeof img === 'string' ? img : img?.url)).filter(Boolean);
+
   return (
     <tr onClick={onClick} className={`transition-colors cursor-pointer border-b last:border-none group ${focused ? 'bg-emerald-100/70 hover:bg-emerald-100 border-emerald-200' : 'hover:bg-indigo-50/30 border-gray-50'}`}>
       <td className="px-6 py-4">
@@ -108,14 +113,31 @@ const ServiceListItem = ({ service, onClick, focused = false, onToggleFocus = nu
         </span>
       </td>
       <td className="px-6 py-4">
-        <div className="font-bold text-gray-900">{service.customer_cache?.first_name}</div>
-        <div className="text-xs text-gray-500">{service.customer_cache?.phone}</div>
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center text-gray-400 shrink-0 overflow-hidden border border-gray-200">
+            {custImgUrl ? <img src={custImgUrl} alt="" className="w-full h-full object-cover" /> : <User size={18} />}
+          </div>
+          <div className="min-w-0">
+            <div className="font-bold text-gray-900 truncate">{service.customer_cache?.first_name}</div>
+            <div className="text-xs text-gray-500">{service.customer_cache?.phone}</div>
+          </div>
+        </div>
       </td>
       <td className="px-6 py-4">
         <div className="flex items-center gap-2">
            <Wrench size={16} className="text-gray-400 shrink-0"/>
            <span className="text-sm text-gray-700 truncate max-w-[200px]">{mainItem}</span>
         </div>
+        {jobImages.length > 0 && (
+          <div className="mt-1.5 flex items-center gap-1">
+            {jobImages.slice(0, 3).map((img, i) => (
+              <img key={i} src={img} alt="" className="w-8 h-8 rounded-md object-cover border border-gray-200" />
+            ))}
+            {jobImages.length > 3 && (
+              <span className="text-[10px] font-bold text-gray-400 bg-gray-100 rounded-md px-1.5 py-1">+{jobImages.length - 3}</span>
+            )}
+          </div>
+        )}
         {service._prep && (
           <div className="mt-1.5 flex items-center gap-2">
             <div className="h-1.5 w-24 bg-gray-100 rounded-full overflow-hidden">

@@ -48,6 +48,18 @@ const ServiceMain = () => {
       .select('*, service_items(*), service_assignees(user_id, job_role, user:user_id(first_name, last_name, avatar_url)), service_payments(*), service_updates(*)')
       .order('created_at', { ascending: false });
     let list = data || [];
+    // เติมข้อมูลลูกค้าสด (รูป/ชื่อ/เบอร์ล่าสุด) ทับ cache — ใบงานเก่าที่ cache ไม่มีรูปจะได้แสดงรูปด้วย
+    try {
+      const customerIds = [...new Set(list.map((s) => s.customer_id).filter(Boolean))];
+      if (customerIds.length) {
+        const { data: customers } = await supabase.from('customers').select('*').in('id', customerIds);
+        const byId = {};
+        (customers || []).forEach((c) => { byId[c.id] = c; });
+        list = list.map((s) => byId[s.customer_id]
+          ? { ...s, customer_cache: { ...(s.customer_cache || {}), ...byId[s.customer_id] } }
+          : s);
+      }
+    } catch { /* ไม่ให้กระทบการโหลด */ }
     // แนบความคืบหน้าการเตรียมของ (เฉพาะงานที่กดเริ่มเตรียมแล้ว) → ใช้โชว์บาร์ในหน้ารวม
     try {
       const { data: preps } = await supabase.from('service_preps').select('id, service_id, status');
