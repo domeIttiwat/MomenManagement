@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Package, Clock, Building2, ShoppingCart, HelpCircle, ArrowRight, ListChecks, ChevronDown, ChevronUp, Star } from 'lucide-react';
+import { Package, Clock, Building2, ShoppingCart, HelpCircle, ArrowRight, ListChecks, ChevronDown, ChevronUp } from 'lucide-react';
+import TagControl, { TagChips, firstTagColor } from '@/app/components/common/TagControl';
 
 const STATUS_LABEL = {
   Quotation: 'เสนอราคา',
@@ -24,8 +25,9 @@ const getStatusColor = (s) => {
   }
 };
 
-const OrderPrepCard = ({ order, onClick, focused = false, onToggleFocus = null }) => {
+const OrderPrepCard = ({ order, onClick, tags = [], itemTagIds = [], onToggleTag = null, onCreateTag = null, onDeleteTag = null }) => {
   const [expanded, setExpanded] = useState(false); // ค่าเริ่มต้น: แบบย่อ — กด "ดูรายการ" เพื่อกางรายชิ้น
+  const tagColor = firstTagColor(tags, itemTagIds);
   const prep = order._prep || { total: 0, done: 0, progress: 0, pending: [], source: { stock: 0, buy: 0, none: 0 } };
   const done = prep.progress === 100;
 
@@ -74,7 +76,8 @@ const OrderPrepCard = ({ order, onClick, focused = false, onToggleFocus = null }
   return (
     <div
       onClick={onClick}
-      className={`rounded-2xl shadow-sm border transition-all cursor-pointer group flex flex-col p-5 bg-white ${focused ? 'border-emerald-500 ring-2 ring-emerald-300 hover:shadow-md' : 'border-gray-100 hover:shadow-md hover:border-indigo-200'}`}
+      className={`rounded-2xl shadow-sm transition-all cursor-pointer group flex flex-col p-5 bg-white hover:shadow-md ${tagColor ? 'border-2' : 'border border-gray-100 hover:border-indigo-200'}`}
+      style={tagColor ? { borderColor: tagColor } : undefined}
     >
       {/* Header: เลขออเดอร์ + สถานะ + อายุ */}
       <div className="flex justify-between items-start gap-2">
@@ -102,21 +105,16 @@ const OrderPrepCard = ({ order, onClick, focused = false, onToggleFocus = null }
           </div>
         </div>
         <div className="flex items-center gap-1 shrink-0">
-          {onToggleFocus && (
-            <button
-              type="button"
-              onClick={(e) => { e.stopPropagation(); onToggleFocus(); }}
-              title={focused ? 'เลิกโฟกัส' : 'โฟกัสงานนี้'}
-              className={`p-1 rounded-lg transition-colors ${focused ? 'text-emerald-600 hover:bg-emerald-100' : 'text-gray-200 hover:text-emerald-500 hover:bg-gray-100'}`}
-            >
-              <Star size={15} className={focused ? 'fill-emerald-500' : ''} />
-            </button>
+          {onToggleTag && (
+            <TagControl tags={tags} itemTagIds={itemTagIds} onToggle={onToggleTag} onCreate={onCreateTag} onDeleteTag={onDeleteTag} />
           )}
           <span className={`text-[11px] whitespace-nowrap flex items-center gap-1 font-semibold ${ageColor}`}>
             <Clock size={11} /> {totalDays} วัน
           </span>
         </div>
       </div>
+
+      {itemTagIds.length > 0 && <div className="mt-2"><TagChips tags={tags} itemTagIds={itemTagIds} /></div>}
 
       {/* Progress */}
       <div className="mt-4">

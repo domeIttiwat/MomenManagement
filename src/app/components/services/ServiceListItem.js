@@ -1,7 +1,9 @@
 import React from 'react';
-import { Wrench, Calendar, User, Clock, Wallet, CheckCircle2, AlertCircle, Truck, PauseCircle, XCircle, PlayCircle, ClipboardList, Star } from 'lucide-react';
+import { Wrench, Calendar, User, Clock, Wallet, CheckCircle2, AlertCircle, Truck, PauseCircle, XCircle, PlayCircle, ClipboardList } from 'lucide-react';
+import TagControl, { TagChips, firstTagColor } from '@/app/components/common/TagControl';
 
-const ServiceListItem = ({ service, onClick, focused = false, onToggleFocus = null }) => {
+const ServiceListItem = ({ service, onClick, tags = [], itemTagIds = [], onToggleTag = null, onCreateTag = null, onDeleteTag = null }) => {
+  const tagColor = firstTagColor(tags, itemTagIds);
   // Logic การแสดงผลสถานะ (Unified Status Logic) - Updated to match ServiceDetail
   const getStatusDisplay = (status, reason) => {
     switch (status) {
@@ -92,21 +94,18 @@ const ServiceListItem = ({ service, onClick, focused = false, onToggleFocus = nu
   const jobImages = (service.images || []).map(img => (typeof img === 'string' ? img : img?.url)).filter(Boolean);
 
   return (
-    <tr onClick={onClick} className={`transition-colors cursor-pointer border-b last:border-none group ${focused ? 'bg-emerald-100/70 hover:bg-emerald-100 border-emerald-200' : 'hover:bg-indigo-50/30 border-gray-50'}`}>
+    <tr onClick={onClick} className="transition-colors cursor-pointer border-b last:border-none group hover:bg-indigo-50/30 border-gray-50"
+      style={tagColor ? { boxShadow: `inset 4px 0 0 ${tagColor}` } : undefined}>
       <td className="px-6 py-4">
         <div className="flex items-center gap-1.5">
-          {onToggleFocus && (
-            <button
-              type="button"
-              onClick={(e) => { e.stopPropagation(); onToggleFocus(); }}
-              title={focused ? 'เลิกโฟกัส' : 'โฟกัสงานนี้'}
-              className={`p-1 -ml-1.5 rounded-lg transition-colors shrink-0 ${focused ? 'text-emerald-600 hover:bg-emerald-100' : 'text-gray-200 hover:text-emerald-500 hover:bg-gray-100'}`}
-            >
-              <Star size={15} className={focused ? 'fill-emerald-500' : ''} />
-            </button>
+          {onToggleTag && (
+            <span className="-ml-1.5">
+              <TagControl align="left" tags={tags} itemTagIds={itemTagIds} onToggle={onToggleTag} onCreate={onCreateTag} onDeleteTag={onDeleteTag} />
+            </span>
           )}
           <div className="font-bold text-indigo-900 text-sm">{service.service_number}</div>
         </div>
+        {itemTagIds.length > 0 && <div className="mt-1"><TagChips tags={tags} itemTagIds={itemTagIds} /></div>}
         <div className="text-[10px] text-gray-500 mb-1">{new Date(service.received_date).toLocaleDateString('th-TH')}</div>
         <span className={`text-[9px] px-1.5 py-0.5 rounded border inline-flex items-center gap-1 font-bold ${getDurationColorClass(totalDays, isFinished)}`}>
            <Clock size={9}/> {durationText}

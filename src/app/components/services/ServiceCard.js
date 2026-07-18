@@ -1,7 +1,9 @@
 import React from 'react';
-import { Wrench, Calendar, User, Clock, CheckCircle2, AlertCircle, Truck, Wallet, PauseCircle, XCircle, PlayCircle, ClipboardList, Star } from 'lucide-react';
+import { Wrench, Calendar, User, Clock, CheckCircle2, AlertCircle, Truck, Wallet, PauseCircle, XCircle, PlayCircle, ClipboardList } from 'lucide-react';
+import TagControl, { TagChips, firstTagColor } from '@/app/components/common/TagControl';
 
-const ServiceCard = ({ service, onClick, focused = false, onToggleFocus = null }) => {
+const ServiceCard = ({ service, onClick, tags = [], itemTagIds = [], onToggleTag = null, onCreateTag = null, onDeleteTag = null }) => {
+  const tagColor = firstTagColor(tags, itemTagIds);
   
   // Logic การแสดงผลสถานะ (Unified Status Logic) - Updated to match ServiceDetail
   const getStatusDisplay = (status, reason) => {
@@ -89,7 +91,9 @@ const ServiceCard = ({ service, onClick, focused = false, onToggleFocus = null }
   const jobImages = (service.images || []).map(img => (typeof img === 'string' ? img : img?.url)).filter(Boolean);
 
   return (
-    <div onClick={onClick} className={`rounded-2xl p-4 shadow-sm border transition-all cursor-pointer group flex flex-col h-full ${focused ? 'bg-emerald-50 border-emerald-400 ring-2 ring-emerald-300 hover:shadow-md' : 'bg-white border-gray-100 hover:shadow-md hover:border-indigo-200'}`}>
+    <div onClick={onClick}
+      className={`bg-white rounded-2xl p-4 shadow-sm transition-all cursor-pointer group flex flex-col h-full hover:shadow-md ${tagColor ? 'border-2' : 'border border-gray-100 hover:border-indigo-200'}`}
+      style={tagColor ? { borderColor: tagColor } : undefined}>
       {/* Header Image */}
       <div className="relative aspect-square bg-gray-50 rounded-xl overflow-hidden mb-4 border border-gray-50">
         {service.images && service.images.length > 0 ? (
@@ -99,15 +103,10 @@ const ServiceCard = ({ service, onClick, focused = false, onToggleFocus = null }
             <Wrench size={32} />
           </div>
         )}
-        {onToggleFocus && (
-          <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); onToggleFocus(); }}
-            title={focused ? 'เลิกโฟกัส' : 'โฟกัสงานนี้'}
-            className={`absolute top-2 left-2 p-1.5 rounded-lg backdrop-blur-sm shadow-sm transition-colors ${focused ? 'bg-white/90 text-emerald-600' : 'bg-white/70 text-gray-300 hover:text-emerald-500'}`}
-          >
-            <Star size={15} className={focused ? 'fill-emerald-500' : ''} />
-          </button>
+        {onToggleTag && (
+          <span className="absolute top-2 left-2 bg-white/80 backdrop-blur-sm rounded-lg shadow-sm">
+            <TagControl align="left" tags={tags} itemTagIds={itemTagIds} onToggle={onToggleTag} onCreate={onCreateTag} onDeleteTag={onDeleteTag} />
+          </span>
         )}
         <div className="absolute top-2 right-2">
           <span className={`px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wide shadow-sm flex items-center gap-1 border ${statusInfo.color}`}>
@@ -122,6 +121,7 @@ const ServiceCard = ({ service, onClick, focused = false, onToggleFocus = null }
       </div>
 
       <div className="flex-1 flex flex-col">
+        {itemTagIds.length > 0 && <div className="mb-2"><TagChips tags={tags} itemTagIds={itemTagIds} /></div>}
         {/* Service No & Date */}
         <div className="flex justify-between items-start mb-2">
           <div>

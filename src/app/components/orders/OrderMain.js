@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Plus, Search, LayoutGrid, List as ListIcon, Loader2, ArrowUpDown, Filter, Eye, EyeOff, History, ShoppingBag, FileText, ListChecks } from 'lucide-react';
+import { Plus, Search, LayoutGrid, List as ListIcon, Loader2, ArrowUpDown, Filter, Eye, EyeOff, History, ShoppingBag, FileText, ListChecks, Tag } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
 import { logAction } from '@/lib/auditLog';
-import { fetchFocusIds, toggleFocus } from '@/lib/userFocus';
+import { fetchUserTags, createTag, deleteTag, fetchTagLinks, toggleTagLink } from '@/lib/userTags';
 import AuditLogPanel from '@/app/components/common/AuditLogPanel';
 import OrderList from './OrderList';
 import OrderForm from './OrderForm';
@@ -87,23 +87,46 @@ const OrderMain = ({ initialNavData, onViewCustomer }) => {
   const [showHistory, setShowHistory] = useState(false);
   const [showQuotation, setShowQuotation] = useState(false);
   const [detailScrollTo, setDetailScrollTo] = useState(null);
-  const [focusIds, setFocusIds] = useState(new Set()); // Focus ส่วนตัว — ของใครของมัน
+  // ── Tag ส่วนตัว (แทน Focus เดิม) — ของใครของมัน คนอื่นไม่เห็น ──
+  const [tags, setTags] = useState([]);
+  const [tagLinks, setTagLinks] = useState({}); // { [orderId]: [tagId,...] }
+  const [tagFilter, setTagFilter] = useState('');
 
   useEffect(() => {
     if (!profile?.id) return;
-    fetchFocusIds(profile.id, 'order').then(setFocusIds);
+    fetchUserTags(profile.id).then(setTags);
+    fetchTagLinks(profile.id, 'order').then(setTagLinks);
   }, [profile?.id]);
 
-  const handleToggleFocus = async (orderId) => {
-    const id = String(orderId);
-    setFocusIds(prev => { // optimistic
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
+  const handleToggleTag = async (orderId, tagId) => {
+    const rid = String(orderId);
+    setTagLinks(prev => { // optimistic
+      const cur = prev[rid] || [];
+      return { ...prev, [rid]: cur.includes(tagId) ? cur.filter(t => t !== tagId) : [...cur, tagId] };
     });
-    try { await toggleFocus(profile?.id, 'order', orderId); }
-    catch { fetchFocusIds(profile?.id, 'order').then(setFocusIds); } // พลาดก็ sync กลับจาก DB
+    try { await toggleTagLink(tagId, 'order', orderId); }
+    catch { fetchTagLinks(profile?.id, 'order').then(setTagLinks); }
   };
+  const handleCreateTag = async (orderId, name, color) => {
+    try {
+      const tag = await createTag(profile?.id, name, color);
+      setTags(prev => [...prev, tag]);
+      if (orderId != null) await handleToggleTag(orderId, tag.id);
+    } catch (e) { alert('สร้าง Tag ไม่สำเร็จ: ' + e.message); }
+  };
+  const handleDeleteTag = async (tagId) => {
+    setTags(prev => prev.filter(t => t.id !== tagId));
+    setTagLinks(prev => Object.fromEntries(Object.entries(prev).map(([k, v]) => [k, v.filter(t => t !== tagId)])));
+    if (tagFilter === tagId) setTagFilter('');
+    try { await deleteTag(tagId); } catch { /* ลบพลาดก็แค่ค้างใน DB */ }
+  };
+  const tagProps = (id) => ({
+    tags,
+    itemTagIds: tagLinks[String(id)] || [],
+    onToggleTag: (tagId) => handleToggleTag(id, tagId),
+    onCreateTag: (name, color) => handleCreateTag(id, name, color),
+    onDeleteTag: handleDeleteTag,
+  });
 
   const openOrder = (o, scrollTo = null) => { setSelectedOrder(o); setDetailScrollTo(scrollTo); setView('detail'); };
   const patchOrder = (updatedOrder) => {
@@ -222,6 +245,10 @@ const OrderMain = ({ initialNavData, onViewCustomer }) => {
       result = result.filter(o => o.status === filterStatus);
     }
 
+    if (tagFilter) {
+      result = result.filter(o => (tagLinks[String(o.id)] || []).includes(tagFilter));
+    }
+
     switch(sortOption) {
       case 'newest': result.sort((a,b) => new Date(b.order_date) - new Date(a.order_date)); break;
       case 'oldest': result.sort((a,b) => new Date(a.order_date) - new Date(b.order_date)); break;
@@ -230,7 +257,7 @@ const OrderMain = ({ initialNavData, onViewCustomer }) => {
     }
 
     return result;
-  }, [orders, search, filterStatus, sortOption, showHistory, showQuotation]);
+  }, [orders, search, filterStatus, sortOption, showHistory, showQuotation, tagFilter, tagLinks]);
 
   // โหมด "ตามการจัดเตรียม": เฉพาะออเดอร์ที่เริ่มเตรียมแล้ว และยังไม่ถึงสถานะเตรียมส่ง/เสร็จสิ้น/ยกเลิก
   // เรียงจากคืบหน้าน้อย → มาก (ตัวที่ค้างเยอะลอยขึ้นบน) ถ้าเท่ากันให้ตัวที่รอนานกว่าขึ้นก่อน
@@ -255,11 +282,15 @@ const OrderMain = ({ initialNavData, onViewCustomer }) => {
       result = result.filter(o => o.status === filterStatus);
     }
 
+    if (tagFilter) {
+      result = result.filter(o => (tagLinks[String(o.id)] || []).includes(tagFilter));
+    }
+
     return result.sort((a, b) =>
       (a._prep.progress - b._prep.progress) ||
       (new Date(a.order_date) - new Date(b.order_date))
     );
-  }, [orders, search, filterStatus]);
+  }, [orders, search, filterStatus, tagFilter, tagLinks]);
 
   if (view === 'form') return <OrderForm onCancel={() => setView('list')} onSuccess={() => { setView('list'); fetchOrders(); }} initialData={selectedOrder} />;
   if (view === 'log') return (
@@ -369,6 +400,20 @@ const OrderMain = ({ initialNavData, onViewCustomer }) => {
              <Filter size={16} className="absolute left-3.5 top-3.5 text-gray-400 pointer-events-none"/>
           </div>
 
+          {/* Tag Filter — Tag ส่วนตัว */}
+          {tags.length > 0 && (
+            <div className="relative">
+               <select
+                 className={`appearance-none px-4 py-3 pl-10 pr-8 rounded-xl text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500/20 cursor-pointer border-none ${tagFilter ? 'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200' : 'bg-gray-50 hover:bg-gray-100 text-gray-600'}`}
+                 value={tagFilter} onChange={e => setTagFilter(e.target.value)}
+               >
+                 <option value="">ทุก Tag</option>
+                 {tags.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+               </select>
+               <Tag size={16} className="absolute left-3.5 top-3.5 pointer-events-none" style={{ color: tags.find(t => t.id === tagFilter)?.color || '#9ca3af' }}/>
+            </div>
+          )}
+
           {/* Sort */}
           <div className="relative">
              <select 
@@ -406,10 +451,10 @@ const OrderMain = ({ initialNavData, onViewCustomer }) => {
 
       {loading ? <div className="text-center py-20"><Loader2 className="animate-spin inline text-indigo-600"/></div> :
         viewMode === 'list' ? (
-          <OrderList orders={filteredAndSorted} showProfit={showProfit} onSelect={o => openOrder(o)} focusIds={focusIds} onToggleFocus={handleToggleFocus} />
+          <OrderList orders={filteredAndSorted} showProfit={showProfit} onSelect={o => openOrder(o)} tagPropsFor={tagProps} />
         ) : viewMode === 'card' ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 pb-20">
-             {filteredAndSorted.map(o => <OrderCard key={o.id} order={o} showProfit={showProfit} onClick={() => openOrder(o)} focused={focusIds.has(String(o.id))} onToggleFocus={() => handleToggleFocus(o.id)} />)}
+             {filteredAndSorted.map(o => <OrderCard key={o.id} order={o} showProfit={showProfit} onClick={() => openOrder(o)} {...tagProps(o.id)} />)}
           </div>
         ) : (
           prepOrders.length === 0 ? (
@@ -420,7 +465,7 @@ const OrderMain = ({ initialNavData, onViewCustomer }) => {
             </div>
           ) : (
             <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-5 pb-20">
-               {prepOrders.map(o => <OrderPrepCard key={o.id} order={o} onClick={() => openOrder(o, 'prep')} focused={focusIds.has(String(o.id))} onToggleFocus={() => handleToggleFocus(o.id)} />)}
+               {prepOrders.map(o => <OrderPrepCard key={o.id} order={o} onClick={() => openOrder(o, 'prep')} {...tagProps(o.id)} />)}
             </div>
           )
         )

@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Plus, Search, Wrench, Loader2, List as ListIcon, LayoutGrid, Filter, ArrowUpDown, History, Eye, EyeOff } from 'lucide-react';
+import { Plus, Search, Wrench, Loader2, List as ListIcon, LayoutGrid, Filter, ArrowUpDown, History, Eye, EyeOff, Tag } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
 import { logAction } from '@/lib/auditLog';
-import { fetchFocusIds, toggleFocus } from '@/lib/userFocus';
+import { fetchUserTags, createTag, deleteTag, fetchTagLinks, toggleTagLink } from '@/lib/userTags';
 import AuditLogPanel from '@/app/components/common/AuditLogPanel';
 import ServiceList from './ServiceList';
 import ServiceForm from './ServiceForm';
@@ -23,23 +23,46 @@ const ServiceMain = () => {
   const [sortOption, setSortOption] = useState('newest');
   const [showHistory, setShowHistory] = useState(false);
   const [showProfit, setShowProfit] = useState(false);
-  const [focusIds, setFocusIds] = useState(new Set()); // Focus ส่วนตัว — ของใครของมัน
+  // ── Tag ส่วนตัว (แทน Focus เดิม) — ของใครของมัน คนอื่นไม่เห็น ──
+  const [tags, setTags] = useState([]);
+  const [tagLinks, setTagLinks] = useState({}); // { [serviceId]: [tagId,...] }
+  const [tagFilter, setTagFilter] = useState('');
 
   useEffect(() => {
     if (!profile?.id) return;
-    fetchFocusIds(profile.id, 'service').then(setFocusIds);
+    fetchUserTags(profile.id).then(setTags);
+    fetchTagLinks(profile.id, 'service').then(setTagLinks);
   }, [profile?.id]);
 
-  const handleToggleFocus = async (serviceId) => {
-    const id = String(serviceId);
-    setFocusIds(prev => { // optimistic
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
+  const handleToggleTag = async (serviceId, tagId) => {
+    const rid = String(serviceId);
+    setTagLinks(prev => { // optimistic
+      const cur = prev[rid] || [];
+      return { ...prev, [rid]: cur.includes(tagId) ? cur.filter(t => t !== tagId) : [...cur, tagId] };
     });
-    try { await toggleFocus(profile?.id, 'service', serviceId); }
-    catch { fetchFocusIds(profile?.id, 'service').then(setFocusIds); }
+    try { await toggleTagLink(tagId, 'service', serviceId); }
+    catch { fetchTagLinks(profile?.id, 'service').then(setTagLinks); }
   };
+  const handleCreateTag = async (serviceId, name, color) => {
+    try {
+      const tag = await createTag(profile?.id, name, color);
+      setTags(prev => [...prev, tag]);
+      if (serviceId != null) await handleToggleTag(serviceId, tag.id);
+    } catch (e) { alert('สร้าง Tag ไม่สำเร็จ: ' + e.message); }
+  };
+  const handleDeleteTag = async (tagId) => {
+    setTags(prev => prev.filter(t => t.id !== tagId));
+    setTagLinks(prev => Object.fromEntries(Object.entries(prev).map(([k, v]) => [k, v.filter(t => t !== tagId)])));
+    if (tagFilter === tagId) setTagFilter('');
+    try { await deleteTag(tagId); } catch { /* ลบพลาดก็แค่ค้างใน DB */ }
+  };
+  const tagProps = (id) => ({
+    tags,
+    itemTagIds: tagLinks[String(id)] || [],
+    onToggleTag: (tagId) => handleToggleTag(id, tagId),
+    onCreateTag: (name, color) => handleCreateTag(id, name, color),
+    onDeleteTag: handleDeleteTag,
+  });
 
   const fetchServices = async (silent = false) => {
     if (!silent) setLoading(true);
@@ -120,6 +143,10 @@ const ServiceMain = () => {
       result = result.filter(item => item.status === filterStatus);
     }
 
+    if (tagFilter) {
+      result = result.filter(item => (tagLinks[String(item.id)] || []).includes(tagFilter));
+    }
+
     switch(sortOption) {
       case 'newest': result.sort((a,b) => new Date(b.received_date) - new Date(a.received_date)); break;
       case 'oldest': result.sort((a,b) => new Date(a.received_date) - new Date(b.received_date)); break;
@@ -128,7 +155,7 @@ const ServiceMain = () => {
     }
 
     return result;
-  }, [services, search, filterStatus, sortOption, showHistory]);
+  }, [services, search, filterStatus, sortOption, showHistory, tagFilter, tagLinks]);
 
   if (view === 'form') return <ServiceForm onCancel={() => setView('list')} onSuccess={() => { setView('list'); fetchServices(); }} initialData={selectedService} />;
   if (view === 'detail') return <ServiceDetail service={selectedService} onBack={() => { setView('list'); fetchServices(true); }} onEdit={() => setView('form')} onDelete={() => handleDelete(selectedService.id)} showProfit={showProfit} setShowProfit={setShowProfit} />;
@@ -214,6 +241,20 @@ const ServiceMain = () => {
                <Filter size={16} className="absolute left-3.5 top-3.5 text-gray-400 pointer-events-none"/>
             </div>
 
+            {/* Tag Filter — Tag ส่วนตัว */}
+            {tags.length > 0 && (
+              <div className="relative">
+                 <select
+                   className={`appearance-none px-4 py-3 pl-10 pr-8 rounded-xl text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500/20 cursor-pointer border-none ${tagFilter ? 'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200' : 'bg-gray-50 hover:bg-gray-100 text-gray-600'}`}
+                   value={tagFilter} onChange={e => setTagFilter(e.target.value)}
+                 >
+                   <option value="">ทุก Tag</option>
+                   {tags.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                 </select>
+                 <Tag size={16} className="absolute left-3.5 top-3.5 pointer-events-none" style={{ color: tags.find(t => t.id === tagFilter)?.color || '#9ca3af' }}/>
+              </div>
+            )}
+
             {/* Sort */}
             <div className="relative">
                <select 
@@ -252,7 +293,7 @@ const ServiceMain = () => {
       </div>
 
       {loading ? <div className="text-center py-20"><Loader2 className="animate-spin inline"/></div> : 
-         <ServiceList services={filteredAndSorted} viewMode={viewMode} onSelect={s => { setSelectedService(s); setView('detail'); }} focusIds={focusIds} onToggleFocus={handleToggleFocus} />
+         <ServiceList services={filteredAndSorted} viewMode={viewMode} onSelect={s => { setSelectedService(s); setView('detail'); }} tagPropsFor={tagProps} />
       }
     </div>
   );
