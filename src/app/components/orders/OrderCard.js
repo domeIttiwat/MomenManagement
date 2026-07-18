@@ -1,5 +1,5 @@
 import React from 'react';
-import { Package, Calendar, User, FileText, Clock, Banknote, Landmark, CreditCard, Facebook, Instagram, MessageCircle, Phone, Wrench } from 'lucide-react';
+import { Package, Calendar, User, FileText, Clock, Banknote, Landmark, CreditCard, Facebook, Instagram, MessageCircle, Phone, Wrench, Star } from 'lucide-react';
 import {
   getFrameStatusLabel,
   getFrameStatusStyle,
@@ -7,7 +7,7 @@ import {
   normalizeFrameStatus,
 } from './frameStatus';
 
-const OrderCard = ({ order, showProfit, onClick }) => {
+const OrderCard = ({ order, showProfit, onClick, focused = false, onToggleFocus = null }) => {
   const totalCost = order.order_items?.reduce((sum, item) => sum + (item.cost_price * item.quantity), 0) || 0;
   const totalProfit = (order.subtotal - order.discount) - totalCost;
   const paymentMethods = [...new Set(order.order_payments?.map(p => p.payment_method) || [])];
@@ -72,12 +72,22 @@ const OrderCard = ({ order, showProfit, onClick }) => {
   const custImgUrl = typeof custImg === 'string' ? custImg : custImg?.url;
 
   return (
-    <div onClick={onClick} className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 hover:shadow-md hover:border-indigo-200 transition-all cursor-pointer group flex flex-col h-full">
+    <div onClick={onClick} className={`rounded-2xl p-4 shadow-sm border transition-all cursor-pointer group flex flex-col h-full ${focused ? 'bg-emerald-50 border-emerald-400 ring-2 ring-emerald-300 hover:shadow-md' : 'bg-white border-gray-100 hover:shadow-md hover:border-indigo-200'}`}>
       <div className="relative aspect-square bg-gray-50 rounded-xl overflow-hidden mb-4 border border-gray-50">
         {order.images && order.images.length > 0 ? (
           <img src={order.images[0]} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
         ) : (
           <div className="w-full h-full flex items-center justify-center text-gray-300"><FileText size={32}/></div>
+        )}
+        {onToggleFocus && (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onToggleFocus(); }}
+            title={focused ? 'เลิกโฟกัส' : 'โฟกัสงานนี้'}
+            className={`absolute top-2 left-2 p-1.5 rounded-lg backdrop-blur-sm shadow-sm transition-colors ${focused ? 'bg-white/90 text-emerald-600' : 'bg-white/70 text-gray-300 hover:text-emerald-500'}`}
+          >
+            <Star size={15} className={focused ? 'fill-emerald-500' : ''} />
+          </button>
         )}
         <div className="absolute top-2 right-2">
           <span className={`px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wide shadow-sm ${statusColors[order.status] || 'bg-gray-100'}`}>

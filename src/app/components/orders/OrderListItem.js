@@ -1,5 +1,5 @@
 import React from 'react';
-import { Package, User, Clock, CheckCircle2, MessageCircle, Facebook, Instagram, Phone, Wrench } from 'lucide-react';
+import { Package, User, Clock, CheckCircle2, MessageCircle, Facebook, Instagram, Phone, Wrench, Star } from 'lucide-react';
 import {
   getFrameStatusLabel,
   getFrameStatusStyle,
@@ -7,7 +7,7 @@ import {
   normalizeFrameStatus,
 } from './frameStatus';
 
-const OrderListItem = ({ order, showProfit, onClick }) => {
+const OrderListItem = ({ order, showProfit, onClick, focused = false, onToggleFocus = null }) => {
   const getStatusColor = (s) => {
     switch(s) {
       case 'Quotation': return 'bg-gray-100 text-gray-600';
@@ -70,9 +70,19 @@ const OrderListItem = ({ order, showProfit, onClick }) => {
   const custImgUrl = typeof custImg === 'string' ? custImg : custImg?.url;
 
   return (
-    <tr onClick={onClick} className="hover:bg-indigo-50/30 transition-colors cursor-pointer border-b border-gray-50 last:border-none group">
+    <tr onClick={onClick} className={`transition-colors cursor-pointer border-b last:border-none group ${focused ? 'bg-emerald-100/70 hover:bg-emerald-100 border-emerald-200' : 'hover:bg-indigo-50/30 border-gray-50'}`}>
       <td className="px-6 py-4 align-top">
         <div className="flex items-center gap-3">
+          {onToggleFocus && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onToggleFocus(); }}
+              title={focused ? 'เลิกโฟกัส' : 'โฟกัสงานนี้'}
+              className={`p-1 rounded-lg transition-colors shrink-0 ${focused ? 'text-emerald-600 hover:bg-emerald-100' : 'text-gray-200 hover:text-emerald-500 hover:bg-gray-100'}`}
+            >
+              <Star size={15} className={focused ? 'fill-emerald-500' : ''} />
+            </button>
+          )}
           <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center text-gray-400 shrink-0 overflow-hidden">
             {custImgUrl ? <img src={custImgUrl} alt="" className="w-full h-full object-cover" /> : <User size={18} />}
           </div>

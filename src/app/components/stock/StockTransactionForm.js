@@ -16,7 +16,8 @@ const TX_TYPES = [
 ];
 
 const StockTransactionForm = ({ initialData, onCancel, onSuccess }) => {
-  const { profile } = useAuth();
+  const { profile, can } = useAuth();
+  const canAdjust = can('stock', 'adjust'); // ปรับสต๊อก/กำหนดยอดใหม่ — เฉพาะผู้มีสิทธิ์ (Supervisor/Admin)
   const [loading, setLoading] = useState(false);
   const fileInputRef = useRef();
 
@@ -51,7 +52,13 @@ const StockTransactionForm = ({ initialData, onCancel, onSuccess }) => {
 
   // Adjustment
   const [adjustSign, setAdjustSign] = useState(+1); // +1 = เพิ่ม, -1 = ลด
+  const [adjustMode, setAdjustMode] = useState('delta'); // delta = เพิ่ม/ลดทีละจำนวน | set = กำหนดยอดใหม่ตรง ๆ (0 ได้)
   const [selectedAdjItemId, setSelectedAdjItemId] = useState('new');
+
+  // ไม่มีสิทธิ์ปรับสต๊อก → ห้ามค้างอยู่ในโหมด adjustment
+  useEffect(() => {
+    if (!canAdjust && txType === 'adjustment') setTxType('stock_in');
+  }, [canAdjust, txType]);
 
   // Images (stock_in only)
   const [imageFiles, setImageFiles] = useState([]);
@@ -171,7 +178,12 @@ const StockTransactionForm = ({ initialData, onCancel, onSuccess }) => {
     e.preventDefault();
     if (!selectedProduct) return alert('กรุณาเลือกสินค้า');
     if (selectedProduct.has_variants && !selectedVariant) return alert('กรุณาเลือก variant');
-    if (!quantity || quantity < 1) return alert('กรุณาระบุจำนวน');
+    const isSetMode = txType === 'adjustment' && adjustMode === 'set';
+    const setItem = isSetMode ? productStockItems.find(i => i.id === selectedAdjItemId) : null;
+    if (isSetMode) {
+      if (!setItem) return alert('โหมดกำหนดยอดใหม่ ใช้กับที่เก็บที่มีอยู่แล้วเท่านั้น — กรุณาเลือกที่เก็บด้านบนก่อน');
+      if (quantity === (Number(setItem.quantity) || 0)) return alert('ยอดใหม่เท่ากับยอดปัจจุบัน — ไม่มีอะไรต้องปรับ');
+    } else if (!quantity || quantity < 1) return alert('กรุณาระบุจำนวน');
     if (!note.trim()) return alert('กรุณาใส่หมายเหตุ (บังคับ)');
 
     setLoading(true);
@@ -237,18 +249,21 @@ const StockTransactionForm = ({ initialData, onCancel, onSuccess }) => {
       }
 
       const imageData = txType === 'stock_in' ? await uploadImages() : [];
-      const delta = txType === 'stock_out' ? -quantity
+      // โหมดกำหนดยอดใหม่: แปลงเป็นส่วนต่างจากยอดปัจจุบัน แล้วเดินเครื่องเหมือนปรับเพิ่ม/ลดปกติ
+      const delta = isSetMode ? (quantity - (Number(setItem.quantity) || 0))
+                  : txType === 'stock_out' ? -quantity
                   : txType === 'adjustment' ? (adjustSign * quantity)
                   : +quantity;
+      const effQty = Math.abs(delta);
 
       const { data: txRow, error: txError } = await supabase.from('stock_transactions').insert([{
         product_id: selectedProduct.id, variant_id: variantId,
-        transaction_type: txType, quantity,
+        transaction_type: txType, quantity: effQty,
         store_id: stId, location_id: locId,
-        note: note.trim(),
+        note: note.trim() + (isSetMode ? ` — กำหนดยอดใหม่เป็น ${quantity} (จากเดิม ${setItem.quantity})` : ''),
         images: imageData.length > 0 ? imageData : null,
         unit_cost_thb: (txType === 'stock_in' || (txType === 'adjustment' && delta > 0)) ? Number(unitCost) || 0 : null,
-        total_cost_thb: (txType === 'stock_in' || (txType === 'adjustment' && delta > 0)) ? (Number(unitCost) || 0) * quantity : null,
+        total_cost_thb: (txType === 'stock_in' || (txType === 'adjustment' && delta > 0)) ? (Number(unitCost) || 0) * effQty : null,
         reference_type: 'manual', created_by: profile?.id,
       }]).select('id').single();
       if (txError) throw txError;
@@ -258,7 +273,7 @@ const StockTransactionForm = ({ initialData, onCancel, onSuccess }) => {
           productId: selectedProduct.id,
           variantId,
           locationId: locId,
-          quantity,
+          quantity: effQty,
           unitCostThb: Number(unitCost) || 0,
           sourceType: 'manual',
           note: note.trim(),
@@ -270,7 +285,7 @@ const StockTransactionForm = ({ initialData, onCancel, onSuccess }) => {
           productId: selectedProduct.id,
           variantId,
           locationId: locId,
-          quantity,
+          quantity: effQty,
           referenceType: 'manual',
           stockTransactionId: txRow?.id,
           profileId: profile?.id,
@@ -302,8 +317,12 @@ const StockTransactionForm = ({ initialData, onCancel, onSuccess }) => {
   const selectedOutItem = productStockItems.find(i => i.id === selectedOutItemId);
   const selectedAdjItem = txType === 'adjustment' && selectedAdjItemId !== 'new'
     ? productStockItems.find(i => i.id === selectedAdjItemId) : null;
+  const isSetModeUi = txType === 'adjustment' && adjustMode === 'set';
   const adjPreviewQty = selectedAdjItem != null
-    ? Math.max(0, selectedAdjItem.quantity + (adjustSign * quantity)) : null;
+    ? (isSetModeUi ? Math.max(0, quantity) : Math.max(0, selectedAdjItem.quantity + (adjustSign * quantity)))
+    : null;
+  const setDeltaUi = isSetModeUi && selectedAdjItem ? quantity - (Number(selectedAdjItem.quantity) || 0) : null;
+  const visibleTxTypes = TX_TYPES.filter(t => t.id !== 'adjustment' || canAdjust);
 
   return (
     <form onSubmit={handleSubmit} className="max-w-xl mx-auto pb-20 animate-in slide-in-from-bottom-4 fade-in duration-500">
@@ -326,7 +345,7 @@ const StockTransactionForm = ({ initialData, onCancel, onSuccess }) => {
         <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
           <p className={labelClass}>ประเภทรายการ</p>
           <div className="grid grid-cols-3 gap-3 mt-2">
-            {TX_TYPES.map(t => {
+            {visibleTxTypes.map(t => {
               const Icon = t.icon;
               return (
                 <button key={t.id} type="button" onClick={() => setTxType(t.id)}
@@ -655,24 +674,41 @@ const StockTransactionForm = ({ initialData, onCancel, onSuccess }) => {
         <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 space-y-3">
           <label className={labelClass}>จำนวน <span className="text-red-400">*</span></label>
 
-          {/* +/- toggle for adjustment */}
+          {/* โหมดปรับ: เพิ่ม/ลด/กำหนดยอดใหม่ */}
           {txType === 'adjustment' && (
             <div className="flex gap-2">
-              <button type="button" onClick={() => setAdjustSign(+1)}
-                className={`flex-1 py-2 rounded-xl text-sm font-bold border-2 transition-all ${adjustSign > 0 ? 'border-green-500 bg-green-50 text-green-700' : 'border-gray-100 text-gray-400 hover:border-gray-200'}`}>
+              <button type="button" onClick={() => { setAdjustMode('delta'); setAdjustSign(+1); }}
+                className={`flex-1 py-2 rounded-xl text-sm font-bold border-2 transition-all ${adjustMode === 'delta' && adjustSign > 0 ? 'border-green-500 bg-green-50 text-green-700' : 'border-gray-100 text-gray-400 hover:border-gray-200'}`}>
                 + เพิ่มขึ้น
               </button>
-              <button type="button" onClick={() => setAdjustSign(-1)}
-                className={`flex-1 py-2 rounded-xl text-sm font-bold border-2 transition-all ${adjustSign < 0 ? 'border-red-500 bg-red-50 text-red-700' : 'border-gray-100 text-gray-400 hover:border-gray-200'}`}>
+              <button type="button" onClick={() => { setAdjustMode('delta'); setAdjustSign(-1); }}
+                className={`flex-1 py-2 rounded-xl text-sm font-bold border-2 transition-all ${adjustMode === 'delta' && adjustSign < 0 ? 'border-red-500 bg-red-50 text-red-700' : 'border-gray-100 text-gray-400 hover:border-gray-200'}`}>
                 − ลดลง
+              </button>
+              <button type="button" onClick={() => setAdjustMode('set')}
+                className={`flex-1 py-2 rounded-xl text-sm font-bold border-2 transition-all ${adjustMode === 'set' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-100 text-gray-400 hover:border-gray-200'}`}>
+                = กำหนดยอดใหม่
               </button>
             </div>
           )}
 
-          <input type="number" min="1"
+          {isSetModeUi && (
+            <div className="flex items-center justify-between gap-2 p-2.5 bg-blue-50/60 border border-blue-100 rounded-xl">
+              <p className="text-xs text-blue-800">คีย์ยอดคงเหลือใหม่ตรง ๆ (ใส่ 0 เพื่อล้าง) — ระบบคำนวณส่วนต่างและบันทึกเป็นการปรับสต๊อกให้เอง</p>
+              <button type="button" onClick={() => setQuantity(0)}
+                className="shrink-0 text-xs font-bold text-red-600 bg-white border border-red-200 hover:bg-red-50 px-3 py-1.5 rounded-lg">
+                ล้างเป็น 0
+              </button>
+            </div>
+          )}
+
+          <input type="number" min={isSetModeUi ? 0 : 1}
             max={txType === 'stock_out' && selectedOutItem ? selectedOutItem.quantity : undefined}
             required className={inputClass} value={quantity}
-            onChange={e => setQuantity(Math.max(1, parseInt(e.target.value) || 1))} />
+            onChange={e => {
+              const v = parseInt(e.target.value);
+              setQuantity(isSetModeUi ? Math.max(0, Number.isNaN(v) ? 0 : v) : Math.max(1, v || 1));
+            }} />
 
           {txType === 'stock_out' && selectedOutItem && (
             <p className="text-xs text-gray-400 ml-1">สต๊อกที่มีในที่เก็บนี้: <span className="font-bold text-gray-600">{selectedOutItem.quantity} ชิ้น</span></p>
@@ -685,21 +721,32 @@ const StockTransactionForm = ({ initialData, onCancel, onSuccess }) => {
                 <p className="text-[10px] text-gray-400 mb-0.5">ปัจจุบัน</p>
                 <p className="font-bold text-gray-700 text-xl">{selectedAdjItem.quantity}</p>
               </div>
-              <span className={`text-2xl font-black ${adjustSign > 0 ? 'text-green-600' : 'text-red-500'}`}>
-                {adjustSign > 0 ? '+' : '−'}{quantity}
-              </span>
-              <span className="text-gray-400 text-xl font-bold">=</span>
+              {isSetModeUi ? (
+                <span className={`text-xl font-black ${(setDeltaUi ?? 0) >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                  {(setDeltaUi ?? 0) >= 0 ? `+${setDeltaUi}` : setDeltaUi} →
+                </span>
+              ) : (
+                <>
+                  <span className={`text-2xl font-black ${adjustSign > 0 ? 'text-green-600' : 'text-red-500'}`}>
+                    {adjustSign > 0 ? '+' : '−'}{quantity}
+                  </span>
+                  <span className="text-gray-400 text-xl font-bold">=</span>
+                </>
+              )}
               <div className="text-center">
-                <p className="text-[10px] text-gray-400 mb-0.5">หลังปรับ</p>
+                <p className="text-[10px] text-gray-400 mb-0.5">{isSetModeUi ? 'ยอดใหม่' : 'หลังปรับ'}</p>
                 <p className={`font-bold text-xl ${adjPreviewQty < selectedAdjItem.quantity ? 'text-red-600' : adjPreviewQty > selectedAdjItem.quantity ? 'text-green-600' : 'text-gray-700'}`}>
                   {adjPreviewQty}
                 </p>
               </div>
             </div>
           )}
+          {isSetModeUi && !selectedAdjItem && (
+            <p className="text-xs text-amber-600 ml-1">โหมดกำหนดยอดใหม่ ต้องเลือก "ที่เก็บปัจจุบัน" ด้านบนก่อน (ใช้กับที่เก็บใหม่ไม่ได้)</p>
+          )}
         </div>
 
-        {(txType === 'stock_in' || (txType === 'adjustment' && adjustSign > 0)) && selectedProduct && (
+        {(txType === 'stock_in' || (txType === 'adjustment' && (isSetModeUi ? (setDeltaUi ?? 0) > 0 : adjustSign > 0))) && selectedProduct && (
           <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 space-y-2">
             <label className={labelClass}>ต้นทุนต่อหน่วยของล็อตนี้</label>
             <input

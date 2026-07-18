@@ -50,7 +50,7 @@ const ServiceForm = ({ onCancel, onSuccess, initialData }) => {
     received_date: getLocalDate(),
     appointment_date: '',
     completed_date: '',
-    status: 'Waiting',
+    status: 'Assessing', // ใบงานใหม่เริ่มที่ "รอประเมิน" (รับรถแล้วรอประเมิน)
     waiting_reason: 'รอคิว',
     customer: null,
     assignees: [], // เริ่มต้นเป็นว่าง
@@ -331,6 +331,7 @@ const ServiceForm = ({ onCancel, onSuccess, initialData }) => {
                <div>
                  <label className={labelClass}>สถานะงาน</label>
                  <select className={inputClass} value={formData.status} onChange={handleStatusChange}>
+                   <option value="Assessing">รอประเมิน</option>
                    <option value="Waiting">รอทำ</option>
                    <option value="In Progress">ส่งทำ</option>
                    <option value="Tested">ทดสอบแล้ว</option>

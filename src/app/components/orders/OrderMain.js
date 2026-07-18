@@ -3,6 +3,7 @@ import { Plus, Search, LayoutGrid, List as ListIcon, Loader2, ArrowUpDown, Filte
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
 import { logAction } from '@/lib/auditLog';
+import { fetchFocusIds, toggleFocus } from '@/lib/userFocus';
 import AuditLogPanel from '@/app/components/common/AuditLogPanel';
 import OrderList from './OrderList';
 import OrderForm from './OrderForm';
@@ -86,6 +87,23 @@ const OrderMain = ({ initialNavData, onViewCustomer }) => {
   const [showHistory, setShowHistory] = useState(false);
   const [showQuotation, setShowQuotation] = useState(false);
   const [detailScrollTo, setDetailScrollTo] = useState(null);
+  const [focusIds, setFocusIds] = useState(new Set()); // Focus ส่วนตัว — ของใครของมัน
+
+  useEffect(() => {
+    if (!profile?.id) return;
+    fetchFocusIds(profile.id, 'order').then(setFocusIds);
+  }, [profile?.id]);
+
+  const handleToggleFocus = async (orderId) => {
+    const id = String(orderId);
+    setFocusIds(prev => { // optimistic
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+    try { await toggleFocus(profile?.id, 'order', orderId); }
+    catch { fetchFocusIds(profile?.id, 'order').then(setFocusIds); } // พลาดก็ sync กลับจาก DB
+  };
 
   const openOrder = (o, scrollTo = null) => { setSelectedOrder(o); setDetailScrollTo(scrollTo); setView('detail'); };
   const patchOrder = (updatedOrder) => {
@@ -93,8 +111,8 @@ const OrderMain = ({ initialNavData, onViewCustomer }) => {
     setOrders(prev => prev.map(o => o.id === updatedOrder.id ? { ...o, ...updatedOrder } : o));
   };
 
-  const fetchOrders = async () => {
-    setLoading(true);
+  const fetchOrders = async (silent = false) => {
+    if (!silent) setLoading(true);
     const { data } = await supabase.from('orders')
       // --- FIX: เพิ่ม user_id ใน order_assignees ---
       .select('*, order_items(*), order_payments(*), order_updates(*), order_assignees(user_id, job_role, user:user_id(first_name, last_name, avatar_url))')
@@ -256,7 +274,7 @@ const OrderMain = ({ initialNavData, onViewCustomer }) => {
   if (view === 'detail') return (
     <OrderDetail
       order={selectedOrder}
-      onBack={() => setView('list')}
+      onBack={() => { setView('list'); fetchOrders(true); }}
       onEdit={() => setView('form')}
       onDelete={() => handleDelete(selectedOrder.id)}
       showProfit={showProfit}
@@ -388,10 +406,10 @@ const OrderMain = ({ initialNavData, onViewCustomer }) => {
 
       {loading ? <div className="text-center py-20"><Loader2 className="animate-spin inline text-indigo-600"/></div> :
         viewMode === 'list' ? (
-          <OrderList orders={filteredAndSorted} showProfit={showProfit} onSelect={o => openOrder(o)} />
+          <OrderList orders={filteredAndSorted} showProfit={showProfit} onSelect={o => openOrder(o)} focusIds={focusIds} onToggleFocus={handleToggleFocus} />
         ) : viewMode === 'card' ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 pb-20">
-             {filteredAndSorted.map(o => <OrderCard key={o.id} order={o} showProfit={showProfit} onClick={() => openOrder(o)} />)}
+             {filteredAndSorted.map(o => <OrderCard key={o.id} order={o} showProfit={showProfit} onClick={() => openOrder(o)} focused={focusIds.has(String(o.id))} onToggleFocus={() => handleToggleFocus(o.id)} />)}
           </div>
         ) : (
           prepOrders.length === 0 ? (
@@ -402,7 +420,7 @@ const OrderMain = ({ initialNavData, onViewCustomer }) => {
             </div>
           ) : (
             <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-5 pb-20">
-               {prepOrders.map(o => <OrderPrepCard key={o.id} order={o} onClick={() => openOrder(o, 'prep')} />)}
+               {prepOrders.map(o => <OrderPrepCard key={o.id} order={o} onClick={() => openOrder(o, 'prep')} focused={focusIds.has(String(o.id))} onToggleFocus={() => handleToggleFocus(o.id)} />)}
             </div>
           )
         )

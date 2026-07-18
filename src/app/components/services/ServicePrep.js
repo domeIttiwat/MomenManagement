@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { ListChecks, Plus, Trash2, RotateCcw, Package, Box, Loader2, X, StickyNote, Search, Link2, Pencil } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
@@ -16,7 +16,7 @@ const nextStatus = (s) => STATUS_ORDER[(STATUS_ORDER.indexOf(s) + 1) % STATUS_OR
 const nextSource = (s) => SOURCE_ORDER[(SOURCE_ORDER.indexOf(s ?? null) + 1) % SOURCE_ORDER.length];
 
 // การจัดเตรียมของสำหรับงานบริการ — ระบบเดียวกับฝั่งออเดอร์ (OrderPrep) ใช้ตาราง service_preps/service_prep_items
-const ServicePrep = ({ service }) => {
+const ServicePrep = ({ service, onItemsChange, openSignal }) => {
   const { can, profile } = useAuth();
   const canEdit = can('assembly', 'prepare');
   const meRef = () => (profile ? { id: profile.id, name: `${profile.first_name} ${profile.last_name}` } : null);
@@ -53,6 +53,18 @@ const ServicePrep = ({ service }) => {
   }, [service.id]);
 
   useEffect(() => { load(); }, [load]);
+
+  // ส่งรายการล่าสุดให้ parent (ใช้โชว์ chip สถานะบนอะไหล่ในรายการซ่อม)
+  useEffect(() => { onItemsChange?.(items); }, [items, onItemsChange]);
+
+  // ปุ่ม "เช็คลิสต์เตรียมอะไหล่" บนหัวข้อรายการซ่อม → ยังไม่เริ่มก็เริ่มให้เลย, เริ่มแล้วเปิดป๊อปอัพอัปเดต
+  const handledSignal = useRef(0);
+  useEffect(() => {
+    if (!openSignal || openSignal === handledSignal.current || loading || busy) return;
+    handledSignal.current = openSignal;
+    if (prep) setEditing(true);
+    else if (canEdit) startPrep();
+  }, [openSignal, loading, busy, prep, canEdit]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!pickerFor) return;

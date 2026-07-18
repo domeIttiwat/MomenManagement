@@ -279,6 +279,7 @@ const ProcurementMain = ({ onNavigateToProduct }) => {
   const canEdit = can('procurement', 'edit');
   const canDelete = can('procurement', 'delete');
   const canReceive = can('procurement', 'receive_stock');
+  const canCloseNoStock = can('procurement', 'close_no_stock'); // ปิดจบไม่บันทึกสต๊อก — เฉพาะ Supervisor/Admin
   const canMarkPaid = can('procurement', 'mark_paid');
   const canMarkArrived = can('procurement', 'mark_arrived');
   const showCost = can('procurement', 'show_cost') || can('products', 'show_cost');
@@ -386,7 +387,7 @@ const ProcurementMain = ({ onNavigateToProduct }) => {
           ? <OrderList orders={orders} onNew={() => openOrderForm()} onOpen={openOrderDetail} canCreate={canCreate} loading={loading} />
           : orderView === 'form'
             ? <OrderFormPanel order={selectedOrder} suppliers={suppliers} products={products} locations={locations} lastPurchases={lastPurchases} profile={profile} canEdit={canEdit || canCreate} onCancel={() => setOrderView('list')} onSaved={() => { setOrderView('list'); fetchAll(); }} showCost={showCost} />
-            : <OrderDetail order={selectedOrder} profile={profile} locations={locations} onBack={() => setOrderView('list')} onEdit={() => openOrderForm(selectedOrder)} onRefresh={() => openOrderDetail(selectedOrder)} canEdit={canEdit} canDelete={canDelete} canMarkPaid={canMarkPaid} canMarkArrived={canMarkArrived} canReceive={canReceive} showCost={showCost} onChanged={() => { fetchAll(); openOrderDetail(selectedOrder); }} />
+            : <OrderDetail order={selectedOrder} profile={profile} locations={locations} onBack={() => setOrderView('list')} onEdit={() => openOrderForm(selectedOrder)} onRefresh={() => openOrderDetail(selectedOrder)} canEdit={canEdit} canDelete={canDelete} canMarkPaid={canMarkPaid} canMarkArrived={canMarkArrived} canReceive={canReceive} canCloseNoStock={canCloseNoStock} showCost={showCost} onChanged={() => { fetchAll(); openOrderDetail(selectedOrder); }} />
       )}
 
       {activeTab === 'suppliers' && (
@@ -466,8 +467,8 @@ const OrderList = ({ orders, onNew, onOpen, canCreate, loading }) => {
     const hay = `${o.order_number || ''} ${o.supplier?.name || ''} ${itemHay}`.toLowerCase();
     if (!hay.includes(search.toLowerCase())) return false;
     if (status) return o.status === status;
-    // ค่าเริ่มต้น: ซ่อนที่รับเข้าแล้ว เว้นแต่กดดูประวัติ
-    if (o.status === 'received' && !showReceived) return false;
+    // ค่าเริ่มต้น: ซ่อนที่รับเข้าแล้ว เว้นแต่กดดูประวัติ — ยกเว้นรอบที่ปิดแบบยังไม่เข้าสต๊อก ให้ค้างบนบอร์ดไว้กันลืมรับเข้าย้อนหลัง
+    if (o.status === 'received' && !o.stock_skipped && !showReceived) return false;
     return true;
   });
   const currentStageDate = (order) => {
@@ -512,6 +513,9 @@ const OrderList = ({ orders, onNew, onOpen, canCreate, loading }) => {
                       <div className="flex items-center gap-2 flex-wrap">
                         <p className="font-bold text-gray-900 group-hover:text-indigo-700">{order.order_number}</p>
                         <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${tone.badge}`}>{statusLabel(order.status)}</span>
+                        {order.status === 'received' && order.stock_skipped && (
+                          <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">ยังไม่เข้าสต๊อก</span>
+                        )}
                         <span className="text-[11px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-bold">{items.length} รายการ</span>
                       </div>
                       <p className="text-sm text-gray-500 mt-1">{order.supplier?.name || 'ไม่ระบุ Supplier'}</p>
@@ -554,10 +558,11 @@ const ProductMiniThumb = ({ product, className = 'w-12 h-12 rounded-2xl' }) => {
   return <div className={`${className} bg-indigo-50 border border-indigo-100 text-indigo-300 flex items-center justify-center shrink-0`}><Package size={18}/></div>;
 };
 
-const OrderStageTracker =({ order, onEditStatus, canEdit, canMarkPaid, canMarkArrived }) => {
+const OrderStageTracker =({ order, onEditStatus, canEdit, canMarkPaid, canMarkArrived, canReceive }) => {
   const steps = poStepMeta(order);
   const lastKnownIndex = steps.reduce((last, step, idx) => (step.date ? idx : last), -1);
-  const editableFor = { ordered: canEdit, paid: canMarkPaid, arrived: canMarkArrived };
+  // รับเข้า: กดได้เฉพาะตอนที่รับเข้าไปแล้ว (ไว้แก้วันที่/ย้อนสถานะกรณีกดผิด)
+  const editableFor = { ordered: canEdit, paid: canMarkPaid, arrived: canMarkArrived, received: canReceive && Boolean(order.received_at) };
 
   const renderStep = (step, idx) => {
     const hasDate = Boolean(step.date);
@@ -1238,7 +1243,7 @@ const QuickAddSpecModal = ({ product, rowIndex = null, onClose, onCreate }) => {
   );
 };
 
-const OrderDetail = ({ order, profile, locations = [], onBack, onEdit, onRefresh, canEdit, canDelete, canMarkPaid, canMarkArrived, canReceive, showCost, onChanged }) => {
+const OrderDetail = ({ order, profile, locations = [], onBack, onEdit, onRefresh, canEdit, canDelete, canMarkPaid, canMarkArrived, canReceive, canCloseNoStock = false, showCost, onChanged }) => {
   const [busy, setBusy] = useState(false);
   const [statusModal, setStatusModal] = useState(null);
   const [receiveModal, setReceiveModal] = useState(null);
@@ -1247,25 +1252,47 @@ const OrderDetail = ({ order, profile, locations = [], onBack, onEdit, onRefresh
   const statusUpdates = updates.filter(u => classifyUpdate(u) === 'status');
   const comments = updates.filter(u => classifyUpdate(u) === 'comment');
   // เปิด modal เลือกคลังปลายทาง: ตั้งค่าเริ่มจาก location เดิมของแต่ละรายการ
+  // backfill = รอบที่ปิดแบบยังไม่เข้าสต๊อก แล้วกลับมารับเข้าจริงย้อนหลัง (ไม่มีโหมด skip ให้เลือกซ้ำ)
   const openReceive = () => {
     const selections = {};
     items.forEach(item => { selections[item.id] = item.location_id || ''; });
-    setReceiveModal({ selections });
+    setReceiveModal({ selections, mode: 'normal', updatePrices: true, backfill: order.status === 'received' && !!order.stock_skipped });
   };
-  const confirmReceive = async (selections) => {
+  const confirmReceive = async ({ selections, mode, updatePrices }) => {
     setBusy(true);
     try {
-      const itemLocations = Object.fromEntries(Object.entries(selections).map(([id, loc]) => [id, loc || null]));
-      const result = await receivePurchaseOrder({ purchaseOrderId: order.id, profileId: profile?.id, itemLocations });
+      let itemLocations = null;
+      if (mode === 'staging') {
+        // เข้ากอง "รอจัดเก็บ" (ยังไม่มีที่เก็บ) — ไปจัดเข้าชั้นทีหลังที่เมนูสต๊อก
+        itemLocations = Object.fromEntries(items.map(item => [item.id, null]));
+      } else if (mode === 'normal') {
+        itemLocations = Object.fromEntries(Object.entries(selections).map(([id, loc]) => [id, loc || null]));
+      }
+      const noStock = mode === 'skip' || mode === 'close';
+      const result = await receivePurchaseOrder({
+        purchaseOrderId: order.id,
+        profileId: profile?.id,
+        itemLocations,
+        updatePrices: noStock ? false : updatePrices,
+        skipStock: noStock,
+        markSkipped: mode === 'close' ? false : null, // close = จบถาวร ไม่ติดป้ายตามทวง
+      });
+      const commentText = mode === 'close'
+        ? 'ปิดจบโดยไม่บันทึกสต๊อก (จัดการของนอกระบบ — ไม่มีการตามรับเข้าอีก)'
+        : mode === 'skip'
+        ? 'ปิดรอบโดยยังไม่รับเข้าสต๊อก (คำนวณต้นทุนเก็บไว้แล้ว — กด "รับเข้าสต๊อกย้อนหลัง" ได้ทีหลัง)'
+        : mode === 'staging'
+          ? `รับเข้าที่ "รอจัดเก็บ" แล้ว (${result.itemCount} รายการ) — รอจัดเข้าชั้นที่เมนูสต๊อก`
+          : `รับเข้าสต๊อกแล้ว (${result.itemCount} รายการ)`;
       await supabase.from('purchase_order_updates').insert([{
         purchase_order_id: order.id,
-        comment: `รับเข้าสต๊อกแล้ว (${result.itemCount} รายการ)`,
+        comment: commentText,
         images: [],
         update_type: 'status',
         status: 'received',
         created_by: profile?.id || null,
       }]);
-      await logAction({ resource_type: 'procurement', resource_id: order.id, action: 'receive_stock', resource_label: order.order_number, new_data: result, created_by: profileRef(profile) });
+      await logAction({ resource_type: 'procurement', resource_id: order.id, action: mode === 'close' ? 'receive_close_no_stock' : mode === 'skip' ? 'receive_skip_stock' : 'receive_stock', resource_label: order.order_number, new_data: result, created_by: profileRef(profile) });
       setReceiveModal(null);
       onChanged();
     } catch (err) {
@@ -1334,17 +1361,26 @@ const OrderDetail = ({ order, profile, locations = [], onBack, onEdit, onRefresh
       <div className="flex justify-between items-center bg-white rounded-2xl border border-gray-100 p-4">
         <div className="flex items-center gap-3">
           <button onClick={onBack} className="p-2 hover:bg-gray-100 rounded-full text-gray-500"><ArrowLeft size={20}/></button>
-          <div><h2 className="font-bold text-xl text-gray-900">{order.order_number}</h2><p className="text-sm text-gray-500">{order.supplier?.name || 'ไม่ระบุ Supplier'} · {statusLabel(order.status)}</p></div>
+          <div>
+            <h2 className="font-bold text-xl text-gray-900 flex items-center gap-2">
+              {order.order_number}
+              {order.status === 'received' && order.stock_skipped && (
+                <span className="text-[11px] px-2 py-0.5 rounded-full font-bold bg-amber-100 text-amber-700 border border-amber-200">ยังไม่เข้าสต๊อก</span>
+              )}
+            </h2>
+            <p className="text-sm text-gray-500">{order.supplier?.name || 'ไม่ระบุ Supplier'} · {statusLabel(order.status)}</p>
+          </div>
         </div>
         <div className="flex gap-2 flex-wrap justify-end">
           {canEdit && <button onClick={onEdit} className="px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-xl text-sm font-semibold">แก้ไข</button>}
-          {order.status === 'arrived' && canReceive && <button disabled={busy} onClick={openReceive} className="px-3 py-2 bg-indigo-600 text-white rounded-xl text-sm font-semibold flex items-center gap-1">{busy ? <Loader2 size={14} className="animate-spin"/> : <CheckCircle size={14}/>} รับเข้าสต๊อก</button>}
+          {order.status === 'arrived' && canReceive && <button disabled={busy} onClick={openReceive} className="px-3 py-2 bg-indigo-600 text-white rounded-xl text-sm font-semibold flex items-center gap-1">{busy ? <Loader2 size={14} className="animate-spin"/> : <CheckCircle size={14}/>} รับเข้าสต๊อก / ปิดรอบ</button>}
+          {order.status === 'received' && order.stock_skipped && canReceive && <button disabled={busy} onClick={openReceive} className="px-3 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-sm font-semibold flex items-center gap-1">{busy ? <Loader2 size={14} className="animate-spin"/> : <CheckCircle size={14}/>} รับเข้าสต๊อกย้อนหลัง</button>}
           {canDelete && <button onClick={remove} className="px-3 py-2 bg-red-50 text-red-600 rounded-xl text-sm font-semibold">ลบ</button>}
           <button onClick={onRefresh} className="p-2 bg-gray-50 rounded-xl"><RefreshCw size={16}/></button>
         </div>
       </div>
 
-      <OrderStageTracker order={order} onEditStatus={setStatusModal} canEdit={canEdit} canMarkPaid={canMarkPaid} canMarkArrived={canMarkArrived} />
+      <OrderStageTracker order={order} onEditStatus={setStatusModal} canEdit={canEdit} canMarkPaid={canMarkPaid} canMarkArrived={canMarkArrived} canReceive={canReceive} />
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
         <SummaryPanel icon={Calendar} title="วันที่สำคัญ" subtitle="ข้อมูลที่ใช้วัดระยะเวลาของรอบนี้">
@@ -1458,17 +1494,30 @@ const OrderDetail = ({ order, profile, locations = [], onBack, onEdit, onRefresh
           items={items}
           locations={locations}
           selections={receiveModal.selections}
+          mode={receiveModal.mode}
+          updatePrices={receiveModal.updatePrices}
+          backfill={receiveModal.backfill}
+          canCloseNoStock={canCloseNoStock}
           busy={busy}
-          onChange={(itemId, locId) => setReceiveModal(prev => ({ selections: { ...prev.selections, [itemId]: locId } }))}
+          onChange={(itemId, locId) => setReceiveModal(prev => ({ ...prev, selections: { ...prev.selections, [itemId]: locId } }))}
+          onModeChange={(mode) => setReceiveModal(prev => ({ ...prev, mode }))}
+          onTogglePrices={(updatePrices) => setReceiveModal(prev => ({ ...prev, updatePrices }))}
           onClose={() => !busy && setReceiveModal(null)}
-          onConfirm={() => confirmReceive(receiveModal.selections)}
+          onConfirm={() => confirmReceive(receiveModal)}
         />
       )}
     </div>
   );
 };
 
-const ReceiveStockModal = ({ order, items, locations = [], selections, busy, onChange, onClose, onConfirm }) => {
+const RECEIVE_MODES = [
+  { id: 'normal', label: 'เข้าคลังจริง', desc: 'เลือกคลังปลายทางเองทีละรายการ สร้างล็อต FIFO + บวกยอดสต๊อก' },
+  { id: 'staging', label: 'เข้าที่พัก "รอจัดเก็บ"', desc: 'รับของทั้งหมดเข้ากอง "รอจัดเก็บ" ยอดสต๊อก/ต้นทุนครบ แล้วค่อยจัดเข้าชั้นทีหลังที่เมนูสต๊อก' },
+  { id: 'skip', label: 'ปิดรอบ ยังไม่เข้าสต๊อก', desc: 'คำนวณต้นทุนเก็บไว้และปิดรอบ แต่ไม่บวกสต๊อก ไม่แตะราคาทุน — ติดป้ายเตือนไว้ กลับมากด "รับเข้าย้อนหลัง" ได้' },
+  { id: 'close', label: 'ปิดจบ ไม่บันทึกสต๊อก', desc: 'จบรอบถาวรโดยไม่บันทึกอะไรลงสต๊อกเลย (จัดการของหน้างานเองแล้ว) — ไม่มีป้ายตามทวง เฉพาะผู้มีสิทธิ์' },
+];
+
+const ReceiveStockModal = ({ order, items, locations = [], selections, mode = 'normal', updatePrices = true, backfill = false, canCloseNoStock = false, busy, onChange, onModeChange, onTogglePrices, onClose, onConfirm }) => {
   const grouped = useMemo(() => {
     const map = {};
     (locations || []).forEach(loc => {
@@ -1477,46 +1526,99 @@ const ReceiveStockModal = ({ order, items, locations = [], selections, busy, onC
     });
     return map;
   }, [locations]);
+  const modes = RECEIVE_MODES.filter(m =>
+    (m.id !== 'skip' || !backfill) &&            // รอบที่ปิดไปแล้ว ไม่มีเหตุให้เลือก skip ซ้ำ
+    (m.id !== 'close' || canCloseNoStock)        // ปิดจบไม่บันทึกสต๊อก — เฉพาะผู้มีสิทธิ์ (Supervisor/Admin)
+  );
+  const confirmLabel = mode === 'close' ? 'ปิดจบโดยไม่บันทึกสต๊อก' : mode === 'skip' ? 'ปิดรอบโดยยังไม่เข้าสต๊อก' : mode === 'staging' ? 'ยืนยันเข้าที่พักรอจัดเก็บ' : 'ยืนยันรับเข้า';
   return (
     <div className="fixed inset-0 z-[9999] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
       <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6 space-y-4">
         <div className="flex justify-between items-center">
           <div>
-            <h3 className="font-bold text-xl text-gray-900">รับเข้าสต๊อก + สร้างล็อต FIFO</h3>
-            <p className="text-sm text-gray-500">{order.order_number} · เลือกคลังปลายทางของแต่ละรายการ</p>
+            <h3 className="font-bold text-xl text-gray-900">{backfill ? 'รับเข้าสต๊อกย้อนหลัง' : 'รับเข้าสต๊อก / ปิดรอบ'}</h3>
+            <p className="text-sm text-gray-500">{order.order_number} · เลือกวิธีจัดการของรอบนี้</p>
           </div>
           <button type="button" onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full text-gray-400"><X size={20}/></button>
         </div>
-        <div className="space-y-3">
-          {items.map(item => {
-            const qty = num(item.quantity_received ?? item.quantity_ordered);
-            return (
-              <div key={item.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-2xl">
-                <div className="flex-1 min-w-0">
-                  <p className="font-semibold text-gray-900 truncate">{item.product?.name || 'สินค้า'}{item.variant?.name ? ` · ${item.variant.name}` : ''}</p>
-                  <p className="text-xs text-gray-500">รับเข้า {qty} ชิ้น · {item.product?.sku || '-'}</p>
-                </div>
-                <select
-                  value={selections[item.id] || ''}
-                  onChange={e => onChange(item.id, e.target.value)}
-                  className="px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm min-w-[180px]"
-                >
-                  <option value="">— ไม่ระบุคลัง —</option>
-                  {Object.entries(grouped).map(([store, locs]) => (
-                    <optgroup key={store} label={store}>
-                      {locs.map(loc => <option key={loc.id} value={loc.id}>{loc.code} · {loc.name}</option>)}
-                    </optgroup>
-                  ))}
-                </select>
-              </div>
-            );
-          })}
-          {!items.length && <p className="text-sm text-gray-500">ไม่มีรายการสินค้าในรอบนี้</p>}
+
+        {/* เลือกโหมด */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {modes.map(m => (
+            <button key={m.id} type="button" onClick={() => onModeChange(m.id)}
+              className={`text-left p-3 rounded-2xl border-2 transition-all ${mode === m.id ? 'border-indigo-500 bg-indigo-50/50' : 'border-gray-100 bg-white hover:border-gray-200'}`}>
+              <p className={`text-sm font-bold ${mode === m.id ? 'text-indigo-700' : 'text-gray-800'}`}>{m.label}</p>
+              <p className="text-[11px] text-gray-500 mt-1 leading-relaxed">{m.desc}</p>
+            </button>
+          ))}
         </div>
-        {!locations.length && <p className="text-xs text-amber-600">ยังไม่มีคลัง/ตำแหน่งเก็บในระบบ — ของจะเข้าแบบไม่ระบุคลัง (ไปเพิ่มได้ที่เมนูสต๊อก)</p>}
+
+        {/* โหมดเข้าคลังจริง: เลือกคลังรายตัว */}
+        {mode === 'normal' && (
+          <div className="space-y-3">
+            {items.map(item => {
+              const qty = num(item.quantity_received ?? item.quantity_ordered);
+              return (
+                <div key={item.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-2xl">
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-gray-900 truncate">{item.product?.name || 'สินค้า'}{item.variant?.name ? ` · ${item.variant.name}` : ''}</p>
+                    <p className="text-xs text-gray-500">รับเข้า {qty} ชิ้น · {item.product?.sku || '-'}</p>
+                  </div>
+                  <select
+                    value={selections[item.id] || ''}
+                    onChange={e => onChange(item.id, e.target.value)}
+                    className="px-3 py-2 bg-white border border-gray-200 rounded-xl text-sm min-w-[180px]"
+                  >
+                    <option value="">— รอจัดเก็บ (ยังไม่มีที่เก็บ) —</option>
+                    {Object.entries(grouped).map(([store, locs]) => (
+                      <optgroup key={store} label={store}>
+                        {locs.map(loc => <option key={loc.id} value={loc.id}>{loc.code} · {loc.name}</option>)}
+                      </optgroup>
+                    ))}
+                  </select>
+                </div>
+              );
+            })}
+            {!items.length && <p className="text-sm text-gray-500">ไม่มีรายการสินค้าในรอบนี้</p>}
+            {!locations.length && <p className="text-xs text-amber-600">ยังไม่มีคลัง/ตำแหน่งเก็บในระบบ — ของจะเข้ากอง "รอจัดเก็บ" (เพิ่มคลังได้ที่เมนูสต๊อก)</p>}
+          </div>
+        )}
+
+        {/* โหมดคลังพัก / ปิดรอบ: สรุปสั้น ๆ */}
+        {mode === 'staging' && (
+          <div className="p-4 bg-orange-50 border border-orange-200 rounded-2xl text-sm text-orange-900">
+            ของทั้ง {items.length} รายการจะเข้ากอง <b>"รอจัดเก็บ"</b> (การ์ดสีส้มในเมนูสต๊อก)
+            ยอดสต๊อกและต้นทุน FIFO ถูกบันทึกครบตั้งแต่ตอนนี้ พอจัดคลังเสร็จค่อยกด "จัดเข้าชั้น" ย้ายเข้าคลังจริงทีละรายการ
+          </div>
+        )}
+        {mode === 'skip' && (
+          <div className="p-4 bg-amber-50 border border-amber-100 rounded-2xl text-sm text-amber-900">
+            รอบนี้จะถูกปิดเป็น "รับเข้าแล้ว" พร้อมต้นทุนต่อชิ้นที่คำนวณเสร็จ แต่<b>ไม่บวกยอดสต๊อก ไม่สร้างล็อต และไม่แตะราคาทุนสินค้า</b>
+            — รอบจะติดป้าย "ยังไม่เข้าสต๊อก" และมีปุ่มให้กดรับเข้าจริงย้อนหลังเมื่อคลังพร้อม
+          </div>
+        )}
+        {mode === 'close' && (
+          <div className="p-4 bg-gray-100 border border-gray-200 rounded-2xl text-sm text-gray-700">
+            <b>ปิดจบถาวร:</b> รอบนี้จะจบเป็น "รับเข้าแล้ว" พร้อมต้นทุนที่คำนวณเสร็จ โดย<b>ไม่บันทึกอะไรลงสต๊อกเลย</b> —
+            ไม่บวกยอด ไม่สร้างล็อต ไม่แตะราคาทุน และ<b>ไม่มีป้ายตามทวง</b> รอบจะถูกเก็บเข้าประวัติทันที
+            ใช้เมื่อจัดการของหน้างานเองโดยไม่ผ่านระบบสต๊อก (ยอดของรอบนี้จะไม่ปรากฏในคลัง)
+          </div>
+        )}
+
+        {/* ตัวเลือกราคาทุน (ไม่เกี่ยวกับโหมดปิดรอบ/ปิดจบ) */}
+        {mode !== 'skip' && mode !== 'close' && (
+          <label className="flex items-start gap-2.5 p-3 bg-gray-50 rounded-2xl cursor-pointer">
+            <input type="checkbox" checked={updatePrices} onChange={e => onTogglePrices(e.target.checked)} className="mt-0.5 w-4 h-4 accent-indigo-600" />
+            <span className="text-sm text-gray-700">
+              <span className="font-semibold">อัปเดตราคาทุนสินค้าอัตโนมัติ</span>
+              <span className="block text-xs text-gray-500 mt-0.5">เขียนทับราคาทุนในหน้าสินค้าด้วยต้นทุนจริงหลังเฉลี่ยค่าส่ง (landed cost) — ปิดไว้ถ้ายังไม่อยากให้ราคาหน้าร้านขยับ</span>
+            </span>
+          </label>
+        )}
+
         <div className="flex justify-end gap-2 pt-2 border-t border-gray-100">
           <button type="button" onClick={onClose} disabled={busy} className="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-xl text-sm font-semibold disabled:opacity-50">ยกเลิก</button>
-          <button type="button" onClick={onConfirm} disabled={busy} className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-semibold flex items-center gap-1 disabled:opacity-50">{busy ? <Loader2 size={14} className="animate-spin"/> : <CheckCircle size={14}/>} ยืนยันรับเข้า</button>
+          <button type="button" onClick={onConfirm} disabled={busy} className={`px-4 py-2 text-white rounded-xl text-sm font-semibold flex items-center gap-1 disabled:opacity-50 ${mode === 'skip' ? 'bg-amber-500 hover:bg-amber-600' : mode === 'close' ? 'bg-gray-800 hover:bg-black' : 'bg-indigo-600 hover:bg-indigo-700'}`}>{busy ? <Loader2 size={14} className="animate-spin"/> : <CheckCircle size={14}/>} {confirmLabel}</button>
         </div>
       </div>
     </div>
@@ -1525,7 +1627,7 @@ const ReceiveStockModal = ({ order, items, locations = [], selections, busy, onC
 
 const StatusUpdateModal = ({ order, status, profile, onClose, onSaved }) => {
   const [saving, setSaving] = useState(false);
-  const statusDate = status === 'ordered' ? order.ordered_at : status === 'paid' ? order.paid_at : order.arrived_at;
+  const statusDate = status === 'ordered' ? order.ordered_at : status === 'paid' ? order.paid_at : status === 'received' ? order.received_at : order.arrived_at;
   const [date, setDate] = useState(dtLocalInput(statusDate) || nowLocalInput());
   const [comment, setComment] = useState(`อัปเดตสถานะ: ${statusLabel(status)}`);
   const [files, setFiles] = useState([]);
@@ -1563,7 +1665,7 @@ const StatusUpdateModal = ({ order, status, profile, onClose, onSaved }) => {
     if (status === 'arrived' && arrivedItems.some(item => num(receivedItems[item.id]) < 0)) return alert('จำนวนรับจริงต้องไม่ติดลบ');
     setSaving(true);
     try {
-      const field = status === 'ordered' ? 'ordered_at' : status === 'paid' ? 'paid_at' : 'arrived_at';
+      const field = status === 'ordered' ? 'ordered_at' : status === 'paid' ? 'paid_at' : status === 'received' ? 'received_at' : 'arrived_at';
       const localFreightThb = isTHB ? 0 : num(localFreightAmount) * (num(order.fx_rate) || 1);
       const freightThb = round2(localFreightThb + num(thaiFreightThb));
       const landedCalculation = status === 'arrived'
@@ -1628,6 +1730,62 @@ const StatusUpdateModal = ({ order, status, profile, onClose, onSaved }) => {
     }
   };
 
+  // ── ย้อนสถานะ (กดผิด) ──
+  // ย้อนได้เฉพาะสเตจล่าสุด (สเตจถัดไปต้องยังไม่ถูกกด) — ขั้น "รับเข้า" ย้อนได้ถ้าไม่มีล็อตสต๊อกผูกอยู่ (เช็คตอนกด)
+  const laterHasDate = status === 'ordered'
+    ? Boolean(order.paid_at || order.arrived_at || order.received_at)
+    : status === 'paid'
+      ? Boolean(order.arrived_at || order.received_at)
+      : status === 'arrived'
+        ? Boolean(order.received_at)
+        : false; // received = สเตจสุดท้าย
+  const stageHasDate = status === 'ordered' ? Boolean(order.ordered_at) : status === 'paid' ? Boolean(order.paid_at) : status === 'received' ? Boolean(order.received_at) : Boolean(order.arrived_at);
+  const canRevert = stageHasDate && !laterHasDate;
+
+  const doRevert = async () => {
+    // ขั้นรับเข้า: ถ้ารอบนี้เคยสร้างล็อตสต๊อกจริง ห้ามย้อนตรง ๆ (ยอดคลังจะค้าง) — รอบที่ปิดแบบไม่เข้าสต๊อกย้อนได้เลย
+    if (status === 'received') {
+      const { count, error: lotError } = await supabase
+        .from('stock_lots').select('id', { count: 'exact', head: true }).eq('purchase_order_id', order.id);
+      if (lotError) return alert('ตรวจสอบล็อตสต๊อกไม่สำเร็จ: ' + lotError.message);
+      if ((count || 0) > 0) {
+        return alert(`ย้อนไม่ได้ — รอบนี้มีล็อตสต๊อกที่สร้างไว้ ${count} ล็อต ต้องไปลบ/ปรับล็อตในเมนูสต๊อกก่อน แล้วค่อยย้อนสถานะ`);
+      }
+    }
+    if (!confirm(`ยืนยันย้อนสถานะ — ยกเลิกขั้น "${statusLabel(status)}" ของรอบนี้? (วันที่/ข้อมูลของขั้นนี้จะถูกล้าง)`)) return;
+    setSaving(true);
+    try {
+      const patch = { updated_at: new Date().toISOString(), updated_by: profile?.id || null };
+      if (status === 'ordered') { patch.status = 'draft'; patch.ordered_at = null; }
+      else if (status === 'paid') { patch.status = 'ordered'; patch.paid_at = null; patch.paid_amount_thb = null; }
+      else if (status === 'received') {
+        patch.status = order.arrived_at ? 'arrived' : order.paid_at ? 'paid' : 'ordered';
+        patch.received_at = null;
+        if (Object.prototype.hasOwnProperty.call(order, 'stock_skipped')) patch.stock_skipped = false; // ล้างป้ายเหลืองไปด้วย
+      }
+      else { patch.status = order.paid_at ? 'paid' : 'ordered'; patch.arrived_at = null; } // arrived
+      const { error } = await writePurchaseOrder(
+        nextPatch => supabase.from('purchase_orders').update(nextPatch).eq('id', order.id),
+        patch
+      );
+      if (error) throw error;
+      await supabase.from('purchase_order_updates').insert([{
+        purchase_order_id: order.id,
+        comment: `ย้อนสถานะ: ยกเลิกขั้น "${statusLabel(status)}" (แก้ไขการกดผิด) → กลับเป็น ${statusLabel(patch.status)}`,
+        images: [],
+        update_type: 'status',
+        status: patch.status,
+        created_by: profile?.id || null,
+      }]);
+      await logAction({ resource_type: 'procurement', resource_id: order.id, action: `revert_${status}`, resource_label: order.order_number, new_data: patch, created_by: profileRef(profile) });
+      onSaved();
+    } catch (err) {
+      alert('ย้อนสถานะไม่สำเร็จ: ' + err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-[9999] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
       <form onSubmit={submit} className="bg-white rounded-3xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-6 space-y-4">
@@ -1635,7 +1793,7 @@ const StatusUpdateModal = ({ order, status, profile, onClose, onSaved }) => {
           <h3 className="font-bold text-lg text-gray-900">อัปเดตสถานะ: {statusLabel(status)}</h3>
           <button type="button" onClick={onClose} className="p-2 rounded-full hover:bg-gray-100 text-gray-400"><X size={18}/></button>
         </div>
-        <Field label={`วันที่-เวลา${status === 'ordered' ? 'สั่ง' : status === 'paid' ? 'จ่าย' : 'ถึง'} *`}>
+        <Field label={`วันที่-เวลา${status === 'ordered' ? 'สั่ง' : status === 'paid' ? 'จ่าย' : status === 'received' ? 'รับเข้า' : 'ถึง'} *`}>
           <input type="datetime-local" required value={date} onChange={e => setDate(e.target.value)} className={inputClass} />
         </Field>
         {status === 'paid' && (
@@ -1742,9 +1900,20 @@ const StatusUpdateModal = ({ order, status, profile, onClose, onSaved }) => {
             </div>
           )}
         </div>
-        <div className="flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="px-4 py-2 rounded-xl bg-gray-100 text-gray-600 font-semibold">ยกเลิก</button>
-          <button disabled={saving} type="submit" className="px-4 py-2 rounded-xl bg-indigo-600 text-white font-semibold flex items-center gap-2">{saving && <Loader2 size={14} className="animate-spin"/>} บันทึกสถานะ</button>
+        <div className="flex justify-between items-center gap-2">
+          <div>
+            {canRevert && (
+              <button type="button" disabled={saving} onClick={doRevert}
+                title="กดผิดมา? ยกเลิกขั้นนี้แล้วถอยกลับไปสถานะก่อนหน้า"
+                className="px-3 py-2 rounded-xl text-sm font-semibold text-red-600 bg-red-50 hover:bg-red-100 border border-red-100 disabled:opacity-50">
+                ย้อนสถานะ (ยกเลิกขั้นนี้)
+              </button>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <button type="button" onClick={onClose} className="px-4 py-2 rounded-xl bg-gray-100 text-gray-600 font-semibold">ยกเลิก</button>
+            <button disabled={saving} type="submit" className="px-4 py-2 rounded-xl bg-indigo-600 text-white font-semibold flex items-center gap-2">{saving && <Loader2 size={14} className="animate-spin"/>} บันทึกสถานะ</button>
+          </div>
         </div>
       </form>
     </div>

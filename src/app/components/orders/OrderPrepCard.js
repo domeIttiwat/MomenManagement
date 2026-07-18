@@ -1,5 +1,5 @@
-import React from 'react';
-import { Package, Clock, Building2, ShoppingCart, HelpCircle, ArrowRight, ListChecks } from 'lucide-react';
+import React, { useState } from 'react';
+import { Package, Clock, Building2, ShoppingCart, HelpCircle, ArrowRight, ListChecks, ChevronDown, ChevronUp, Star } from 'lucide-react';
 
 const STATUS_LABEL = {
   Quotation: 'เสนอราคา',
@@ -24,7 +24,8 @@ const getStatusColor = (s) => {
   }
 };
 
-const OrderPrepCard = ({ order, onClick }) => {
+const OrderPrepCard = ({ order, onClick, focused = false, onToggleFocus = null }) => {
+  const [expanded, setExpanded] = useState(false); // ค่าเริ่มต้น: แบบย่อ — กด "ดูรายการ" เพื่อกางรายชิ้น
   const prep = order._prep || { total: 0, done: 0, progress: 0, pending: [], source: { stock: 0, buy: 0, none: 0 } };
   const done = prep.progress === 100;
 
@@ -73,7 +74,7 @@ const OrderPrepCard = ({ order, onClick }) => {
   return (
     <div
       onClick={onClick}
-      className="bg-white rounded-2xl shadow-sm border border-gray-100 hover:shadow-md hover:border-indigo-200 transition-all cursor-pointer group flex flex-col p-5"
+      className={`rounded-2xl shadow-sm border transition-all cursor-pointer group flex flex-col p-5 bg-white ${focused ? 'border-emerald-500 ring-2 ring-emerald-300 hover:shadow-md' : 'border-gray-100 hover:shadow-md hover:border-indigo-200'}`}
     >
       {/* Header: เลขออเดอร์ + สถานะ + อายุ */}
       <div className="flex justify-between items-start gap-2">
@@ -84,18 +85,37 @@ const OrderPrepCard = ({ order, onClick }) => {
               {STATUS_LABEL[order.status] || order.status}
             </span>
           </div>
-          <p className="mt-1 text-xs text-gray-500 truncate">
-            {custName}{nickname ? ` (${nickname})` : ''}
-          </p>
+          <div className="mt-1.5 flex items-center gap-1.5 min-w-0">
+            <div className="w-6 h-6 rounded-full bg-gray-100 border border-gray-200 overflow-hidden flex items-center justify-center shrink-0">
+              {cust?.images?.[0]
+                ? <img src={cust.images[0]} alt="" className="w-full h-full object-cover" />
+                : <span className="text-[10px] font-bold text-gray-400">{(cust?.first_name || '?')[0]}</span>}
+            </div>
+            <p className="text-xs text-gray-500 truncate">
+              {custName}{nickname ? ` (${nickname})` : ''}
+            </p>
+          </div>
           <div className="mt-0.5 flex items-center gap-1 text-xs text-gray-600 truncate">
             <Package size={12} className="text-indigo-400 shrink-0" />
             <span className="truncate">{mainItem?.product_name || '—'}{mainItem?.variant_name ? ` · ${mainItem.variant_name}` : ''}</span>
             {moreItems > 0 && <span className="text-[10px] bg-gray-100 px-1 rounded shrink-0">+{moreItems}</span>}
           </div>
         </div>
-        <span className={`text-[11px] whitespace-nowrap flex items-center gap-1 font-semibold ${ageColor}`}>
-          <Clock size={11} /> {totalDays} วัน
-        </span>
+        <div className="flex items-center gap-1 shrink-0">
+          {onToggleFocus && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onToggleFocus(); }}
+              title={focused ? 'เลิกโฟกัส' : 'โฟกัสงานนี้'}
+              className={`p-1 rounded-lg transition-colors ${focused ? 'text-emerald-600 hover:bg-emerald-100' : 'text-gray-200 hover:text-emerald-500 hover:bg-gray-100'}`}
+            >
+              <Star size={15} className={focused ? 'fill-emerald-500' : ''} />
+            </button>
+          )}
+          <span className={`text-[11px] whitespace-nowrap flex items-center gap-1 font-semibold ${ageColor}`}>
+            <Clock size={11} /> {totalDays} วัน
+          </span>
+        </div>
       </div>
 
       {/* Progress */}
@@ -128,32 +148,57 @@ const OrderPrepCard = ({ order, onClick }) => {
         )}
       </div>
 
-      {/* รายชิ้นทั้งหมด แยก 3 แถบ */}
-      <div className="mt-3 border-t border-gray-50 pt-3 flex-1 space-y-2.5">
+      {/* สรุปย่อ: จำนวนต่อสถานะ + ปุ่มกางดูรายชิ้น */}
+      <div className="mt-3 border-t border-gray-50 pt-3 flex-1">
         {items.length === 0 ? (
           <p className="text-xs text-gray-400 flex items-center gap-1">
             <ListChecks size={13} /> ยังไม่มีรายการจัดเตรียม
           </p>
         ) : (
-          groups.map(g => g.list.length > 0 && (
-            <div key={g.key}>
-              <div className="flex items-center gap-1.5 mb-1">
-                <span className={`w-2 h-2 rounded-full ${g.dot}`} />
-                <span className="text-[11px] font-semibold text-gray-500">{g.label}</span>
-                <span className={`text-[10px] px-1.5 rounded-full font-bold ${g.headChip}`}>{g.list.length}</span>
+          <>
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex flex-wrap gap-1.5">
+                {groups.map(g => g.list.length > 0 && (
+                  <span key={g.key} className="flex items-center gap-1.5 text-[11px] text-gray-500">
+                    <span className={`w-2 h-2 rounded-full ${g.dot}`} />
+                    {g.label} <span className={`px-1.5 rounded-full font-bold text-[10px] ${g.headChip}`}>{g.list.length}</span>
+                  </span>
+                ))}
               </div>
-              <div className="flex flex-col gap-0.5 pl-3.5">
-                {g.list.map((it, i) => (
-                  <div key={i} className="flex items-baseline gap-2 min-w-0">
-                    <span className={`text-xs truncate min-w-0 ${g.text}`}>{it.title}</span>
-                    {it.from && (
-                      <span className="ml-auto text-[10px] text-gray-300 truncate max-w-[45%]" title={it.from}>{it.from}</span>
-                    )}
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setExpanded(v => !v); }}
+                className="shrink-0 text-[11px] font-semibold text-gray-400 hover:text-indigo-600 flex items-center gap-0.5 px-2 py-1 rounded-lg hover:bg-indigo-50 transition-colors"
+              >
+                {expanded ? <>ย่อ <ChevronUp size={13} /></> : <>ดูรายการ <ChevronDown size={13} /></>}
+              </button>
+            </div>
+
+            {/* รายชิ้นทั้งหมด แยกแถบ — โชว์เมื่อกดกาง */}
+            {expanded && (
+              <div className="mt-3 space-y-2.5">
+                {groups.map(g => g.list.length > 0 && (
+                  <div key={g.key}>
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <span className={`w-2 h-2 rounded-full ${g.dot}`} />
+                      <span className="text-[11px] font-semibold text-gray-500">{g.label}</span>
+                      <span className={`text-[10px] px-1.5 rounded-full font-bold ${g.headChip}`}>{g.list.length}</span>
+                    </div>
+                    <div className="flex flex-col gap-0.5 pl-3.5">
+                      {g.list.map((it, i) => (
+                        <div key={i} className="flex items-baseline gap-2 min-w-0">
+                          <span className={`text-xs truncate min-w-0 ${g.text}`}>{it.title}</span>
+                          {it.from && (
+                            <span className="ml-auto text-[10px] text-gray-300 truncate max-w-[45%]" title={it.from}>{it.from}</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 ))}
               </div>
-            </div>
-          ))
+            )}
+          </>
         )}
       </div>
 

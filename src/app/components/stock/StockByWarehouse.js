@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Search, Warehouse, ChevronRight, ArrowLeft, AlertTriangle,
-  PackageCheck, PackageMinus, RefreshCw, Plus, LayoutGrid, List, MapPin, Layers, X,
+  PackageCheck, PackageMinus, RefreshCw, Plus, LayoutGrid, List, MapPin, Layers, X, Inbox,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
@@ -145,7 +145,7 @@ const StockByWarehouse = ({ onStockIn, onStockOut, onAdjust, onNewTx }) => {
       .filter(d => !search || d.name.toLowerCase().includes(search.toLowerCase()) || (d.sku || '').toLowerCase().includes(search.toLowerCase()));
     return (
       <div className="space-y-4">
-        <DetailHeader title="ของที่ยังไม่ระบุคลัง" subtitle={`${list.length} รายการ — รับมาแล้วแต่ยังไม่จัดที่เก็บ`} onBack={() => { setSelected(null); setSearch(''); }} search={search} setSearch={setSearch} onRefresh={fetchData} amber />
+        <DetailHeader title="รอจัดเก็บ" subtitle={`${list.length} รายการ — รับเข้าแล้ว ยังไม่มีที่เก็บ กด "จัดเข้าชั้น" เพื่อย้ายเข้าคลัง`} onBack={() => { setSelected(null); setSearch(''); }} search={search} setSearch={setSearch} onRefresh={fetchData} amber />
         <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden divide-y divide-gray-50">
           {list.length === 0 ? <p className="py-16 text-center text-gray-400">ไม่มีของค้างแบบไม่ระบุคลัง 🎉</p> : list.map(it => <ItemRow key={it.id} it={it} onAssign={setAssign} />)}
         </div>
@@ -236,21 +236,26 @@ const StockByWarehouse = ({ onStockIn, onStockOut, onAdjust, onNewTx }) => {
             );
           })}
 
-          {/* การ์ดไม่ระบุคลัง */}
-          {storeStats.unassigned.skus > 0 && (
-            <button onClick={() => setSelected(UNASSIGNED)} className="group text-left bg-amber-50/60 border border-amber-200 hover:border-amber-400 hover:shadow-md rounded-2xl p-5 transition-all">
-              <div className="flex items-start justify-between">
-                <span className="w-11 h-11 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center"><AlertTriangle size={22} /></span>
-                <ChevronRight size={18} className="text-amber-300 group-hover:text-amber-500 mt-2" />
-              </div>
-              <p className="font-bold text-amber-900 mt-3">ไม่ระบุคลัง</p>
-              <p className="text-xs text-amber-600 mt-0.5">รับมาแล้วยังไม่จัดที่เก็บ</p>
-              <div className="flex items-center gap-4 mt-3 pt-3 border-t border-amber-100 text-sm">
-                <span><b className="text-amber-900">{storeStats.unassigned.qty}</b> <span className="text-amber-500 text-xs">ชิ้น</span></span>
-                <span><b className="text-amber-900">{storeStats.unassigned.skus}</b> <span className="text-amber-500 text-xs">SKU</span></span>
-              </div>
-            </button>
-          )}
+          {/* การ์ด "รอจัดเก็บ" — ที่พักรวมของที่รับเข้าแล้วแต่ยังไม่มีที่เก็บ (โชว์ตลอด เป็นจุดพักหลักจุดเดียว) */}
+          <button onClick={() => setSelected(UNASSIGNED)}
+            className={`group text-left rounded-2xl p-5 transition-all border-2 ${storeStats.unassigned.qty > 0
+              ? 'bg-gradient-to-br from-orange-50 to-amber-100/70 border-orange-400 hover:border-orange-500 hover:shadow-lg shadow-sm'
+              : 'bg-white border-dashed border-gray-200 hover:border-orange-300'}`}>
+            <div className="flex items-start justify-between">
+              <span className={`w-11 h-11 rounded-2xl flex items-center justify-center ${storeStats.unassigned.qty > 0 ? 'bg-orange-500 text-white shadow-sm' : 'bg-gray-100 text-gray-400'}`}>
+                <Inbox size={22} />
+              </span>
+              <ChevronRight size={18} className={`mt-2 ${storeStats.unassigned.qty > 0 ? 'text-orange-400 group-hover:text-orange-600' : 'text-gray-300'}`} />
+            </div>
+            <p className={`font-bold mt-3 ${storeStats.unassigned.qty > 0 ? 'text-orange-900' : 'text-gray-500'}`}>รอจัดเก็บ</p>
+            <p className={`text-xs mt-0.5 ${storeStats.unassigned.qty > 0 ? 'text-orange-700 font-medium' : 'text-gray-400'}`}>
+              {storeStats.unassigned.qty > 0 ? 'รับเข้าแล้ว ยังไม่มีที่เก็บ — กดเพื่อจัดเข้าชั้น' : 'ไม่มีของค้าง — ของที่รับเข้าแบบยังไม่ระบุที่เก็บจะมากองที่นี่'}
+            </p>
+            <div className={`flex items-center gap-4 mt-3 pt-3 border-t text-sm ${storeStats.unassigned.qty > 0 ? 'border-orange-200' : 'border-gray-50'}`}>
+              <span><b className={storeStats.unassigned.qty > 0 ? 'text-orange-900' : 'text-gray-500'}>{storeStats.unassigned.qty}</b> <span className={`text-xs ${storeStats.unassigned.qty > 0 ? 'text-orange-500' : 'text-gray-400'}`}>ชิ้น</span></span>
+              <span><b className={storeStats.unassigned.qty > 0 ? 'text-orange-900' : 'text-gray-500'}>{storeStats.unassigned.skus}</b> <span className={`text-xs ${storeStats.unassigned.qty > 0 ? 'text-orange-500' : 'text-gray-400'}`}>SKU</span></span>
+            </div>
+          </button>
 
           {stores.length === 0 && (
             <div className="col-span-full bg-white rounded-3xl border border-gray-100 py-16 text-center text-gray-400">
@@ -290,7 +295,7 @@ const DetailModalWrap = ({ product, onClose, can, onStockIn, onStockOut, onAdjus
     onClose={onClose}
     onStockIn={can('stock', 'stock_in') ? () => { setPopupProduct(null); onStockIn(product, null); } : null}
     onStockOut={can('stock', 'stock_out') ? () => { setPopupProduct(null); onStockOut(product, null); } : null}
-    onAdjust={can('stock', 'create') ? () => { setPopupProduct(null); onAdjust(product, null); } : null}
+    onAdjust={can('stock', 'adjust') ? () => { setPopupProduct(null); onAdjust(product, null); } : null}
   />
 );
 

@@ -3,6 +3,7 @@ import { Plus, Search, Wrench, Loader2, List as ListIcon, LayoutGrid, Filter, Ar
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
 import { logAction } from '@/lib/auditLog';
+import { fetchFocusIds, toggleFocus } from '@/lib/userFocus';
 import AuditLogPanel from '@/app/components/common/AuditLogPanel';
 import ServiceList from './ServiceList';
 import ServiceForm from './ServiceForm';
@@ -22,14 +23,52 @@ const ServiceMain = () => {
   const [sortOption, setSortOption] = useState('newest');
   const [showHistory, setShowHistory] = useState(false);
   const [showProfit, setShowProfit] = useState(false);
+  const [focusIds, setFocusIds] = useState(new Set()); // Focus ส่วนตัว — ของใครของมัน
 
-  const fetchServices = async () => {
-    setLoading(true);
+  useEffect(() => {
+    if (!profile?.id) return;
+    fetchFocusIds(profile.id, 'service').then(setFocusIds);
+  }, [profile?.id]);
+
+  const handleToggleFocus = async (serviceId) => {
+    const id = String(serviceId);
+    setFocusIds(prev => { // optimistic
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+    try { await toggleFocus(profile?.id, 'service', serviceId); }
+    catch { fetchFocusIds(profile?.id, 'service').then(setFocusIds); }
+  };
+
+  const fetchServices = async (silent = false) => {
+    if (!silent) setLoading(true);
     const { data } = await supabase.from('services')
       // --- FIX: เพิ่ม user_id ใน service_assignees ---
       .select('*, service_items(*), service_assignees(user_id, job_role, user:user_id(first_name, last_name, avatar_url)), service_payments(*), service_updates(*)')
       .order('created_at', { ascending: false });
-    if (data) setServices(data);
+    let list = data || [];
+    // แนบความคืบหน้าการเตรียมของ (เฉพาะงานที่กดเริ่มเตรียมแล้ว) → ใช้โชว์บาร์ในหน้ารวม
+    try {
+      const { data: preps } = await supabase.from('service_preps').select('id, service_id, status');
+      if (preps && preps.length) {
+        const { data: pitems } = await supabase.from('service_prep_items')
+          .select('prep_id, id, kind, parent_item_id, status').in('prep_id', preps.map((p) => p.id));
+        const byPrep = {};
+        (pitems || []).forEach((it) => { (byPrep[it.prep_id] = byPrep[it.prep_id] || []).push(it); });
+        const prepByService = {};
+        preps.forEach((p) => {
+          const its = byPrep[p.id] || [];
+          const parents = new Set(its.filter((x) => x.parent_item_id).map((x) => x.parent_item_id));
+          const leaves = its.filter((x) => x.kind !== 'product' || !parents.has(x.id));
+          const total = leaves.length;
+          const done = leaves.filter((x) => x.status === 'done').length;
+          prepByService[p.service_id] = { total, done, progress: total ? Math.round((done / total) * 100) : 0, status: p.status };
+        });
+        list = list.map((s) => ({ ...s, _prep: prepByService[s.id] || null }));
+      }
+    } catch { /* ไม่ให้กระทบการโหลดงานซ่อม */ }
+    setServices(list);
     setLoading(false);
   };
 
@@ -80,7 +119,7 @@ const ServiceMain = () => {
   }, [services, search, filterStatus, sortOption, showHistory]);
 
   if (view === 'form') return <ServiceForm onCancel={() => setView('list')} onSuccess={() => { setView('list'); fetchServices(); }} initialData={selectedService} />;
-  if (view === 'detail') return <ServiceDetail service={selectedService} onBack={() => setView('list')} onEdit={() => setView('form')} onDelete={() => handleDelete(selectedService.id)} showProfit={showProfit} setShowProfit={setShowProfit} />;
+  if (view === 'detail') return <ServiceDetail service={selectedService} onBack={() => { setView('list'); fetchServices(true); }} onEdit={() => setView('form')} onDelete={() => handleDelete(selectedService.id)} showProfit={showProfit} setShowProfit={setShowProfit} />;
   if (view === 'log') return (
     <div className="max-w-[1600px] mx-auto space-y-4 animate-in fade-in">
       <button onClick={() => setView('list')} className="flex items-center gap-2 text-gray-500 hover:text-gray-900 font-medium px-3 py-2 rounded-lg hover:bg-gray-50 transition-colors">
@@ -152,6 +191,7 @@ const ServiceMain = () => {
                  value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
                >
                  <option value="All">ทุกสถานะ</option>
+                 <option value="Assessing">รอประเมิน</option>
                  <option value="Waiting">รอทำ</option>
                  <option value="In Progress">ส่งทำ</option>
                  <option value="Tested">ทดสอบแล้ว</option>
@@ -200,7 +240,7 @@ const ServiceMain = () => {
       </div>
 
       {loading ? <div className="text-center py-20"><Loader2 className="animate-spin inline"/></div> : 
-         <ServiceList services={filteredAndSorted} viewMode={viewMode} onSelect={s => { setSelectedService(s); setView('detail'); }} />
+         <ServiceList services={filteredAndSorted} viewMode={viewMode} onSelect={s => { setSelectedService(s); setView('detail'); }} focusIds={focusIds} onToggleFocus={handleToggleFocus} />
       }
     </div>
   );

@@ -1,10 +1,11 @@
 import React from 'react';
-import { Wrench, Calendar, User, Clock, Wallet, CheckCircle2, AlertCircle, Truck, PauseCircle, XCircle, PlayCircle } from 'lucide-react';
+import { Wrench, Calendar, User, Clock, Wallet, CheckCircle2, AlertCircle, Truck, PauseCircle, XCircle, PlayCircle, ClipboardList, Star } from 'lucide-react';
 
-const ServiceListItem = ({ service, onClick }) => {
+const ServiceListItem = ({ service, onClick, focused = false, onToggleFocus = null }) => {
   // Logic การแสดงผลสถานะ (Unified Status Logic) - Updated to match ServiceDetail
   const getStatusDisplay = (status, reason) => {
     switch (status) {
+      case 'Assessing': return { color: 'bg-cyan-100 text-cyan-700 border-cyan-200', icon: ClipboardList, label: 'รอประเมิน' };
       case 'Waiting':
         if (reason === 'รอคิว') return { color: 'bg-orange-100 text-orange-700 border-orange-200', icon: PauseCircle, label: 'รอคิว' };
         if (reason === 'รออะไหล่') return { color: 'bg-red-100 text-red-700 border-red-200', icon: AlertCircle, label: 'รออะไหล่' };
@@ -86,9 +87,21 @@ const ServiceListItem = ({ service, onClick }) => {
   const mainItem = service.service_items?.[0]?.description || 'ไม่มีรายการ';
 
   return (
-    <tr onClick={onClick} className="hover:bg-indigo-50/30 transition-colors cursor-pointer border-b border-gray-50 last:border-none group">
+    <tr onClick={onClick} className={`transition-colors cursor-pointer border-b last:border-none group ${focused ? 'bg-emerald-100/70 hover:bg-emerald-100 border-emerald-200' : 'hover:bg-indigo-50/30 border-gray-50'}`}>
       <td className="px-6 py-4">
-        <div className="font-bold text-indigo-900 text-sm">{service.service_number}</div>
+        <div className="flex items-center gap-1.5">
+          {onToggleFocus && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onToggleFocus(); }}
+              title={focused ? 'เลิกโฟกัส' : 'โฟกัสงานนี้'}
+              className={`p-1 -ml-1.5 rounded-lg transition-colors shrink-0 ${focused ? 'text-emerald-600 hover:bg-emerald-100' : 'text-gray-200 hover:text-emerald-500 hover:bg-gray-100'}`}
+            >
+              <Star size={15} className={focused ? 'fill-emerald-500' : ''} />
+            </button>
+          )}
+          <div className="font-bold text-indigo-900 text-sm">{service.service_number}</div>
+        </div>
         <div className="text-[10px] text-gray-500 mb-1">{new Date(service.received_date).toLocaleDateString('th-TH')}</div>
         <span className={`text-[9px] px-1.5 py-0.5 rounded border inline-flex items-center gap-1 font-bold ${getDurationColorClass(totalDays, isFinished)}`}>
            <Clock size={9}/> {durationText}
@@ -103,6 +116,16 @@ const ServiceListItem = ({ service, onClick }) => {
            <Wrench size={16} className="text-gray-400 shrink-0"/>
            <span className="text-sm text-gray-700 truncate max-w-[200px]">{mainItem}</span>
         </div>
+        {service._prep && (
+          <div className="mt-1.5 flex items-center gap-2">
+            <div className="h-1.5 w-24 bg-gray-100 rounded-full overflow-hidden">
+              <div className={`h-full rounded-full ${service._prep.progress === 100 ? 'bg-emerald-500' : 'bg-indigo-500'}`} style={{ width: `${service._prep.progress}%` }} />
+            </div>
+            <span className={`text-[10px] font-bold ${service._prep.progress === 100 ? 'text-emerald-600' : 'text-indigo-600'}`}>
+              เตรียมของ {service._prep.done}/{service._prep.total}
+            </span>
+          </div>
+        )}
       </td>
       <td className="px-6 py-4 text-center">
          <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase border flex items-center justify-center gap-1 w-fit mx-auto ${statusInfo.color}`}>

@@ -250,7 +250,12 @@ export async function allocateFifoStockOut(opts) {
   };
 }
 
-export async function receivePurchaseOrder({ purchaseOrderId, profileId = null, itemLocations = null }) {
+// options:
+// - updatePrices: อัปเดตราคาทุนสินค้าอัตโนมัติจาก landed cost (default: true)
+// - skipStock:    ปิดรอบโดยไม่สร้างล็อต/ไม่บวกสต๊อก/ไม่แตะราคา (คำนวณต้นทุนเก็บไว้อย่างเดียว)
+// - markSkipped:  ตั้งค่าป้าย "ยังไม่เข้าสต๊อก" เอง (null = ตามค่า skipStock)
+//                 skipStock=true + markSkipped=false = "ปิดจบไม่บันทึกสต๊อก" — จบถาวร ไม่มีป้ายตามทวง
+export async function receivePurchaseOrder({ purchaseOrderId, profileId = null, itemLocations = null, updatePrices = true, skipStock = false, markSkipped = null }) {
   const [{ data: order, error: orderError }, { data: items, error: itemError }] = await Promise.all([
     supabase.from('purchase_orders').select('*').eq('id', purchaseOrderId).single(),
     supabase.from('purchase_order_items').select('*').eq('purchase_order_id', purchaseOrderId),
@@ -302,6 +307,8 @@ export async function receivePurchaseOrder({ purchaseOrderId, profileId = null, 
       .eq('id', item.id);
     if (updateItemError) throw updateItemError;
 
+    if (skipStock) continue; // ปิดรอบแบบยังไม่เข้าสต๊อก — เก็บแค่ต้นทุน ไม่สร้างล็อต/ไม่แตะราคา
+
     await createStockLot({
       productId: item.product_id,
       variantId: item.variant_id,
@@ -317,16 +324,18 @@ export async function receivePurchaseOrder({ purchaseOrderId, profileId = null, 
       syncSummary: true,
     });
 
-    await updateProductPrices({
-      productId: item.product_id,
-      variantId: item.variant_id,
-      newCostPrice: landedUnitCost,
-      newSellPrice: item.new_sell_price_thb == null ? null : item.new_sell_price_thb,
-      sourceType: 'purchase_order',
-      sourceId: purchaseOrderId,
-      note: `รับเข้าจากรอบสั่งของ ${order.order_number}`,
-      profileId,
-    });
+    if (updatePrices) {
+      await updateProductPrices({
+        productId: item.product_id,
+        variantId: item.variant_id,
+        newCostPrice: landedUnitCost,
+        newSellPrice: item.new_sell_price_thb == null ? null : item.new_sell_price_thb,
+        sourceType: 'purchase_order',
+        sourceId: purchaseOrderId,
+        note: `รับเข้าจากรอบสั่งของ ${order.order_number}`,
+        profileId,
+      });
+    }
   }
 
   // เขียนเฉพาะคอลัมน์ที่มีจริงบนตาราง (กัน schema drift: บาง env ยังไม่มี thai_freight_thb)
@@ -341,6 +350,8 @@ export async function receivePurchaseOrder({ purchaseOrderId, profileId = null, 
     updated_at: new Date().toISOString(),
   };
   if (hasThaiFreightColumn) orderUpdate.thai_freight_thb = toNum(order.thai_freight_thb);
+  // flag รอบที่ปิดโดยยังไม่เข้าสต๊อก (กัน schema drift: เขียนเฉพาะ env ที่มีคอลัมน์)
+  if (Object.prototype.hasOwnProperty.call(order, 'stock_skipped')) orderUpdate.stock_skipped = markSkipped == null ? skipStock : markSkipped;
 
   const { error: updateOrderError } = await supabase
     .from('purchase_orders')

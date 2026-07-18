@@ -2,7 +2,7 @@ import React from 'react';
 import OrderListItem from './OrderListItem';
 import { FileText } from 'lucide-react';
 
-const OrderList = ({ orders, showProfit, onSelect }) => {
+const OrderList = ({ orders, showProfit, onSelect, focusIds, onToggleFocus }) => {
   if (orders.length === 0) return (
     <div className="p-20 text-center bg-gray-50 rounded-2xl border-2 border-dashed border-gray-200">
       <FileText size={48} className="mx-auto text-gray-300 mb-4"/>
@@ -27,7 +27,7 @@ const OrderList = ({ orders, showProfit, onSelect }) => {
             </tr>
           </thead>
           <tbody>
-            {orders.map(o => <OrderListItem key={o.id} order={o} showProfit={showProfit} onClick={() => onSelect(o)} />)}
+            {orders.map(o => <OrderListItem key={o.id} order={o} showProfit={showProfit} onClick={() => onSelect(o)} focused={focusIds?.has(String(o.id))} onToggleFocus={onToggleFocus ? () => onToggleFocus(o.id) : null} />)}
           </tbody>
         </table>
       </div>

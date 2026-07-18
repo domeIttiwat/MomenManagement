@@ -3,7 +3,7 @@ import ServiceListItem from './ServiceListItem';
 import ServiceCard from './ServiceCard'; // Import Card
 import { Wrench } from 'lucide-react';
 
-const ServiceList = ({ services, viewMode, onSelect }) => {
+const ServiceList = ({ services, viewMode, onSelect, focusIds, onToggleFocus }) => {
   if (services.length === 0) return (
     <div className="p-20 text-center bg-gray-50 rounded-2xl border-2 border-dashed border-gray-200">
       <Wrench size={48} className="mx-auto text-gray-300 mb-4"/>
@@ -15,7 +15,7 @@ const ServiceList = ({ services, viewMode, onSelect }) => {
   if (viewMode === 'card') {
     return (
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 pb-20">
-        {services.map(s => <ServiceCard key={s.id} service={s} onClick={() => onSelect(s)} />)}
+        {services.map(s => <ServiceCard key={s.id} service={s} onClick={() => onSelect(s)} focused={focusIds?.has(String(s.id))} onToggleFocus={onToggleFocus ? () => onToggleFocus(s.id) : null} />)}
       </div>
     );
   }
@@ -37,7 +37,7 @@ const ServiceList = ({ services, viewMode, onSelect }) => {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-50">
-            {services.map(s => <ServiceListItem key={s.id} service={s} onClick={() => onSelect(s)} />)}
+            {services.map(s => <ServiceListItem key={s.id} service={s} onClick={() => onSelect(s)} focused={focusIds?.has(String(s.id))} onToggleFocus={onToggleFocus ? () => onToggleFocus(s.id) : null} />)}
           </tbody>
         </table>
       </div>
