@@ -3,6 +3,7 @@ import { ListChecks, Plus, Trash2, RotateCcw, Package, Box, Loader2, X, StickyNo
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
 import { logAction } from '@/lib/auditLog';
+import { allocateFifoStockOut, createStockLot } from '@/lib/stockLots';
 
 const STATUS = {
   pending:     { label: 'ยังไม่เตรียม',   chip: 'bg-gray-100 text-gray-500',     dot: 'bg-gray-300' },
@@ -144,6 +145,75 @@ const OrderPrep = ({ order }) => {
     await supabase.from('order_prep_items').update(patch).eq('id', id);
     refreshPrepStatus();
   };
+
+  // ── ตัด/คืนสต๊อกอัตโนมัติ (เฉพาะรายการ "ดึงจากสต๊อก" ที่ผูกสินค้าไว้) ──
+  const deductStock = async (it) => {
+    const qty = Math.max(1, Math.trunc(Number(it.qty) || 1));
+    const { data: tx } = await supabase.from('stock_transactions').insert([{
+      product_id: it.stock_product_id,
+      transaction_type: 'stock_out',
+      quantity: qty,
+      note: `เบิกเตรียมของ: ${it.title} (${order.order_number})`,
+      reference_type: 'order_prep',
+      reference_id: String(order.id),
+      created_by: profile?.id || null,
+    }]).select('id').single();
+    const result = await allocateFifoStockOut({
+      productId: it.stock_product_id,
+      quantity: qty,
+      referenceType: 'order_prep',
+      referenceId: String(order.id),
+      stockTransactionId: tx?.id || null,
+      profileId: profile?.id || null,
+      syncSummary: true,
+    });
+    if (tx?.id && result?.totalCost > 0) {
+      await supabase.from('stock_transactions').update({ unit_cost_thb: result.weightedUnitCost, total_cost_thb: result.totalCost }).eq('id', tx.id);
+    }
+    if (result?.missingQty > 0) alert(`หมายเหตุ: สต๊อกมีไม่พอ ตัดได้ ${qty - result.missingQty} จาก ${qty} ชิ้น`);
+    return qty;
+  };
+  const returnStock = async (it) => {
+    const backQty = Math.max(1, Math.trunc(Number(it.stock_deducted_qty ?? it.qty) || 1));
+    await createStockLot({
+      productId: it.stock_product_id,
+      quantity: backQty,
+      unitCostThb: Number(it.unit_price) || 0,
+      sourceType: 'return',
+      note: `คืนของจากเตรียมของ: ${it.title} (${order.order_number})`,
+      profileId: profile?.id || null,
+      syncSummary: true,
+    });
+    await supabase.from('stock_transactions').insert([{
+      product_id: it.stock_product_id,
+      transaction_type: 'stock_in',
+      quantity: backQty,
+      note: `คืนของจากเตรียมของ: ${it.title} (${order.order_number})`,
+      reference_type: 'order_prep',
+      reference_id: String(order.id),
+      created_by: profile?.id || null,
+    }]);
+  };
+  // กดวนสถานะ: เข้า "เตรียมแล้ว" = ตัดสต๊อกจริง (FIFO), ถอยออกจาก "เตรียมแล้ว" = คืนของกลับเข้าสต๊อก
+  const cycleStatus = async (it) => {
+    const ns = nextStatus(it.status);
+    const patch = { status: ns };
+    const linked = it.source === 'stock' && it.stock_product_id;
+    if (linked && ns === 'done' && !it.stock_deducted) {
+      try {
+        const qty = await deductStock(it);
+        patch.stock_deducted = true;
+        patch.stock_deducted_qty = qty;
+      } catch (err) { alert('ตัดสต๊อกไม่สำเร็จ: ' + err.message); }
+    } else if (linked && it.status === 'done' && it.stock_deducted) {
+      try {
+        await returnStock(it);
+        patch.stock_deducted = false;
+        patch.stock_deducted_qty = null;
+      } catch (err) { alert('คืนสต๊อกไม่สำเร็จ: ' + err.message); }
+    }
+    patchItem(it.id, patch);
+  };
   const refreshPrepStatus = async () => {
     if (!prep) return;
     const { data: its } = await supabase.from('order_prep_items').select('id,kind,parent_item_id,status').eq('prep_id', prep.id);
@@ -156,7 +226,13 @@ const OrderPrep = ({ order }) => {
     await supabase.from('order_preps').update({ status: st, updated_at: new Date().toISOString() }).eq('id', prep.id);
     setPrep((p) => (p ? { ...p, status: st } : p));
   };
-  const deleteItem = async (id) => { setItems((prev) => prev.filter((it) => it.id !== id)); await supabase.from('order_prep_items').delete().eq('id', id); };
+  const deleteItem = async (it) => {
+    if (it.stock_deducted && it.stock_product_id) {
+      try { await returnStock(it); } catch (err) { alert('คืนสต๊อกไม่สำเร็จ: ' + err.message); }
+    }
+    setItems((prev) => prev.filter((x) => x.id !== it.id));
+    await supabase.from('order_prep_items').delete().eq('id', it.id);
+  };
 
   const addManual = async () => {
     if (!manualTitle.trim() || !prep) return;
@@ -181,12 +257,18 @@ const OrderPrep = ({ order }) => {
 
   const doReset = async () => { // ล้างค่าการจัดเตรียม (เก็บรายการไว้)
     if (!prep) return; setBusy(true);
-    await supabase.from('order_prep_items').update({ status: 'pending', source: null, unit_price: null, stock_product_id: null }).eq('prep_id', prep.id);
+    for (const it of items) { // คืนสต๊อกรายการที่เคยตัดไว้ก่อนล้างค่า
+      if (it.stock_deducted && it.stock_product_id) { try { await returnStock(it); } catch { /* คืนพลาดไปเช็คที่เมนูสต๊อก */ } }
+    }
+    await supabase.from('order_prep_items').update({ status: 'pending', source: null, unit_price: null, stock_product_id: null, stock_deducted: false, stock_deducted_qty: null }).eq('prep_id', prep.id);
     await supabase.from('order_preps').update({ status: 'in_progress' }).eq('id', prep.id);
     setConfirm(null); setConfirmText(''); setBusy(false); await load();
   };
   const doCancel = async () => { // ยกเลิก/ลบการจัดเตรียมทั้งหมด
     if (!prep) return; setBusy(true);
+    for (const it of items) { // คืนสต๊อกรายการที่เคยตัดไว้ก่อนลบ
+      if (it.stock_deducted && it.stock_product_id) { try { await returnStock(it); } catch { /* คืนพลาดไปเช็คที่เมนูสต๊อก */ } }
+    }
     await supabase.from('order_preps').delete().eq('id', prep.id);
     await logAction({ resource_type: 'order', resource_id: order.id, action: 'prep_cancel', resource_label: order.order_number, created_by: meRef() });
     setConfirm(null); setConfirmText(''); setEditing(false); setBusy(false); await load();
@@ -445,11 +527,12 @@ const OrderPrep = ({ order }) => {
             className="w-14 text-right text-xs outline-none bg-transparent disabled:opacity-60" />
         </div>}
 
-        {/* สถานะ — คลิกวน */}
-        <button type="button" disabled={!canEdit} onClick={() => patchItem(it.id, { status: nextStatus(it.status) })} title="คลิกเพื่อเปลี่ยนสถานะ"
+        {/* สถานะ — คลิกวน (เตรียมแล้ว = ตัดสต๊อกจริงถ้าผูก "ดึงจากสต๊อก") */}
+        <button type="button" disabled={!canEdit} onClick={() => cycleStatus(it)} title="คลิกเพื่อเปลี่ยนสถานะ"
           className={`text-xs rounded-lg px-2.5 py-1.5 font-semibold transition-colors ${STATUS[it.status]?.chip} disabled:opacity-60`}>
           {STATUS[it.status]?.label}
         </button>
+        {it.stock_deducted && <span className="text-[9px] font-bold text-emerald-500 whitespace-nowrap">ตัดสต๊อกแล้ว</span>}
 
         {/* หมายเหตุ — ว่างแล้วคลิกออกจะหายเอง */}
         {it.note != null
@@ -459,7 +542,7 @@ const OrderPrep = ({ order }) => {
               className="text-xs border border-gray-200 rounded-lg px-2 py-1 bg-yellow-50/50 w-28 outline-none disabled:opacity-60" />
           : canEdit && <button onClick={() => patchItem(it.id, { note: '' })} className="text-gray-300 hover:text-amber-500 p-1" title="เพิ่มหมายเหตุ"><StickyNote size={13} /></button>}
 
-        {canEdit && it.kind === 'manual' && <button onClick={() => deleteItem(it.id)} className="text-gray-300 hover:text-red-500 p-1"><Trash2 size={13} /></button>}
+        {canEdit && it.kind === 'manual' && <button onClick={() => deleteItem(it)} className="text-gray-300 hover:text-red-500 p-1"><Trash2 size={13} /></button>}
       </div>
     );
   }
