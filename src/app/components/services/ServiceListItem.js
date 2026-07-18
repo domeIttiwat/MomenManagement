@@ -95,7 +95,7 @@ const ServiceListItem = ({ service, onClick, tags = [], itemTagIds = [], onToggl
 
   return (
     <tr onClick={onClick} className="transition-colors cursor-pointer border-b last:border-none group hover:bg-indigo-50/30 border-gray-50"
-      style={tagColor ? { boxShadow: `inset 5px 0 0 ${tagColor}, inset 0 0 0 2px ${tagColor}` } : undefined}>
+      style={tagColor ? { backgroundColor: `${tagColor}14`, boxShadow: `inset 5px 0 0 ${tagColor}` } : undefined}>
       <td className="px-6 py-4">
         <div className="flex items-center gap-1.5">
           {onToggleTag && (
