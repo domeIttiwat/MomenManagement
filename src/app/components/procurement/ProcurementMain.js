@@ -37,7 +37,11 @@ const round2 = (value) => Math.round((num(value) + Number.EPSILON) * 100) / 100;
 const moneyOrNull = (value) => (value === '' || value === null || value === undefined ? null : round2(value));
 const today = () => new Date().toISOString().split('T')[0];
 const dtForInput = (iso) => iso ? iso.split('T')[0] : '';
-const toIsoOrNull = (date) => date ? new Date(date + 'T00:00:00').toISOString() : null;
+// datetime-local helpers: เก็บทั้งวันและเวลา, ดีฟอลต์ = เวลาปัจจุบัน, แปลงกลับเป็น ISO (UTC) ตอนบันทึก
+const pad2 = (n) => String(n).padStart(2, '0');
+const nowLocalInput = () => { const d = new Date(); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
+const dtLocalInput = (iso) => { if (!iso) return ''; const d = new Date(iso); if (isNaN(d.getTime())) return ''; return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
+const toIsoOrNull = (v) => v ? new Date(v).toISOString() : null;
 const profileRef = (profile) => profile ? { id: profile.id, name: `${profile.first_name || ''} ${profile.last_name || ''}`.trim() } : null;
 const poDayDiff = (from, to = new Date()) => {
   if (!from) return null;
@@ -1522,7 +1526,7 @@ const ReceiveStockModal = ({ order, items, locations = [], selections, busy, onC
 const StatusUpdateModal = ({ order, status, profile, onClose, onSaved }) => {
   const [saving, setSaving] = useState(false);
   const statusDate = status === 'ordered' ? order.ordered_at : status === 'paid' ? order.paid_at : order.arrived_at;
-  const [date, setDate] = useState(dtForInput(statusDate) || today());
+  const [date, setDate] = useState(dtLocalInput(statusDate) || nowLocalInput());
   const [comment, setComment] = useState(`อัปเดตสถานะ: ${statusLabel(status)}`);
   const [files, setFiles] = useState([]);
   const fileInputRef = useRef(null);
@@ -1631,8 +1635,8 @@ const StatusUpdateModal = ({ order, status, profile, onClose, onSaved }) => {
           <h3 className="font-bold text-lg text-gray-900">อัปเดตสถานะ: {statusLabel(status)}</h3>
           <button type="button" onClick={onClose} className="p-2 rounded-full hover:bg-gray-100 text-gray-400"><X size={18}/></button>
         </div>
-        <Field label={`วันที่${status === 'ordered' ? 'สั่ง' : status === 'paid' ? 'จ่าย' : 'ถึง'} *`}>
-          <input type="date" required value={date} onChange={e => setDate(e.target.value)} className={inputClass} />
+        <Field label={`วันที่-เวลา${status === 'ordered' ? 'สั่ง' : status === 'paid' ? 'จ่าย' : 'ถึง'} *`}>
+          <input type="datetime-local" required value={date} onChange={e => setDate(e.target.value)} className={inputClass} />
         </Field>
         {status === 'paid' && (
           <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-3 space-y-3">

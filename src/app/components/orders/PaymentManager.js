@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Plus, Trash2, CheckCircle2, CreditCard, Banknote, Landmark } from 'lucide-react';
 import NumericInput from '../products/NumericInput';
+import { nowLocalInput, dtLocalDisplay } from '@/lib/datetime';
 
 const PaymentManager = ({ payments = [], onChange, grandTotal }) => {
   const [isAdding, setIsAdding] = useState(false);
@@ -8,9 +9,9 @@ const PaymentManager = ({ payments = [], onChange, grandTotal }) => {
   // ตรวจสอบว่ามีมัดจำไปแล้วหรือยัง?
   const hasDeposit = payments.some(p => p.type === 'deposit');
 
-  const [newPay, setNewPay] = useState({ 
-    amount: 0, 
-    date: new Date().toISOString().split('T')[0], 
+  const [newPay, setNewPay] = useState({
+    amount: 0,
+    date: nowLocalInput(),
     type: hasDeposit ? 'full' : 'deposit', // ถ้ามีมัดจำแล้ว ให้ default เป็น full
     method: 'Transfer', 
     chargePercent: 0,
@@ -26,7 +27,7 @@ const PaymentManager = ({ payments = [], onChange, grandTotal }) => {
     const currentHasDeposit = payments.some(p => p.type === 'deposit');
     setNewPay({ 
       amount: Math.max(0, remaining),
-      date: new Date().toISOString().split('T')[0], 
+      date: nowLocalInput(),
       type: currentHasDeposit ? 'full' : 'deposit',
       method: 'Transfer',
       chargePercent: 0,
@@ -112,7 +113,7 @@ const PaymentManager = ({ payments = [], onChange, grandTotal }) => {
                 <span className="flex items-center gap-1 text-gray-600 bg-gray-50 px-2 py-0.5 rounded border border-gray-100 text-xs">
                    {getMethodIcon(p.method)} {p.method === 'Transfer' ? 'โอนเงิน' : p.method === 'Cash' ? 'เงินสด' : 'บัตรเครดิต'}
                 </span>
-                <span className="text-gray-500 text-xs">{p.date}</span>
+                <span className="text-gray-500 text-xs">{dtLocalDisplay(p.date)}</span>
               </div>
               <div className="flex items-center gap-3">
                 <span className="font-bold">฿{Number(p.amount).toLocaleString()}</span>
@@ -144,8 +145,8 @@ const PaymentManager = ({ payments = [], onChange, grandTotal }) => {
               {!hasDeposit && <option value="deposit">มัดจำ</option>}
               <option value="full">{hasDeposit ? 'ชำระส่วนที่เหลือ / เพิ่มเติม' : 'ชำระเต็มจำนวน'}</option>
             </select>
-            <input 
-              type="date" className="border border-indigo-200 rounded-lg px-2 py-2 text-sm outline-none bg-white" 
+            <input
+              type="datetime-local" className="border border-indigo-200 rounded-lg px-2 py-2 text-sm outline-none bg-white"
               value={newPay.date}
               onChange={e => setNewPay({...newPay, date: e.target.value})}
             />

@@ -12,6 +12,7 @@ import NumericInput from '../products/NumericInput';
 import ServiceBillPreview from './ServiceBillPreview';
 import ServiceUpdateManager from './ServiceUpdateManager';
 import { allocateFifoStockOut } from '@/lib/stockLots';
+import { dtLocalInput, localToISO, nowLocalInput } from '@/lib/datetime';
 
 const ServiceForm = ({ onCancel, onSuccess, initialData }) => {
   const { profile } = useAuth();
@@ -29,7 +30,7 @@ const ServiceForm = ({ onCancel, onSuccess, initialData }) => {
     items: initialData.service_items || [],
     payments: (initialData.service_payments || []).map(p => ({
         ...p,
-        date: p.payment_date ? p.payment_date.split('T')[0] : (p.date || getLocalDate()),
+        date: p.payment_date ? dtLocalInput(p.payment_date) : (p.date || nowLocalInput()),
         method: p.method || 'Transfer',
         fee_amount: p.fee_amount || 0
     })),
@@ -254,7 +255,7 @@ const ServiceForm = ({ onCancel, onSuccess, initialData }) => {
         await supabase.from('service_payments').insert(formData.payments.map(p => ({
           service_id: serviceId,
           amount: p.amount,
-          payment_date: p.date,
+          payment_date: localToISO(p.date),
           type: p.type,
           method: p.method,
           fee_amount: p.fee_amount
