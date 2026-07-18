@@ -148,14 +148,12 @@ const ServicePrep = ({ service, onItemsChange, openSignal }) => {
       quantity: qty,
       note: `เบิกเตรียมของ: ${it.title} (${service.service_number})`,
       reference_type: 'service_prep',
-      reference_id: String(service.id),
       created_by: profile?.id || null,
     }]).select('id').single();
     const result = await allocateFifoStockOut({
       productId: it.stock_product_id,
       quantity: qty,
       referenceType: 'service_prep',
-      referenceId: String(service.id),
       stockTransactionId: tx?.id || null,
       profileId: profile?.id || null,
       syncSummary: true,
@@ -183,7 +181,6 @@ const ServicePrep = ({ service, onItemsChange, openSignal }) => {
       quantity: backQty,
       note: `คืนของจากเตรียมของ: ${it.title} (${service.service_number})`,
       reference_type: 'service_prep',
-      reference_id: String(service.id),
       created_by: profile?.id || null,
     }]);
   };
@@ -234,15 +231,36 @@ const ServicePrep = ({ service, onItemsChange, openSignal }) => {
     if (!error && data) { setItems((prev) => [...prev, data]); setManualTitle(''); setManualQty(1); }
   };
 
-  const cycleSource = (it) => {
+  const cycleSource = async (it) => {
     const ns = nextSource(it.source);
-    patchItem(it.id, ns === 'stock' ? { source: 'stock' } : { source: ns, stock_product_id: null });
+    const patch = ns === 'stock' ? { source: 'stock' } : { source: ns, stock_product_id: null };
+    if (it.stock_deducted && it.stock_product_id && ns !== 'stock') {
+      // เคยตัดสต๊อกไว้ แล้วเปลี่ยนที่มาออกจากสต๊อก → คืนของก่อน
+      try { await returnStock(it); patch.stock_deducted = false; patch.stock_deducted_qty = null; }
+      catch (err) { alert('คืนสต๊อกไม่สำเร็จ: ' + err.message); }
+    }
+    patchItem(it.id, patch);
   };
 
   const selectStock = async (product) => {
     if (!pickerFor) return;
+    const it = items.find((x) => x.id === pickerFor);
     setLinkedNames((m) => ({ ...m, [product.id]: product.name }));
-    await patchItem(pickerFor, { source: 'stock', stock_product_id: product.id, unit_price: Number(product.cost_price) || 0 });
+    const patch = { source: 'stock', stock_product_id: product.id, unit_price: Number(product.cost_price) || 0 };
+    if (it && it.status === 'done') {
+      // รายการถูกติ๊ก "เตรียมแล้ว" อยู่ก่อน → จัดการสต๊อกทันทีตอนผูกสินค้า
+      try {
+        if (it.stock_deducted && it.stock_product_id && it.stock_product_id !== product.id) {
+          await returnStock(it); // เปลี่ยนไปผูกตัวใหม่ → คืนของตัวเก่าก่อน
+        }
+        if (!it.stock_deducted || it.stock_product_id !== product.id) {
+          const qty = await deductStock({ ...it, ...patch });
+          patch.stock_deducted = true;
+          patch.stock_deducted_qty = qty;
+        }
+      } catch (err) { alert('ตัดสต๊อกไม่สำเร็จ: ' + err.message); }
+    }
+    await patchItem(pickerFor, patch);
     setPickerFor(null); setSearch(''); setResults([]);
   };
 
