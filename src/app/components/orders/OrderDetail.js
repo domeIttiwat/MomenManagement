@@ -8,6 +8,7 @@ import ImageUploader from './ImageUploader';
 import PaintBadge from '@/app/components/common/PaintBadge';
 import AuditLogPanel from '@/app/components/common/AuditLogPanel';
 import OrderPrep from './OrderPrep';
+import WorkCardStrip from '../assembly/WorkCardStrip';
 import {
   FRAME_STATUS,
   FRAME_STATUS_OPTIONS,
@@ -471,6 +472,9 @@ const OrderDetail = ({ order, onBack, onEdit, onDelete, showProfit, setShowProfi
         </div>
 
         <div className="space-y-6">
+           {/* การ์ดงานประกอบของออเดอร์นี้ */}
+           <WorkCardStrip refType="order" refId={order.id} refLabel={order.order_number} />
+
            {/* Assignees (NEW) */}
            <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
               <h3 className="font-bold text-gray-800 mb-4">ผู้รับผิดชอบ</h3>

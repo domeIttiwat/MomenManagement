@@ -1,6 +1,6 @@
 'use client';
 import React, { useState, useEffect, useCallback } from 'react';
-import { Clock, User, ChevronDown, ChevronUp, RefreshCw, PlusCircle, Edit2, Trash2, Layers, Package } from 'lucide-react';
+import { Clock, User, ChevronDown, ChevronUp, RefreshCw, PlusCircle, Edit2, Trash2, Layers, Package, CheckCircle2, Undo2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 
 // ============================================================
@@ -12,6 +12,8 @@ const ACTION_CONFIG = {
   delete:       { label: 'ลบ',           color: 'bg-red-100 text-red-700 border-red-200',        dot: 'bg-red-500',    Icon: Trash2 },
   stage_change: { label: 'เปลี่ยนขั้นตอน', color: 'bg-purple-100 text-purple-700 border-purple-200', dot: 'bg-purple-500', Icon: Layers },
   item_change:  { label: 'อัปเดตรายการ',   color: 'bg-amber-100 text-amber-700 border-amber-200',  dot: 'bg-amber-500',  Icon: Package },
+  check:        { label: 'ติ๊กเสร็จ',      color: 'bg-emerald-100 text-emerald-700 border-emerald-200', dot: 'bg-emerald-500', Icon: CheckCircle2 },
+  uncheck:      { label: 'ยกเลิกติ๊ก',     color: 'bg-rose-100 text-rose-700 border-rose-200',     dot: 'bg-rose-500',   Icon: Undo2 },
 };
 
 const RESOURCE_LABELS = {

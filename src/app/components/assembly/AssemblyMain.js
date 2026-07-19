@@ -1,316 +1,674 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { Plus, Search, Loader2, History, Filter, Hammer, ChevronRight } from 'lucide-react';
+'use client';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { Hammer, Plus, Loader2, Clock, Flag, Link2, Inbox, CheckCircle2, Target, ArrowUp, ArrowDown, ShoppingCart, History, ClipboardCheck, BarChart3, Trophy } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
-import { logAction } from '@/lib/auditLog';
-import AuditLogPanel from '@/app/components/common/AuditLogPanel';
-import AssemblyForm from './AssemblyForm';
-import AssemblyDetail from './AssemblyDetail';
+import WorkCardForm from './WorkCardForm';
+import WorkCardDetail from './WorkCardDetail';
 
-const STAGE_CONFIG = {
-  preparing:   { label: 'เตรียมของ',  badge: 'bg-amber-500/20 text-amber-400 border-amber-500/30' },
-  in_progress: { label: 'กำลังทำ',    badge: 'bg-blue-500/20 text-blue-400 border-blue-500/30' },
-  qc:          { label: 'QC / ทดสอบ', badge: 'bg-purple-500/20 text-purple-400 border-purple-500/30' },
-  completed:   { label: 'เสร็จสิ้น',  badge: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' },
-  cancelled:   { label: 'ยกเลิก',     badge: 'bg-slate-500/20 text-slate-400 border-slate-500/30' },
+// ระบบงานประกอบ (ก.ค. 2026): บอร์ด "งาน Focus ช่วงนี้" สองคอลัมน์
+// ซ้าย = มอบหมายแล้วยังไม่เสร็จ | ขวา = เสร็จแล้วรอตรวจ → ตรวจแล้ว "ยกออก" เข้าประวัติ
+// คิวงาน = งานที่ยังไม่ถึงคิว ดึงเข้ามาโฟกัสทีละไม่มาก
+const localDate = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
-const PROGRESS_COLOR = {
-  completed: 'bg-emerald-500',
-  qc: 'bg-purple-500',
-  in_progress: 'bg-blue-500',
-  preparing: 'bg-amber-500',
-  cancelled: 'bg-slate-600',
+const STATUS_META = {
+  todo: { label: 'ยังไม่เสร็จ', chip: 'bg-blue-50 text-blue-600', bar: 'bg-blue-400' },
+  doing: { label: 'ยังไม่เสร็จ', chip: 'bg-blue-50 text-blue-600', bar: 'bg-blue-400' },
+  blocked: { label: 'ยังไม่เสร็จ', chip: 'bg-blue-50 text-blue-600', bar: 'bg-blue-400' },
+  done: { label: 'เสร็จแล้ว', chip: 'bg-emerald-100 text-emerald-700', bar: 'bg-emerald-500' },
 };
 
-const AssemblyMain = () => {
-  const { can, profile } = useAuth();
-  const meRef = () => profile ? { id: profile.id, name: `${profile.first_name} ${profile.last_name}` } : null;
-  const [view, setView] = useState('list');
-  const [jobs, setJobs] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [selectedJob, setSelectedJob] = useState(null);
-  const [search, setSearch] = useState('');
-  const [filterStage, setFilterStage] = useState('All');
-  const [showHistory, setShowHistory] = useState(false);
+const ageText = (from) => {
+  const days = Math.max(0, Math.floor((Date.now() - new Date(from).getTime()) / 86400000));
+  if (days < 1) return 'วันนี้';
+  if (days < 30) return `${days} วัน`;
+  const m = Math.floor(days / 30);
+  if (m < 12) return `${m} เดือน`;
+  return `${Math.floor(m / 12)} ปี ${m % 12} ด.`;
+};
 
-  const fetchJobs = async () => {
-    setLoading(true);
-    const { data } = await supabase
-      .from('assembly_jobs')
-      .select('*')
-      .order('created_at', { ascending: false });
-    if (data) setJobs(data);
+const AssemblyMain = ({ initialNavData = null }) => {
+  const { profile, can } = useAuth();
+  const meRef = () => (profile ? { id: profile.id, name: `${profile.first_name} ${profile.last_name}` } : null);
+  const [cards, setCards] = useState([]);
+  const [stats, setStats] = useState({});
+  const [refData, setRefData] = useState({}); // ข้อมูลออเดอร์/งานซ่อมที่การ์ดผูกอยู่: ลูกค้า รายการ รูป หมายเหตุ
+  const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState('focus'); // focus | queue | history
+  const [selected, setSelected] = useState(null);
+  const [formOpen, setFormOpen] = useState(false);
+  const [editCard, setEditCard] = useState(null);
+
+  // สถิติช่าง
+  const [statsPeriod, setStatsPeriod] = useState('month'); // day | month | 30d | all
+  const [statsData, setStatsData] = useState(null);
+  const [statsLoading, setStatsLoading] = useState(false);
+  const [statsDate, setStatsDate] = useState(localDate()); // วันที่ดูแบบรายวัน
+  const [daily, setDaily] = useState(null); // ไทม์ไลน์รายคนของวันนั้น
+  const [statsOpenId, setStatsOpenId] = useState(null); // แถวสถิติที่กดกางดูรายละเอียด
+
+  const fetchAll = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
+    const { data } = await supabase.from('work_cards').select('*')
+      .order('priority', { ascending: false }).order('created_at', { ascending: true });
+    setCards(data || []);
+    // ดึงข้อมูลงานที่ผูก (ลูกค้า/รุ่นรถ/รูป/หมายเหตุ) มาโชว์บนการ์ด — ดึงเป็นชุดเดียว
+    try {
+      const list = data || [];
+      const toUrls = (arr) => (arr || []).map((v) => (typeof v === 'string' ? v : v?.url)).filter(Boolean);
+      const oids = [...new Set(list.filter((c) => c.ref_type === 'order' && c.ref_id).map((c) => c.ref_id))];
+      const sids = [...new Set(list.filter((c) => c.ref_type === 'service' && c.ref_id).map((c) => c.ref_id))];
+      const m = {};
+      if (oids.length) {
+        const { data: os } = await supabase.from('orders').select('id, customer_cache, notes, images, order_items(product_name, quantity)').in('id', oids);
+        (os || []).forEach((o) => { m[`order:${o.id}`] = { customer: o.customer_cache, notes: o.notes, images: toUrls(o.images), items: (o.order_items || []).map((x) => `${x.product_name}${x.quantity > 1 ? ` ×${x.quantity}` : ''}`).filter(Boolean) }; });
+      }
+      if (sids.length) {
+        const { data: ss } = await supabase.from('services').select('id, customer_cache, notes, images, service_items(description)').in('id', sids);
+        (ss || []).forEach((s) => { m[`service:${s.id}`] = { customer: s.customer_cache, notes: s.notes, images: toUrls(s.images), items: (s.service_items || []).map((x) => x.description).filter(Boolean) }; });
+      }
+      // นับสถานะของจากเช็คลิสต์เตรียมของ: พร้อมประกอบ (ยังไม่ทำ) / รอของ / ประกอบแล้ว
+      const loadPrep = async (prepTable, itemTable, refCol, rids, typeKey) => {
+        if (!rids.length) return;
+        const { data: ps } = await supabase.from(prepTable).select(`id, ${refCol}`).in(refCol, rids);
+        const prepIds = (ps || []).map((p) => p.id);
+        if (!prepIds.length) return;
+        const { data: its } = await supabase.from(itemTable).select('id, prep_id, status, kind, parent_item_id, assembled_at, no_assemble').in('prep_id', prepIds);
+        const byPrep = {};
+        (its || []).forEach((x) => { (byPrep[x.prep_id] = byPrep[x.prep_id] || []).push(x); });
+        (ps || []).forEach((p) => {
+          const all = byPrep[p.id] || [];
+          const hasChild = (xid) => all.some((y) => y.parent_item_id === xid);
+          const leaves = all.filter((x) => (x.kind !== 'product' || !hasChild(x.id)) && x.status !== 'skipped');
+          const key = `${typeKey}:${p[refCol]}`;
+          if (m[key]) m[key].prep = {
+            // ไม่นับของเตรียมให้เฉยๆ (no_assemble) ใน "พร้อมประกอบ" — มันไม่ใช่งานติ๊ก
+            ready: leaves.filter((x) => x.status === 'done' && !x.assembled_at && !x.no_assemble).length,
+            waiting: leaves.filter((x) => x.status !== 'done' && !x.assembled_at).length,
+            assembled: leaves.filter((x) => x.assembled_at).length,
+          };
+        });
+      };
+      await loadPrep('order_preps', 'order_prep_items', 'order_id', oids, 'order');
+      await loadPrep('service_preps', 'service_prep_items', 'service_id', sids, 'service');
+      setRefData(m);
+    } catch { /* ignore */ }
+    try {
+      const ids = (data || []).map((c) => c.id);
+      if (ids.length) {
+        const { data: its } = await supabase.from('work_card_items').select('card_id, kind, done').in('card_id', ids);
+        const m = {};
+        (its || []).forEach((it) => {
+          const s = (m[it.card_id] = m[it.card_id] || { total: 0, done: 0, matPending: 0 });
+          if (it.kind === 'material') { if (!it.done) s.matPending += 1; }
+          else { s.total += 1; if (it.done) s.done += 1; }
+        });
+        setStats(m);
+      } else setStats({});
+    } catch { /* ignore */ }
     setLoading(false);
-  };
+  }, []);
 
-  useEffect(() => { fetchJobs(); }, []);
+  useEffect(() => { fetchAll(); }, [fetchAll]);
 
-  const handleDelete = async (id) => {
-    if (!confirm('ลบใบงานนี้?')) return;
-    const target = jobs.find(j => j.id === id);
-    await logAction({
-      resource_type: 'assembly', resource_id: id, action: 'delete',
-      resource_label: target?.title || target?.job_number,
-      old_data: target ? { job_number: target.job_number, title: target.title, stage: target.stage } : null,
-      created_by: meRef(),
-    });
-    await supabase.from('assembly_jobs').delete().eq('id', id);
-    fetchJobs();
-    setView('list');
-  };
-
-  const filtered = useMemo(() => {
-    let result = [...jobs];
-    if (!showHistory) result = result.filter(j => j.stage !== 'completed' && j.stage !== 'cancelled');
-    if (search) {
-      const s = search.toLowerCase();
-      result = result.filter(j =>
-        j.job_number?.toLowerCase().includes(s) ||
-        j.title?.toLowerCase().includes(s) ||
-        j.customer_cache?.first_name?.toLowerCase().includes(s) ||
-        j.customer_cache?.last_name?.toLowerCase().includes(s) ||
-        j.customer_cache?.phone?.includes(s)
-      );
+  // เปิดการ์ดที่ถูกส่งมาจากหน้าอื่น (กระดิ่งแจ้งเตือน / แถบงานประกอบในออเดอร์)
+  useEffect(() => {
+    if (initialNavData?.target === 'work_card' && initialNavData.id) {
+      supabase.from('work_cards').select('*').eq('id', initialNavData.id).maybeSingle()
+        .then(({ data }) => { if (data) setSelected(data); });
     }
-    if (filterStage !== 'All') result = result.filter(j => j.stage === filterStage);
-    return result;
-  }, [jobs, search, filterStage, showHistory]);
+  }, [initialNavData?.timestamp]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const refreshSelected = async (id) => {
-    const { data } = await supabase.from('assembly_jobs').select('*').eq('id', id).single();
-    if (data) setSelectedJob(data);
+  const grouped = useMemo(() => {
+    const live = cards.filter((c) => !c.archived_at);
+    return {
+      doingCol: live.filter((c) => c.focus_date && c.status !== 'done'),   // ซ้าย: โฟกัสอยู่ ยังไม่เสร็จ
+      doneCol: live.filter((c) => c.status === 'done'),                     // ขวา: เสร็จแล้ว รอตรวจ
+      queue: live.filter((c) => !c.focus_date && c.status !== 'done'),      // คิวงาน
+      history: cards.filter((c) => c.archived_at).slice(0, 80),             // ยกออกแล้ว
+    };
+  }, [cards]);
+
+  // ── สถิติช่าง: นับจากบันทึกการติ๊กจริง (ใครติ๊ก เมื่อไหร่) + เก็บรายละเอียดให้กดกางดูได้ ──
+  const fetchStats = useCallback(async () => {
+    setStatsLoading(true);
+    try {
+      const now = new Date();
+      let from = null;
+      if (statsPeriod === 'month') from = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+      else if (statsPeriod === '30d') from = new Date(Date.now() - 30 * 86400000).toISOString();
+      let cq = supabase.from('work_cards').select('title, ref_label, done_by, done_at, created_at').not('done_at', 'is', null);
+      let iq = supabase.from('work_card_items').select('title, kind, done_by, done_at, work_cards(title)').eq('done', true).not('done_at', 'is', null);
+      let opq = supabase.from('order_prep_items').select('title, prepared_by, prepared_at').not('prepared_at', 'is', null);
+      let spq = supabase.from('service_prep_items').select('title, prepared_by, prepared_at').not('prepared_at', 'is', null);
+      if (from) {
+        cq = cq.gte('done_at', from); iq = iq.gte('done_at', from);
+        opq = opq.gte('prepared_at', from); spq = spq.gte('prepared_at', from);
+      }
+      const [{ data: cs }, { data: its }, { data: ops }, { data: sps }] = await Promise.all([cq, iq, opq, spq]);
+      const m = {};
+      const ent = (p) => {
+        if (!p?.id) return null;
+        return (m[p.id] = m[p.id] || { id: p.id, name: p.name || '-', cards: 0, parts: 0, ticks: 0, preps: 0, durMs: 0, closedList: [], tickList: [], prepList: [] });
+      };
+      (cs || []).forEach((c) => {
+        const e = ent(c.done_by); if (!e) return;
+        e.cards += 1;
+        e.closedList.push({ t: `${c.title}${c.ref_label ? ` · ${c.ref_label}` : ''}`, at: c.done_at });
+        if (c.created_at && c.done_at) e.durMs += Math.max(0, new Date(c.done_at) - new Date(c.created_at));
+      });
+      (its || []).forEach((it) => {
+        if (it.kind === 'material') return;
+        const e = ent(it.done_by); if (!e) return;
+        e.ticks += 1;
+        if (it.kind === 'part') e.parts += 1;
+        e.tickList.push({ t: `${it.title}${it.work_cards?.title ? ` (${it.work_cards.title})` : ''}`, at: it.done_at, part: it.kind === 'part' });
+      });
+      [...(ops || []), ...(sps || [])].forEach((r) => {
+        const e = ent(r.prepared_by); if (!e) return;
+        e.preps += 1;
+        e.prepList.push({ t: r.title, at: r.prepared_at });
+      });
+      const byTime = (a, b) => new Date(b.at) - new Date(a.at); // ล่าสุดขึ้นก่อน
+      setStatsData(Object.values(m).map((e) => ({
+        ...e,
+        closedList: e.closedList.sort(byTime),
+        tickList: e.tickList.sort(byTime),
+        prepList: e.prepList.sort(byTime),
+      })).sort((a, b) => (b.parts * 2 + b.ticks + b.cards * 3 + b.preps) - (a.parts * 2 + a.ticks + a.cards * 3 + a.preps)));
+    } finally { setStatsLoading(false); }
+  }, [statsPeriod]);
+  // สถิติรายวัน: ไทม์ไลน์รายคน — ชื่อ+รูป แล้วไล่เวลาว่ากี่โมงทำอะไรบ้าง
+  const fetchDaily = useCallback(async () => {
+    setStatsLoading(true);
+    try {
+      const start = new Date(`${statsDate}T00:00:00`);
+      const end = new Date(start.getTime() + 86400000);
+      const sISO = start.toISOString(); const eISO = end.toISOString();
+      const [op, sp, closed, created, archived, ticks, cmts] = await Promise.all([
+        supabase.from('order_prep_items').select('title, prepared_by, prepared_at').gte('prepared_at', sISO).lt('prepared_at', eISO),
+        supabase.from('service_prep_items').select('title, prepared_by, prepared_at').gte('prepared_at', sISO).lt('prepared_at', eISO),
+        supabase.from('work_cards').select('title, ref_label, done_by, done_at').gte('done_at', sISO).lt('done_at', eISO),
+        supabase.from('work_cards').select('title, ref_label, created_by, created_at').gte('created_at', sISO).lt('created_at', eISO),
+        supabase.from('work_cards').select('title, archived_by, archived_at').gte('archived_at', sISO).lt('archived_at', eISO),
+        supabase.from('work_card_items').select('title, kind, done_by, done_at, work_cards(title)').eq('done', true).gte('done_at', sISO).lt('done_at', eISO),
+        supabase.from('work_card_comments').select('body, created_by, created_at, parent_id, work_cards(title)').gte('created_at', sISO).lt('created_at', eISO),
+      ]);
+      const people = {};
+      const add = (p, at, type, text) => {
+        if (!p?.id || !at) return;
+        const e = (people[p.id] = people[p.id] || { id: p.id, name: p.name || '-', avatar: null, events: [] });
+        e.events.push({ at, type, text });
+      };
+      [...(op.data || []), ...(sp.data || [])].forEach((r) => add(r.prepared_by, r.prepared_at, 'prep', `เตรียมของ: ${r.title}`));
+      (closed.data || []).forEach((c) => add(c.done_by, c.done_at, 'done', `ปิดงาน: ${c.title}${c.ref_label ? ` · ${c.ref_label}` : ''}`));
+      (created.data || []).forEach((c) => add(c.created_by, c.created_at, 'create', `สั่งงาน/สร้างการ์ด: ${c.title}${c.ref_label ? ` · ${c.ref_label}` : ''}`));
+      (archived.data || []).forEach((c) => add(c.archived_by, c.archived_at, 'check', `ตรวจงานผ่าน ยกออกบอร์ด: ${c.title}`));
+      (ticks.data || []).forEach((t) => add(t.done_by, t.done_at,
+        t.kind === 'material' ? 'mat' : 'tick',
+        `${t.kind === 'material' ? 'จัดของให้' : t.kind === 'part' ? 'ประกอบ' : 'ทำเสร็จ'}: ${t.title}${t.work_cards?.title ? ` (${t.work_cards.title})` : ''}`));
+      (cmts.data || []).forEach((c) => add(c.created_by, c.created_at, 'comment',
+        `${c.parent_id ? 'ตอบกลับ' : 'คอมเมนต์'}ใน "${c.work_cards?.title || '-'}": ${String(c.body || 'แนบรูป').slice(0, 70)}`));
+      // รูปโปรไฟล์
+      const ids = Object.keys(people);
+      if (ids.length) {
+        const { data: profs } = await supabase.from('profiles').select('id, avatar_url').in('id', ids);
+        (profs || []).forEach((pr) => { if (people[pr.id]) people[pr.id].avatar = pr.avatar_url; });
+      }
+      setDaily(Object.values(people)
+        .map((p) => ({ ...p, events: p.events.sort((a, b) => new Date(a.at) - new Date(b.at)) }))
+        .sort((a, b) => b.events.length - a.events.length));
+    } finally { setStatsLoading(false); }
+  }, [statsDate]);
+
+  useEffect(() => {
+    if (tab !== 'stats') return;
+    if (statsPeriod === 'day') fetchDaily(); else fetchStats();
+  }, [tab, statsPeriod, fetchStats, fetchDaily]);
+
+  const shiftDay = (n) => {
+    const d = new Date(`${statsDate}T00:00:00`);
+    d.setDate(d.getDate() + n);
+    setStatsDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
   };
 
-  if (view === 'log') return (
-    <div className="max-w-[1600px] mx-auto space-y-4 animate-in fade-in">
-      <button onClick={() => setView('list')} className="flex items-center gap-2 text-gray-500 hover:text-gray-900 font-medium px-3 py-2 rounded-lg hover:bg-gray-50 transition-colors">
-        <Hammer size={16} /> กลับรายการใบงาน
-      </button>
-      <AuditLogPanel resourceType="assembly" title="Log รวม — ใบงานทั้งหมด" />
-    </div>
-  );
-  if (view === 'form') return (
-    <AssemblyForm
-      initialData={selectedJob}
-      onCancel={() => { setSelectedJob(null); setView('list'); }}
-      onSuccess={() => { setSelectedJob(null); setView('list'); fetchJobs(); }}
-    />
-  );
+  const avgDur = (e) => {
+    if (!e.cards) return '-';
+    const h = e.durMs / e.cards / 3600000;
+    if (h < 1) return '< 1 ชม.';
+    if (h < 48) return `${Math.round(h)} ชม.`;
+    return `${(h / 24).toFixed(1)} วัน`;
+  };
 
-  if (view === 'detail') return (
-    <AssemblyDetail
-      job={selectedJob}
-      onBack={() => { setSelectedJob(null); setView('list'); fetchJobs(); }}
-      onEdit={() => setView('form')}
-      onDelete={() => handleDelete(selectedJob.id)}
-      onRefresh={() => refreshSelected(selectedJob.id)}
-    />
-  );
+  const pullToFocus = async (c) => {
+    const fd = localDate();
+    setCards((prev) => prev.map((x) => (x.id === c.id ? { ...x, focus_date: fd } : x)));
+    await supabase.from('work_cards').update({ focus_date: fd, updated_at: new Date().toISOString() }).eq('id', c.id);
+  };
+  const backToQueue = async (c) => {
+    setCards((prev) => prev.map((x) => (x.id === c.id ? { ...x, focus_date: null } : x)));
+    await supabase.from('work_cards').update({ focus_date: null, updated_at: new Date().toISOString() }).eq('id', c.id);
+  };
+  // ตรวจเช็คเรียบร้อย → ยกออกจากบอร์ด เข้าประวัติ
+  const archiveCard = async (c) => {
+    const patch = { archived_at: new Date().toISOString(), archived_by: meRef() };
+    setCards((prev) => prev.map((x) => (x.id === c.id ? { ...x, ...patch } : x)));
+    await supabase.from('work_cards').update(patch).eq('id', c.id);
+  };
 
-  const JobCard = ({ job }) => {
-    const items = job.items || [];
-    const total = items.length;
-    const prepared  = items.filter(i => i.prepared_at || i.skip_prepare).length;
-    const assembled = items.filter(i => i.assembled_at).length;
-    const remaining = total - assembled;
-    const done = items.filter(i => i.qc_status === 'passed' || i.assembled_at || i.prepared_at).length;
-    const pct = total > 0 ? Math.round((done / total) * 100) : 0;
-    const stageConf = STAGE_CONFIG[job.stage] || STAGE_CONFIG.preparing;
-    const assignees = job.assignees || [];
-
+  // ── การ์ดใบเดียวบนบอร์ด ──
+  const CardTile = ({ c, zone }) => {
+    const st = stats[c.id] || { total: 0, done: 0, matPending: 0 };
+    const meta = STATUS_META[c.status] || STATUS_META.todo;
+    const mine = (c.assignees || []).some((a) => a.id === profile?.id);
+    const ref = c.ref_type && c.ref_id ? refData[`${c.ref_type}:${c.ref_id}`] : null;
+    const rawCust = ref?.customer?.images?.[0];
+    const custImg = typeof rawCust === 'string' ? rawCust : rawCust?.url || null;
+    const custName = ref ? (`${ref.customer?.first_name || ''} ${ref.customer?.last_name || ''}`.trim() || '-') : '';
+    const allImgs = [...(c.images || []), ...(ref?.images || [])];
+    // อยู่ในระบบมากี่วันแล้ว (นับจากวันที่ดึงเข้าโฟกัส ถ้าไม่มีนับจากวันสร้าง) — ตัวเลขใหญ่มุมขวาบน
+    const from = c.focus_date ? new Date(c.focus_date) : new Date(c.created_at);
+    const days = Math.max(0, Math.floor((Date.now() - from.getTime()) / 86400000));
+    const ageNum = days < 31 ? days : days < 365 ? Math.floor(days / 30) : Math.floor(days / 365);
+    const ageUnit = days < 31 ? 'วัน' : days < 365 ? 'เดือน' : 'ปี';
+    const ageTone = days >= 7 ? 'bg-red-50 text-red-600 border-red-200' : days >= 3 ? 'bg-amber-50 text-amber-600 border-amber-200' : 'bg-gray-50 text-gray-500 border-gray-200';
+    const isPolish = c.rework_count > 0 && c.status !== 'done'; // การ์ดที่ถูกส่งกลับมาเก็บงาน — ต้องเด่น
     return (
-      <div
-        onClick={() => { setSelectedJob(job); setView('detail'); }}
-        className="bg-slate-900 rounded-2xl border border-slate-800 hover:border-amber-500/40 hover:bg-slate-800/80 cursor-pointer transition-all duration-200 active:scale-[0.99] p-5 group"
-      >
-        <div className="flex items-start justify-between gap-3 mb-3">
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-2 flex-wrap">
-              <span className="text-xs font-mono text-slate-500">{job.job_number}</span>
-              <span className={`text-xs px-2.5 py-0.5 rounded-full font-semibold border ${stageConf.badge}`}>
-                {stageConf.label}
+      <div onClick={() => setSelected(c)}
+        className={`w-full text-left bg-white rounded-2xl border shadow-sm hover:shadow-md transition-all p-4 relative overflow-hidden cursor-pointer ${isPolish ? 'border-violet-300 ring-2 ring-violet-200 bg-violet-50/40' : mine ? 'border-indigo-200' : 'border-gray-100'}`}>
+        <span className={`absolute left-0 top-0 bottom-0 w-1.5 ${isPolish ? 'bg-violet-500' : meta.bar}`} />
+        {/* แถบม่วงเด่นๆ: งานถูกส่งกลับมาเก็บเพิ่ม */}
+        {isPolish && (
+          <div className="-mx-4 -mt-4 mb-2.5 px-4 py-2 bg-violet-500 text-white text-[11px] font-bold flex items-center gap-1.5">
+            ✨ กลับมาเก็บงานเพิ่ม รอบ #{c.rework_count} — เปิดดูคอมเมนต์ว่าต้องเก็บจุดไหน
+          </div>
+        )}
+        {/* ตัวเลขวันชัดๆ มุมขวาบน */}
+        <span title={`${c.focus_date ? 'เข้าโฟกัสเมื่อ' : 'สร้างเมื่อ'} ${from.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' })} · ${days} วันแล้ว`}
+          className={`absolute ${isPolish ? 'top-11' : 'top-2.5'} right-2.5 flex flex-col items-center justify-center leading-none rounded-xl border px-2.5 py-1.5 ${ageTone}`}>
+          <span className="text-lg font-black">{days === 0 ? '•' : ageNum}</span>
+          <span className="text-[9px] font-bold mt-0.5">{days === 0 ? 'วันนี้' : ageUnit}</span>
+        </span>
+        <div className="pl-2">
+          <div className="flex items-center gap-1.5 flex-wrap pr-12">
+            {c.priority === 'urgent' && <span className="text-[10px] font-bold bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full flex items-center gap-0.5"><Flag size={9} /> ด่วน</span>}
+            {c.ref_label && <span className="text-[10px] font-bold bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded-full flex items-center gap-0.5"><Link2 size={9} /> {c.ref_label}</span>}
+            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${meta.chip}`}>{meta.label}</span>
+            {st.matPending > 0 && <span className="text-[10px] font-bold bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded-full flex items-center gap-0.5"><ShoppingCart size={9} /> ขอของเพิ่ม {st.matPending}</span>}
+            {c.rework_count > 0 && c.status === 'done' && (
+              <span className="text-[10px] font-bold bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded-full">
+                ✨ เก็บงานแล้ว รอตรวจใหม่
               </span>
-              {job.ref_type && (
-                <span className={`text-xs px-2 py-0.5 rounded border font-medium ${
-                  job.ref_type === 'order'
-                    ? 'bg-green-500/10 text-green-400 border-green-500/20'
-                    : 'bg-orange-500/10 text-orange-400 border-orange-500/20'
-                }`}>
-                  {job.ref_type === 'order' ? '🛒 Order' : '🔧 Service'}
-                </span>
-              )}
-            </div>
-            <h3 className="font-bold text-white text-sm truncate group-hover:text-amber-300 transition-colors">
-              {job.title}
-            </h3>
-            {job.customer_cache?.first_name && (
-              <p className="text-sm text-slate-400 mt-0.5 truncate">
-                {job.customer_cache.first_name} {job.customer_cache.last_name}
-                {job.customer_cache.phone && (
-                  <span className="ml-2 text-slate-500 text-xs">{job.customer_cache.phone}</span>
-                )}
-              </p>
             )}
           </div>
+          <p className="font-bold text-gray-900 mt-1.5 leading-snug pr-12">{c.title}</p>
 
-          {assignees.length > 0 && (
-            <div className="flex -space-x-2 shrink-0">
-              {assignees.slice(0, 3).map((a, i) => (
-                <div key={i} className="w-8 h-8 rounded-full bg-amber-900/60 border-2 border-slate-900 flex items-center justify-center text-xs font-bold text-amber-300 overflow-hidden">
-                  {a.user?.avatar_url
-                    ? <img src={a.user.avatar_url} className="w-full h-full object-cover" alt="" />
-                    : (a.user?.first_name?.[0] || '?')
-                  }
-                </div>
-              ))}
-              {assignees.length > 3 && (
-                <div className="w-8 h-8 rounded-full bg-slate-700 border-2 border-slate-900 flex items-center justify-center text-xs font-bold text-slate-300">
-                  +{assignees.length - 3}
+          {/* ลูกค้า + รุ่นรถ/อาการ จากออเดอร์ที่ผูก — รู้เลยว่าคันไหน */}
+          {ref && (
+            <div className="mt-1.5">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className="w-5 h-5 rounded-full overflow-hidden bg-gray-100 shrink-0 flex items-center justify-center text-[9px] font-bold text-gray-500">
+                  {custImg ? <img src={custImg} className="w-full h-full object-cover" /> : (custName[0] || '?')}
+                </span>
+                <span className="text-xs font-semibold text-gray-700 truncate">
+                  {custName}{ref.customer?.nickname ? ` (${ref.customer.nickname})` : ''}
+                </span>
+              </div>
+              {ref.items.length > 0 && (
+                <p className="text-[11px] text-gray-500 truncate mt-0.5">
+                  {c.ref_type === 'service' ? '🔧' : '🛵'} {ref.items[0]}{ref.items.length > 1 ? ` +${ref.items.length - 1}` : ''}
+                </p>
+              )}
+              {ref.notes && <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-100 rounded-md px-1.5 py-1 mt-1 line-clamp-2">📝 {ref.notes}</p>}
+              {/* สถานะของ: พร้อมประกอบ (ยังไม่ทำ) / รอของ / ประกอบแล้ว */}
+              {ref.prep && (
+                <div className="flex gap-1 mt-1.5 flex-wrap">
+                  {ref.prep.ready > 0 && <span className="text-[10px] font-bold bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">พร้อมประกอบ {ref.prep.ready}</span>}
+                  {ref.prep.waiting > 0 && <span className="text-[10px] font-bold bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">รอเตรียมของ {ref.prep.waiting}</span>}
+                  {ref.prep.assembled > 0 && <span className="text-[10px] font-bold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full">ประกอบแล้ว {ref.prep.assembled}</span>}
                 </div>
               )}
             </div>
           )}
-        </div>
 
-        {total > 0 && (
-          <div className="mt-2 mb-3 space-y-2">
-            <div className="flex justify-between text-xs mb-1.5">
-              <span className="text-slate-600">ความคืบหน้า</span>
-              <span className="text-slate-500">{pct}%</span>
+          {allImgs.length > 0 && (
+            <div className="flex gap-1.5 mt-2">
+              {allImgs.slice(0, 3).map((img, i) => (
+                <img key={i} src={img} className="w-12 h-12 rounded-lg object-cover border border-gray-100" />
+              ))}
+              {allImgs.length > 3 && <span className="w-12 h-12 rounded-lg bg-gray-100 flex items-center justify-center text-[10px] font-bold text-gray-500">+{allImgs.length - 3}</span>}
             </div>
-            <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
-              <div
-                className={`h-full rounded-full transition-all duration-700 ${PROGRESS_COLOR[job.stage] || 'bg-amber-500'}`}
-                style={{ width: `${pct}%` }}
-              />
+          )}
+          <div className="flex items-center justify-between mt-2 gap-2">
+            <div className="min-w-0">
+              {(c.assignees || []).length > 0
+                ? <span className="text-xs text-gray-500 truncate block">{c.assignees.map((a) => a.name?.split(' ')[0]).join(', ')}</span>
+                : <span className="text-xs text-teal-600 font-semibold">งานกลาง — ใครว่างรับได้</span>}
             </div>
-            <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
-              <span className="text-[11px] text-slate-500 bg-slate-800 border border-slate-700 px-2 py-0.5 rounded-lg">
-                รายการ <span className="text-slate-300 font-semibold">{total}</span>
-              </span>
-              <span className="text-[11px] text-amber-600/80 bg-amber-500/8 border border-amber-500/15 px-2 py-0.5 rounded-lg">
-                เตรียมแล้ว <span className="font-semibold">{prepared}</span>
-              </span>
-              <span className="text-[11px] text-blue-400/80 bg-blue-500/8 border border-blue-500/15 px-2 py-0.5 rounded-lg">
-                ทำเสร็จ <span className="font-semibold">{assembled}</span>
-              </span>
-              <span className={`text-[11px] px-2 py-0.5 rounded-lg border ${
-                remaining === 0
-                  ? 'text-emerald-400/80 bg-emerald-500/8 border-emerald-500/15'
-                  : 'text-slate-500 bg-slate-800/60 border-slate-700'
-              }`}>
-                คงเหลือ <span className="font-semibold">{remaining}</span>
-              </span>
+            <div className="flex items-center gap-2 shrink-0">
+              {st.total > 0 && <span className={`text-[11px] font-bold ${st.done === st.total ? 'text-emerald-600' : 'text-gray-500'}`}>{st.done}/{st.total}</span>}
+              <span className="text-[11px] text-gray-400 flex items-center gap-0.5"><Clock size={10} /> {ageText(c.created_at)}</span>
             </div>
           </div>
-        )}
+          {st.total > 0 && (
+            <div className="h-1 bg-gray-100 rounded-full overflow-hidden mt-2">
+              <div className={`h-full rounded-full ${st.done === st.total ? 'bg-emerald-500' : 'bg-indigo-500'}`} style={{ width: `${Math.round((st.done / st.total) * 100)}%` }} />
+            </div>
+          )}
 
-        <div className="flex items-center justify-between mt-1">
-          <span className="text-xs text-slate-600">
-            {new Date(job.created_at).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' })}
-          </span>
-          <ChevronRight size={14} className="text-slate-700 group-hover:text-amber-400 transition-colors" />
+          {/* ปุ่มลัดตามโซน */}
+          <div className="flex gap-1.5 mt-2.5" onClick={(e) => e.stopPropagation()}>
+            {zone === 'queue' && (
+              <button onClick={() => pullToFocus(c)}
+                className="text-[11px] font-bold text-teal-700 bg-teal-50 hover:bg-teal-100 border border-teal-200 px-2.5 py-1.5 rounded-lg flex items-center gap-1 active:scale-95">
+                <ArrowUp size={11} /> ดึงเข้ามาโฟกัส
+              </button>
+            )}
+            {zone === 'doing' && (
+              <button onClick={() => backToQueue(c)}
+                className="text-[11px] font-semibold text-gray-400 hover:text-gray-600 hover:bg-gray-100 px-2.5 py-1.5 rounded-lg flex items-center gap-1">
+                <ArrowDown size={11} /> พักกลับเข้าคิว
+              </button>
+            )}
+            {zone === 'done' && (
+              <button onClick={() => { if (confirm(`ตรวจงาน "${c.title}" เรียบร้อยแล้ว ยกออกจากบอร์ด?`)) archiveCard(c); }}
+                className="text-[11px] font-bold text-white bg-emerald-600 hover:bg-emerald-700 px-3 py-1.5 rounded-lg flex items-center gap-1 active:scale-95">
+                <ClipboardCheck size={12} /> ตรวจแล้ว ยกออก
+              </button>
+            )}
+          </div>
         </div>
       </div>
     );
   };
 
-  return (
-    <div className="bg-slate-950 rounded-3xl p-4 md:p-6 min-h-[calc(100vh-8rem)] space-y-5 pb-20 animate-in fade-in duration-500">
+  // แท็บคิวงาน/ประวัติ/สถิติ — เปิดปิดต่อตำแหน่งได้ที่ จัดการทีมงาน → สิทธิ์การใช้งาน
+  const TABS = [
+    { id: 'focus', label: `งาน Focus (${grouped.doingCol.length + grouped.doneCol.length})`, icon: Target },
+    ...(can('assembly', 'queue') ? [{ id: 'queue', label: `คิวงาน (${grouped.queue.length})`, icon: Inbox }] : []),
+    ...(can('assembly', 'history') ? [{ id: 'history', label: 'ประวัติ', icon: History }] : []),
+    ...(can('assembly', 'stats') ? [{ id: 'stats', label: 'สถิติ', icon: BarChart3 }] : []),
+  ];
 
+  return (
+    <div className="w-full space-y-4 animate-in fade-in duration-500 pb-20">
       {/* Header */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-gradient-to-br from-amber-900/60 via-slate-900 to-slate-900 p-6 rounded-2xl border border-amber-800/20">
-        <div>
-          <h1 className="text-3xl font-bold text-white flex items-center gap-3 tracking-tight">
-            <div className="w-10 h-10 bg-amber-600 rounded-xl flex items-center justify-center shadow-lg shadow-amber-900">
-              <Hammer size={20} className="text-white" />
-            </div>
-            งานประกอบ
-          </h1>
-          <p className="text-slate-400 mt-1.5 ml-1 text-sm">
-            {filtered.length} รายการ
-            {!showHistory && (
-              <span className="text-xs bg-slate-800 text-slate-500 px-2 py-0.5 rounded ml-2 border border-slate-700">
-                ซ่อนรายการเสร็จสิ้น
-              </span>
-            )}
-          </p>
+      <div className="flex items-center justify-between gap-3 bg-gradient-to-r from-slate-700 to-slate-900 rounded-3xl p-5 sm:p-6 text-white shadow-lg">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-11 h-11 bg-white/15 rounded-2xl flex items-center justify-center shrink-0"><Hammer size={22} /></div>
+          <div className="min-w-0">
+            <h1 className="text-xl sm:text-2xl font-bold">งานประกอบ</h1>
+            <p className="text-slate-300 text-xs sm:text-sm truncate">กำลังทำ {grouped.doingCol.length} · เสร็จรอตรวจ {grouped.doneCol.length} · ในคิว {grouped.queue.length}</p>
+          </div>
         </div>
-        <div className="flex gap-2">
-          <button
-            onClick={() => setView('log')}
-            className="bg-white/10 hover:bg-white/20 text-white px-4 py-2.5 rounded-xl font-medium text-sm border border-white/10 flex items-center gap-2 transition-all"
-          >
-            <History size={16}/> Log ทั้งหมด
+        <div className="flex items-center gap-2 shrink-0">
+          <button onClick={() => { setEditCard(null); setFormOpen(true); }}
+            className="bg-white text-slate-800 hover:bg-slate-100 px-4 sm:px-5 py-2.5 rounded-xl font-bold flex items-center gap-1.5 active:scale-95 transition-all">
+            <Plus size={18} /> <span className="hidden sm:inline">สร้างงาน</span>
           </button>
-          {can('assembly', 'create') && (
-            <button
-              onClick={() => { setSelectedJob(null); setView('form'); }}
-              className="bg-amber-600 hover:bg-amber-500 text-white px-5 py-2.5 rounded-xl font-bold shadow-lg shadow-amber-950 flex items-center gap-2 transition-all active:scale-95"
-            >
-              <Plus size={20} /> สร้างใบงานใหม่
-            </button>
-          )}
         </div>
       </div>
 
-      {/* Toolbar */}
-      <div className="bg-slate-900 border border-slate-800 p-2 rounded-2xl flex flex-col xl:flex-row gap-3">
-          <div className="relative flex-1">
-            <Search className="absolute left-4 top-3.5 text-slate-500" size={18} />
-            <input
-              className="w-full pl-11 pr-4 py-3 bg-slate-800 text-white placeholder:text-slate-500 rounded-xl outline-none border border-slate-700 focus:border-amber-500 transition-colors text-sm"
-              placeholder="ค้นหาเลขที่ใบงาน, ชื่องาน, ลูกค้า..."
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-            />
-          </div>
-          <div className="flex flex-wrap items-center gap-2 px-2">
-            <button
-              onClick={() => setShowHistory(!showHistory)}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all ${
-                showHistory
-                  ? 'bg-amber-600/20 text-amber-400 ring-1 ring-amber-500/30'
-                  : 'text-slate-400 hover:bg-slate-800'
-              }`}
-            >
-              <History size={16} /> {showHistory ? 'แสดงทั้งหมด' : 'ดูประวัติเก่า'}
+      {/* Tabs */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-1.5 flex gap-1">
+        {TABS.map((t) => {
+          const Icon = t.icon;
+          return (
+            <button key={t.id} onClick={() => setTab(t.id)}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-bold transition-all ${tab === t.id ? 'bg-slate-800 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}>
+              <Icon size={15} /> {t.label}
             </button>
-            <div className="w-px h-7 bg-slate-700 hidden md:block" />
-            <div className="relative">
-              <select
-                className="appearance-none bg-slate-800 border border-slate-700 text-slate-300 pl-9 pr-7 py-2.5 rounded-xl text-sm focus:outline-none focus:border-amber-500 cursor-pointer"
-                value={filterStage}
-                onChange={e => setFilterStage(e.target.value)}
-              >
-                <option value="All">ทุกขั้นตอน</option>
-                <option value="preparing">เตรียมของ</option>
-                <option value="in_progress">กำลังทำ</option>
-                <option value="qc">QC / ทดสอบ</option>
-                <option value="completed">เสร็จสิ้น</option>
-                <option value="cancelled">ยกเลิก</option>
-              </select>
-              <Filter size={14} className="absolute left-3 top-3 text-slate-500 pointer-events-none" />
+          );
+        })}
+      </div>
+
+      {loading ? (
+        <div className="text-center py-20 text-gray-400"><Loader2 size={22} className="animate-spin inline" /></div>
+      ) : tab === 'focus' ? (
+        /* ── บอร์ด Focus: 2 คอลัมน์ ── */
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+          {/* ซ้าย: ยังทำไม่เสร็จ */}
+          <div className="bg-gray-50/80 rounded-3xl border border-gray-100 p-3.5">
+            <div className="flex items-center justify-between px-1.5 pb-3">
+              <h3 className="font-bold text-gray-800 flex items-center gap-2"><span className="w-2.5 h-2.5 rounded-full bg-blue-500" /> กำลังทำ / ยังไม่เสร็จ</h3>
+              <span className="text-xs font-bold text-gray-400 bg-white border border-gray-200 rounded-full px-2.5 py-0.5">{grouped.doingCol.length}</span>
+            </div>
+            <div className="space-y-2.5">
+              {grouped.doingCol.map((c) => <CardTile key={c.id} c={c} zone="doing" />)}
+              {grouped.doingCol.length === 0 && (
+                <div className="text-center py-10 text-gray-400 text-sm border-2 border-dashed border-gray-200 rounded-2xl bg-white/50">
+                  ยังไม่มีงานโฟกัส — ดึงจาก "คิวงาน" หรือสร้างงานใหม่
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* ขวา: เสร็จแล้ว รอตรวจ */}
+          <div className="bg-emerald-50/50 rounded-3xl border border-emerald-100 p-3.5">
+            <div className="flex items-center justify-between px-1.5 pb-3">
+              <h3 className="font-bold text-gray-800 flex items-center gap-2"><span className="w-2.5 h-2.5 rounded-full bg-emerald-500" /> เสร็จแล้ว รอตรวจ</h3>
+              <span className="text-xs font-bold text-emerald-600 bg-white border border-emerald-200 rounded-full px-2.5 py-0.5">{grouped.doneCol.length}</span>
+            </div>
+            <div className="space-y-2.5">
+              {grouped.doneCol.map((c) => <CardTile key={c.id} c={c} zone="done" />)}
+              {grouped.doneCol.length === 0 && (
+                <div className="text-center py-10 text-gray-400 text-sm border-2 border-dashed border-emerald-100 rounded-2xl bg-white/50">
+                  งานที่ทำเสร็จจะย้ายมารอตรวจที่นี่
+                </div>
+              )}
             </div>
           </div>
         </div>
+      ) : tab === 'queue' ? (
+        grouped.queue.length === 0 ? (
+          <div className="bg-white rounded-3xl border border-dashed border-gray-200 py-20 text-center">
+            <Inbox size={36} className="mx-auto text-gray-300 mb-3" />
+            <p className="font-semibold text-gray-500">คิวงานว่าง</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-3">
+            {grouped.queue.map((c) => <CardTile key={c.id} c={c} zone="queue" />)}
+          </div>
+        )
+      ) : tab === 'stats' ? (
+        /* ── สถิติช่าง ── */
+        <div className="space-y-3">
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-1.5 flex gap-1 w-fit">
+            {[['day', 'รายวัน'], ['month', 'เดือนนี้'], ['30d', '30 วันล่าสุด'], ['all', 'ทั้งหมด']].map(([id, label]) => (
+              <button key={id} onClick={() => setStatsPeriod(id)}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${statsPeriod === id ? 'bg-slate-800 text-white' : 'text-gray-500 hover:bg-gray-50'}`}>
+                {label}
+              </button>
+            ))}
+          </div>
 
-      {/* List */}
-      {loading ? (
-        <div className="text-center py-20">
-          <Loader2 className="animate-spin inline text-amber-500" size={32} />
-        </div>
-      ) : filtered.length === 0 ? (
-        <div className="text-center py-24 text-slate-600">
-          <Hammer size={48} className="mx-auto mb-3 opacity-20" />
-          <p className="font-medium text-slate-500">ยังไม่มีใบงาน</p>
-          <p className="text-sm mt-1">กดปุ่ม "สร้างใบงานใหม่" เพื่อเริ่มต้น</p>
+          {statsPeriod === 'day' ? (() => {
+            const dayLabel = statsDate === localDate() ? 'วันนี้' : new Date(`${statsDate}T00:00:00`).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' });
+            return (
+              <div className="space-y-3">
+                {/* เลือกวันดูย้อนหลังได้ */}
+                <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-2 flex items-center gap-1.5 w-fit">
+                  <button onClick={() => shiftDay(-1)} className="px-3 py-2 rounded-lg hover:bg-gray-100 text-gray-500 font-bold">‹</button>
+                  <input type="date" value={statsDate} onChange={(e) => e.target.value && setStatsDate(e.target.value)}
+                    className="px-3 py-2 bg-gray-50 rounded-xl text-sm font-bold outline-none" />
+                  <button onClick={() => shiftDay(1)} className="px-3 py-2 rounded-lg hover:bg-gray-100 text-gray-500 font-bold">›</button>
+                  <button onClick={() => setStatsDate(localDate())} className="text-xs font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-3 py-2 rounded-xl">วันนี้</button>
+                </div>
+                {statsLoading || daily === null ? (
+                  <div className="text-center py-16 text-gray-400"><Loader2 size={20} className="animate-spin inline" /></div>
+                ) : daily.length === 0 ? (
+                  <div className="bg-white rounded-3xl border border-dashed border-gray-200 py-16 text-center">
+                    <BarChart3 size={32} className="mx-auto text-gray-300 mb-2" />
+                    <p className="font-semibold text-gray-500">ไม่มีความเคลื่อนไหวใน{dayLabel}</p>
+                  </div>
+                ) : (
+                  /* ── การ์ดรายคน: รูป+ชื่อ + ไทม์ไลน์ว่ากี่โมงทำอะไร ── */
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-start">
+                    {daily.map((p) => {
+                      const TYPE = {
+                        done: { label: 'ปิดงาน', chip: 'bg-indigo-100 text-indigo-700' },
+                        check: { label: 'ตรวจผ่าน', chip: 'bg-emerald-600 text-white' },
+                        prep: { label: 'เตรียมของ', chip: 'bg-emerald-100 text-emerald-700' },
+                        tick: { label: 'ประกอบ', chip: 'bg-blue-100 text-blue-700' },
+                        mat: { label: 'จัดของ', chip: 'bg-amber-100 text-amber-700' },
+                        create: { label: 'สั่งงาน', chip: 'bg-slate-200 text-slate-700' },
+                        comment: { label: 'คอมเมนต์', chip: 'bg-gray-100 text-gray-500' },
+                      };
+                      const count = (t) => p.events.filter((e) => e.type === t).length;
+                      const tm = (at) => new Date(at).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+                      return (
+                        <div key={p.id} className="bg-white rounded-3xl border border-gray-100 shadow-sm p-4">
+                          {/* หัว: รูป + ชื่อ + สรุปยอด */}
+                          <div className="flex items-center gap-3 pb-3 border-b border-gray-50">
+                            <span className="w-11 h-11 rounded-full overflow-hidden bg-indigo-50 shrink-0 flex items-center justify-center text-sm font-bold text-indigo-500">
+                              {p.avatar ? <img src={p.avatar} className="w-full h-full object-cover" /> : (p.name[0] || '?')}
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <p className="font-bold text-gray-900 truncate">{p.name}</p>
+                              <div className="flex flex-wrap gap-1 mt-0.5">
+                                {Object.entries(TYPE).map(([t, meta]) => count(t) > 0 && (
+                                  <span key={t} className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${meta.chip}`}>{meta.label} {count(t)}</span>
+                                ))}
+                              </div>
+                            </div>
+                            <span className="text-2xl font-black text-gray-200 shrink-0">{p.events.length}</span>
+                          </div>
+                          {/* ไทม์ไลน์เรียงตามเวลา */}
+                          <div className="mt-2.5 space-y-1 max-h-80 overflow-y-auto">
+                            {p.events.map((e, i) => (
+                              <div key={i} className="flex items-start gap-2 py-1 border-b border-gray-50 last:border-0">
+                                <span className="text-[11px] font-mono font-bold text-gray-400 shrink-0 pt-0.5 w-11">{tm(e.at)}</span>
+                                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0 mt-0.5 ${TYPE[e.type]?.chip || 'bg-gray-100 text-gray-500'}`}>{TYPE[e.type]?.label}</span>
+                                <span className="text-xs text-gray-700 leading-relaxed min-w-0">{e.text}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                <p className="text-[11px] text-gray-400 text-center">เริ่มบันทึก "ใครเตรียมของ" 19 ก.ค. 2026 — ของที่เตรียมไว้ก่อนหน้านั้นไม่ถูกนับย้อนหลัง</p>
+              </div>
+            );
+          })() : statsLoading || statsData === null ? (
+            <div className="text-center py-16 text-gray-400"><Loader2 size={20} className="animate-spin inline" /></div>
+          ) : statsData.length === 0 ? (
+            <div className="bg-white rounded-3xl border border-dashed border-gray-200 py-20 text-center">
+              <BarChart3 size={36} className="mx-auto text-gray-300 mb-3" />
+              <p className="font-semibold text-gray-500">ยังไม่มีข้อมูลในช่วงนี้</p>
+              <p className="text-xs text-gray-400 mt-1">สถิตินับจากการติ๊กเช็คลิสต์และการปิดงานจริง</p>
+            </div>
+          ) : (
+            <div className="bg-white rounded-3xl border border-gray-100 shadow-sm divide-y divide-gray-50">
+              {statsData.map((e, i) => {
+                const maxScore = Math.max(...statsData.map((x) => x.parts + x.ticks), 1);
+                const open = statsOpenId === e.id;
+                const fmt = (at) => new Date(at).toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+                return (
+                  <div key={e.id}>
+                    {/* แถวสรุป — กดเพื่อกางรายละเอียดทั้งหมด */}
+                    <button onClick={() => setStatsOpenId(open ? null : e.id)} className="w-full text-left px-5 py-4 flex items-center gap-4 hover:bg-gray-50/60 transition-colors">
+                      <div className={`w-9 h-9 rounded-full flex items-center justify-center font-bold shrink-0 ${i === 0 ? 'bg-amber-100 text-amber-600' : 'bg-gray-100 text-gray-500'}`}>
+                        {i === 0 ? <Trophy size={16} /> : `#${i + 1}`}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-bold text-gray-800 truncate">{e.name}</p>
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-gray-500 mt-0.5">
+                          <span>ปิดงาน <b className="text-gray-700">{e.cards}</b> ใบ</span>
+                          <span>ประกอบ <b className="text-indigo-600">{e.parts}</b> ชิ้น</span>
+                          <span>ติ๊กงาน <b className="text-gray-700">{e.ticks}</b> รายการ</span>
+                          <span>เตรียมของ <b className="text-emerald-600">{e.preps}</b> ชิ้น</span>
+                          <span>เฉลี่ยปิดงาน <b className="text-gray-700">{avgDur(e)}</b></span>
+                        </div>
+                        <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden mt-2 max-w-sm">
+                          <div className="h-full rounded-full bg-indigo-500" style={{ width: `${Math.round(((e.parts + e.ticks) / maxScore) * 100)}%` }} />
+                        </div>
+                      </div>
+                      <span className="text-xs font-bold text-indigo-500 shrink-0 flex items-center gap-1">
+                        {open ? 'ปิด ▲' : 'ดูรายละเอียด ▼'}
+                      </span>
+                    </button>
+
+                    {/* รายละเอียดทั้งหมด: งานไหน วันไหน กี่โมง */}
+                    {open && (
+                      <div className="px-5 pb-4 grid grid-cols-1 lg:grid-cols-3 gap-3 items-start bg-gray-50/40">
+                        {[
+                          { title: `ปิดงาน (${e.closedList.length})`, tone: 'text-indigo-600', dot: 'bg-indigo-500', list: e.closedList },
+                          { title: `ประกอบ/ติ๊กงาน (${e.tickList.length})`, tone: 'text-blue-600', dot: 'bg-blue-500', list: e.tickList },
+                          { title: `เตรียมของ (${e.prepList.length})`, tone: 'text-emerald-600', dot: 'bg-emerald-500', list: e.prepList },
+                        ].map((sec, si) => (
+                          <div key={si} className="bg-white rounded-2xl border border-gray-100 p-3 mt-1">
+                            <p className={`text-[11px] font-bold flex items-center gap-1.5 mb-1.5 ${sec.tone}`}>
+                              <span className={`w-2 h-2 rounded-full ${sec.dot}`} /> {sec.title}
+                            </p>
+                            {sec.list.length === 0 && <p className="text-[11px] text-gray-300 text-center py-3">— ไม่มี —</p>}
+                            <div className="space-y-1 max-h-56 overflow-y-auto">
+                              {sec.list.map((r, ri) => (
+                                <div key={ri} className="flex items-start gap-2 text-[11px] border-b border-gray-50 last:border-0 py-1">
+                                  <span className="font-mono font-bold text-gray-400 shrink-0">{fmt(r.at)}</span>
+                                  <span className="text-gray-700 min-w-0">{r.t}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          <p className="text-[11px] text-gray-400 text-center">นับจากบันทึกจริง: ใครติ๊กเช็คลิสต์/ประกอบชิ้นส่วน/ปิดงาน เมื่อไหร่</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {filtered.map(job => <JobCard key={job.id} job={job} />)}
-        </div>
+        /* ── ประวัติ (ตรวจแล้ว ยกออก) ── */
+        grouped.history.length === 0 ? (
+          <div className="bg-white rounded-3xl border border-dashed border-gray-200 py-20 text-center">
+            <History size={36} className="mx-auto text-gray-300 mb-3" />
+            <p className="font-semibold text-gray-500">ยังไม่มีงานที่ตรวจเช็คแล้ว</p>
+          </div>
+        ) : (
+          <div className="bg-white rounded-3xl border border-gray-100 shadow-sm divide-y divide-gray-50">
+            {grouped.history.map((c) => (
+              <button key={c.id} onClick={() => setSelected(c)} className="w-full text-left px-5 py-3.5 hover:bg-gray-50 flex items-center gap-3">
+                <CheckCircle2 size={18} className="text-emerald-500 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-gray-700 truncate">{c.title}</p>
+                  <p className="text-[11px] text-gray-400">
+                    {c.ref_label ? `${c.ref_label} · ` : ''}เสร็จโดย {c.done_by?.name || '-'} · ตรวจโดย {c.archived_by?.name || '-'} · {new Date(c.archived_at).toLocaleDateString('th-TH', { day: '2-digit', month: 'short', year: '2-digit' })}
+                  </p>
+                </div>
+              </button>
+            ))}
+          </div>
+        )
+      )}
+
+      {/* Modals */}
+      {formOpen && (
+        <WorkCardForm
+          initialData={editCard}
+          profile={profile}
+          onClose={() => { setFormOpen(false); setEditCard(null); }}
+          onSaved={(newCard) => {
+            setFormOpen(false); setEditCard(null); fetchAll(true);
+            if (newCard) setSelected(newCard);
+            if (selected && editCard) supabase.from('work_cards').select('*').eq('id', editCard.id).single().then(({ data }) => data && setSelected(data));
+          }}
+        />
+      )}
+      {selected && !formOpen && (
+        <WorkCardDetail
+          card={selected}
+          onClose={() => setSelected(null)}
+          onChanged={() => fetchAll(true)}
+          onEdit={(c) => { setEditCard(c); setFormOpen(true); }}
+        />
       )}
     </div>
   );

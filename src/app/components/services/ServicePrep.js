@@ -35,6 +35,8 @@ const ServicePrep = ({ service, onItemsChange, openSignal }) => {
   const [search, setSearch] = useState('');
   const [results, setResults] = useState([]);
   const [linkedNames, setLinkedNames] = useState({});
+  const [repickFor, setRepickFor] = useState(null);       // item id ที่กำลังเปิดเมนูเปลี่ยนที่หยิบ
+  const [repickOptions, setRepickOptions] = useState([]); // ที่เก็บที่มีของ ของสินค้าที่ผูกไว้
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -140,7 +142,7 @@ const ServicePrep = ({ service, onItemsChange, openSignal }) => {
   };
 
   // ── ตัด/คืนสต๊อกอัตโนมัติ (เฉพาะรายการ "ดึงจากสต๊อก" ที่ผูกสินค้าไว้) ──
-  const deductStock = async (it) => {
+  const deductStock = async (it, locationId = undefined) => {
     const qty = Math.max(1, Math.trunc(Number(it.qty) || 1));
     const { data: tx } = await supabase.from('stock_transactions').insert([{
       product_id: it.stock_product_id,
@@ -153,6 +155,7 @@ const ServicePrep = ({ service, onItemsChange, openSignal }) => {
     const result = await allocateFifoStockOut({
       productId: it.stock_product_id,
       quantity: qty,
+      ...(locationId !== undefined ? { locationId } : {}), // เลือกที่หยิบเอง = ตัดเฉพาะจุดนั้น
       referenceType: 'service_prep',
       stockTransactionId: tx?.id || null,
       profileId: profile?.id || null,
@@ -162,7 +165,27 @@ const ServicePrep = ({ service, onItemsChange, openSignal }) => {
       await supabase.from('stock_transactions').update({ unit_cost_thb: result.weightedUnitCost, total_cost_thb: result.totalCost }).eq('id', tx.id);
     }
     if (result?.missingQty > 0) alert(`หมายเหตุ: สต๊อกมีไม่พอ ตัดได้ ${qty - result.missingQty} จาก ${qty} ชิ้น`);
-    return qty;
+    // สร้าง "ใบสั่งหยิบ": ระบบตัด FIFO จากที่เก็บ/ล็อตไหน → บอกคนหยิบให้เดินถูกจุด
+    let pickText = null;
+    try {
+      const allocs = result?.allocations || [];
+      if (allocs.length) {
+        const lotIds = [...new Set(allocs.map((a) => a.stock_lot_id).filter(Boolean))];
+        const locIds = [...new Set(allocs.map((a) => a.location_id).filter(Boolean))];
+        const [{ data: lots }, { data: locs }, { data: strs }] = await Promise.all([
+          lotIds.length ? supabase.from('stock_lots').select('id, lot_code').in('id', lotIds) : Promise.resolve({ data: [] }),
+          locIds.length ? supabase.from('storage_locations').select('id, code, store_id').in('id', locIds) : Promise.resolve({ data: [] }),
+          supabase.from('stores').select('id, name'),
+        ]);
+        const lotById = {}; (lots || []).forEach((l) => { lotById[l.id] = l.lot_code; });
+        const storeById = {}; (strs || []).forEach((st) => { storeById[st.id] = st.name; });
+        const locById = {}; (locs || []).forEach((l) => { locById[l.id] = `${storeById[l.store_id] || ''} ${l.code}`.trim(); });
+        pickText = allocs.map((a) =>
+          `${a.location_id ? (locById[a.location_id] || 'ไม่ทราบที่เก็บ') : 'รอจัดเก็บ'} ×${a.quantity}${lotById[a.stock_lot_id] ? ` · ล็อต ${lotById[a.stock_lot_id]}` : ''}`
+        ).join(', ');
+      }
+    } catch { /* สร้างใบสั่งหยิบไม่ได้ก็ตัดปกติ */ }
+    return { qty, pickText };
   };
   const returnStock = async (it) => {
     const backQty = Math.max(1, Math.trunc(Number(it.stock_deducted_qty ?? it.qty) || 1));
@@ -188,18 +211,24 @@ const ServicePrep = ({ service, onItemsChange, openSignal }) => {
   const cycleStatus = async (it) => {
     const ns = nextStatus(it.status);
     const patch = { status: ns };
+    // บันทึกใครติ๊กเตรียม เมื่อไหร่ (ใช้ทำสถิติรายวัน)
+    if (ns === 'done') { patch.prepared_by = meRef(); patch.prepared_at = new Date().toISOString(); }
+    else if (it.status === 'done') { patch.prepared_by = null; patch.prepared_at = null; }
     const linked = it.source === 'stock' && it.stock_product_id;
     if (linked && ns === 'done' && !it.stock_deducted) {
       try {
-        const qty = await deductStock(it);
+        const { qty, pickText } = await deductStock(it);
         patch.stock_deducted = true;
         patch.stock_deducted_qty = qty;
+        patch.stock_pick = pickText;
+        if (pickText) alert(`ตัดสต๊อกแล้ว — ไปหยิบที่: ${pickText}`);
       } catch (err) { alert('ตัดสต๊อกไม่สำเร็จ: ' + err.message); }
     } else if (linked && it.status === 'done' && it.stock_deducted) {
       try {
         await returnStock(it);
         patch.stock_deducted = false;
         patch.stock_deducted_qty = null;
+        patch.stock_pick = null;
       } catch (err) { alert('คืนสต๊อกไม่สำเร็จ: ' + err.message); }
     }
     patchItem(it.id, patch);
@@ -215,6 +244,38 @@ const ServicePrep = ({ service, onItemsChange, openSignal }) => {
     await supabase.from('service_preps').update({ status: st, updated_at: new Date().toISOString() }).eq('id', prep.id);
     setPrep((p) => (p ? { ...p, status: st } : p));
   };
+  // ── เปลี่ยนที่หยิบเอง: คืนของที่ตัดไว้ แล้วตัดใหม่เฉพาะที่เก็บที่เลือก ──
+  const openRepick = async (it) => {
+    setRepickFor(it.id); setRepickOptions([]);
+    try {
+      const { data } = await supabase.from('stock_items')
+        .select('quantity, location_id').eq('product_id', it.stock_product_id).gt('quantity', 0);
+      const locIds = [...new Set((data || []).map((r) => r.location_id).filter(Boolean))];
+      const [{ data: locs }, { data: strs }] = await Promise.all([
+        locIds.length ? supabase.from('storage_locations').select('id, code, store_id').in('id', locIds) : Promise.resolve({ data: [] }),
+        supabase.from('stores').select('id, name'),
+      ]);
+      const storeById = {}; (strs || []).forEach((st) => { storeById[st.id] = st.name; });
+      setRepickOptions((data || []).map((r) => {
+        const l = (locs || []).find((x) => x.id === r.location_id);
+        return {
+          locationId: r.location_id,
+          qty: r.quantity,
+          label: r.location_id ? (l ? `${storeById[l.store_id] || ''} ${l.code}`.trim() : 'ไม่ทราบที่เก็บ') : 'รอจัดเก็บ',
+        };
+      }));
+    } catch { /* โหลดตัวเลือกไม่ได้ */ }
+  };
+  const repickFrom = async (it, locationId) => {
+    setRepickFor(null);
+    try {
+      await returnStock(it); // คืนของที่ตัดไว้ก่อน (กลับเข้ากองรอจัดเก็บ)
+      const { qty, pickText } = await deductStock(it, locationId);
+      await patchItem(it.id, { stock_deducted: true, stock_deducted_qty: qty, stock_pick: pickText });
+      if (pickText) alert(`เปลี่ยนที่หยิบแล้ว — ไปหยิบที่: ${pickText}`);
+    } catch (err) { alert('เปลี่ยนที่หยิบไม่สำเร็จ: ' + err.message); }
+  };
+
   const deleteItem = async (it) => {
     if (it.stock_deducted && it.stock_product_id) {
       try { await returnStock(it); } catch (err) { alert('คืนสต๊อกไม่สำเร็จ: ' + err.message); }
@@ -236,7 +297,7 @@ const ServicePrep = ({ service, onItemsChange, openSignal }) => {
     const patch = ns === 'stock' ? { source: 'stock' } : { source: ns, stock_product_id: null };
     if (it.stock_deducted && it.stock_product_id && ns !== 'stock') {
       // เคยตัดสต๊อกไว้ แล้วเปลี่ยนที่มาออกจากสต๊อก → คืนของก่อน
-      try { await returnStock(it); patch.stock_deducted = false; patch.stock_deducted_qty = null; }
+      try { await returnStock(it); patch.stock_deducted = false; patch.stock_deducted_qty = null; patch.stock_pick = null; }
       catch (err) { alert('คืนสต๊อกไม่สำเร็จ: ' + err.message); }
     }
     patchItem(it.id, patch);
@@ -254,9 +315,11 @@ const ServicePrep = ({ service, onItemsChange, openSignal }) => {
           await returnStock(it); // เปลี่ยนไปผูกตัวใหม่ → คืนของตัวเก่าก่อน
         }
         if (!it.stock_deducted || it.stock_product_id !== product.id) {
-          const qty = await deductStock({ ...it, ...patch });
+          const { qty, pickText } = await deductStock({ ...it, ...patch });
           patch.stock_deducted = true;
           patch.stock_deducted_qty = qty;
+          patch.stock_pick = pickText;
+          if (pickText) alert(`ตัดสต๊อกแล้ว — ไปหยิบที่: ${pickText}`);
         }
       } catch (err) { alert('ตัดสต๊อกไม่สำเร็จ: ' + err.message); }
     }
@@ -269,7 +332,7 @@ const ServicePrep = ({ service, onItemsChange, openSignal }) => {
     for (const it of items) { // คืนสต๊อกรายการที่เคยตัดไว้ก่อนล้างค่า
       if (it.stock_deducted && it.stock_product_id) { try { await returnStock(it); } catch { /* คืนพลาดไปเช็คที่เมนูสต๊อก */ } }
     }
-    await supabase.from('service_prep_items').update({ status: 'pending', source: null, unit_price: null, stock_product_id: null, stock_deducted: false, stock_deducted_qty: null }).eq('prep_id', prep.id);
+    await supabase.from('service_prep_items').update({ status: 'pending', source: null, unit_price: null, stock_product_id: null, stock_deducted: false, stock_deducted_qty: null, stock_pick: null }).eq('prep_id', prep.id);
     await supabase.from('service_preps').update({ status: 'in_progress' }).eq('id', prep.id);
     setConfirm(null); setConfirmText(''); setBusy(false); await load();
   };
@@ -319,7 +382,12 @@ const ServicePrep = ({ service, onItemsChange, openSignal }) => {
   const RoRow = ({ it, indent }) => (
     <div className={`flex flex-wrap items-center gap-2 py-1.5 ${indent ? 'pl-7' : 'pl-3'} pr-3`}>
       <span className={`w-2 h-2 rounded-full shrink-0 ${STATUS[it.status]?.dot}`} />
-      <span className="text-sm text-gray-800 flex-1 min-w-[120px]">{it.title}</span>
+      <span className="flex-1 min-w-[120px]">
+        <span className="text-sm text-gray-800">{it.title}</span>
+        {it.stock_deducted && it.stock_pick && (
+          <span className="block text-[10px] text-emerald-600 mt-0.5">หยิบที่: {it.stock_pick}</span>
+        )}
+      </span>
       {it.source && <span className="text-[10px] text-indigo-600 bg-indigo-50 rounded px-1.5 py-0.5">{SOURCE_LABEL[it.source]}</span>}
       <span className="flex items-baseline gap-1 bg-gray-100 rounded-md px-2 py-0.5 shrink-0"><span className="text-[10px] text-gray-400">จำนวน</span><span className="text-sm font-bold text-gray-800">{it.qty}</span></span>
       {Number(it.unit_price) > 0 && <span className="text-xs text-amber-600 font-medium w-20 text-right">฿{Number(it.unit_price).toLocaleString()}</span>}
@@ -503,7 +571,39 @@ const ServicePrep = ({ service, onItemsChange, openSignal }) => {
     return (
       <div key={it.id} className="flex flex-wrap items-center gap-2 py-2.5 px-2 border-b border-gray-50 last:border-0">
         <Box size={13} className="text-gray-300 shrink-0" />
-        <span className="text-sm text-gray-800 flex-1 min-w-[110px]">{it.title}{it._whole && <span className="text-[10px] text-gray-400"> (ทั้งชิ้น)</span>}</span>
+        <div className="flex-1 min-w-[110px]">
+          <span className="text-sm text-gray-800">{it.title}{it._whole && <span className="text-[10px] text-gray-400"> (ทั้งชิ้น)</span>}</span>
+          {it.stock_deducted && (
+            <span className="relative block mt-1" onClick={(e) => e.stopPropagation()}>
+              <button type="button" disabled={!canEdit}
+                onClick={() => (repickFor === it.id ? setRepickFor(null) : openRepick(it))}
+                title={`หยิบที่: ${it.stock_pick || '-'} — คลิกเพื่อเปลี่ยนที่หยิบ`}
+                className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-100 hover:border-emerald-300 rounded-md px-1.5 py-0.5 max-w-full truncate inline-block align-middle disabled:opacity-60">
+                หยิบ: {it.stock_pick || 'ตัดแล้ว'}
+              </button>
+              {repickFor === it.id && (
+                <>
+                  <span className="fixed inset-0 z-[130] block" onClick={() => setRepickFor(null)} />
+                  <span className="absolute z-[140] top-6 left-0 w-60 bg-white border border-gray-200 rounded-2xl shadow-xl p-2 block text-left cursor-default">
+                    <span className="block text-[10px] font-bold text-gray-400 px-2 pt-1 pb-1.5">เปลี่ยนที่หยิบ — คืนของเดิมแล้วตัดใหม่จากจุดที่เลือก</span>
+                    <button type="button" onClick={() => repickFrom(it, undefined)}
+                      className="w-full text-left px-2 py-1.5 rounded-lg text-xs hover:bg-indigo-50 font-bold text-indigo-600">
+                      อัตโนมัติ (FIFO ทุกคลัง)
+                    </button>
+                    {repickOptions.map((o, i) => (
+                      <button key={i} type="button" onClick={() => repickFrom(it, o.locationId)}
+                        className="w-full text-left px-2 py-1.5 rounded-lg text-xs hover:bg-gray-50 flex justify-between gap-2">
+                        <span className="truncate text-gray-700">{o.label}</span>
+                        <span className="text-gray-400 shrink-0">มี {o.qty}</span>
+                      </button>
+                    ))}
+                    {repickOptions.length === 0 && <span className="block text-xs text-gray-400 px-2 py-1.5">กำลังโหลด / ไม่มีของในจุดอื่น</span>}
+                  </span>
+                </>
+              )}
+            </span>
+          )}
+        </div>
 
         <span className="flex items-baseline gap-1 bg-gray-900 text-white rounded-lg px-2.5 py-1 shrink-0">
           <span className="text-[10px] opacity-60">จำนวน</span><span className="text-base font-black leading-none">{it.qty}</span>
@@ -528,7 +628,6 @@ const ServicePrep = ({ service, onItemsChange, openSignal }) => {
           className={`text-xs rounded-lg px-2.5 py-1.5 font-semibold transition-colors ${STATUS[it.status]?.chip} disabled:opacity-60`}>
           {STATUS[it.status]?.label}
         </button>
-        {it.stock_deducted && <span className="text-[9px] font-bold text-emerald-500 whitespace-nowrap">ตัดสต๊อกแล้ว</span>}
 
         {it.note != null
           ? <input disabled={!canEdit} value={it.note} placeholder="พิมพ์หมายเหตุ..." autoFocus={it.note === ''}

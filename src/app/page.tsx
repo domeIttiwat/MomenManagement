@@ -17,6 +17,7 @@ import AssemblyMain from './components/assembly/AssemblyMain';
 import StockMain from './components/stock/StockMain';
 import ProcurementMain from './components/procurement/ProcurementMain';
 import FinanceMain from './components/finance/FinanceMain';
+import NotificationBell from './components/common/NotificationBell';
 
 // สร้าง Wrapper Component
 const ALL_TABS = ['dashboard', 'products', 'stock', 'procurement', 'customers', 'orders', 'services', 'assembly', 'marketing', 'finance', 'users'];
@@ -71,6 +72,10 @@ const AppContent = () => {
   };
   const handleTabChange = (tab: any) => {
     if (canView(tab)) { setActiveTab(tab); setNavData(null); }
+  };
+  // กดแจ้งเตือน → เปิดการ์ดงานประกอบนั้นในหน้างานประกอบ
+  const handleOpenWorkCard = (cardId: any) => {
+    if (canView('assembly')) { setActiveTab('assembly'); setNavData({ target: 'work_card', id: cardId, timestamp: Date.now() }); }
   };
 
   return (
@@ -127,12 +132,15 @@ const AppContent = () => {
             />
           ) : <AccessDenied />)}
           {activeTab === 'services' && (canView('services') ? <ServiceMain /> : <AccessDenied />)}
-          {activeTab === 'assembly' && (canView('assembly') ? <AssemblyMain /> : <AccessDenied />)}
+          {activeTab === 'assembly' && (canView('assembly') ? <AssemblyMain initialNavData={navData?.target === 'work_card' ? navData : null} /> : <AccessDenied />)}
           {activeTab === 'marketing' && (canView('marketing') ? <MarketingMain /> : <AccessDenied />)}
           {activeTab === 'finance' && (canView('finance') ? <FinanceMain /> : <AccessDenied />)}
           {activeTab === 'users' && (canView('users') ? <UserMain /> : <AccessDenied />)}
         </div>
         </div>
+
+        {/* กระดิ่งแจ้งเตือนกลาง — เห็นจากทุกหน้า */}
+        <NotificationBell onOpenWorkCard={handleOpenWorkCard} />
       </main>
     </div>
   );

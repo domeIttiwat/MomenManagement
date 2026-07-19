@@ -40,3 +40,6 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 service-account-key.json
+
+_to_delete/
+.claude/settings.local.json

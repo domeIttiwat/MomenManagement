@@ -1,39 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, Edit, Trash2, Printer, Wrench, User, Calendar, Clock, DollarSign, CreditCard, Banknote, Landmark, X, History, FileText, CheckCircle2, AlertCircle, Truck, PauseCircle, XCircle, PlayCircle, Send, Paperclip, Loader2, Image as ImageIcon, MessageCircle, Eye, EyeOff, TrendingUp, ClipboardList, ListChecks } from 'lucide-react';
+import { ArrowLeft, Edit, Trash2, Printer, Wrench, User, Calendar, Clock, DollarSign, CreditCard, Banknote, Landmark, X, History, FileText, CheckCircle2, AlertCircle, Truck, PauseCircle, XCircle, PlayCircle, Send, Paperclip, Loader2, Image as ImageIcon, MessageCircle, Eye, EyeOff, TrendingUp } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
 import ServiceBillPreview from './ServiceBillPreview';
 import AuditLogPanel from '@/app/components/common/AuditLogPanel';
 import ServicePrep from './ServicePrep';
-
-// chip สถานะการเตรียมของ — ใช้โชว์บนอะไหล่แต่ละตัวในรายการซ่อม
-const PREP_CHIP = {
-  pending:     { label: 'ยังไม่เตรียม', cls: 'bg-gray-100 text-gray-500' },
-  in_progress: { label: 'กำลังเตรียม',  cls: 'bg-amber-100 text-amber-700' },
-  done:        { label: 'เตรียมแล้ว',   cls: 'bg-emerald-100 text-emerald-700' },
-};
+import WorkCardStrip from '../assembly/WorkCardStrip';
 
 const ServiceDetail = ({ service, onBack, onEdit, onDelete, showProfit, setShowProfit }) => {
   const { can } = useAuth();
   const [showBill, setShowBill] = useState(false);
   const [lightboxImg, setLightboxImg] = useState(null);
-  const [prepItems, setPrepItems] = useState([]); // รายการจาก ServicePrep (sync ให้เอง)
-  const [prepSignal, setPrepSignal] = useState(0); // กดปุ่มบนหัวข้อรายการซ่อม → สั่ง ServicePrep เริ่ม/เปิดป๊อปอัพ
-
-  // map ชื่อรายการ → สถานะเตรียม (นับเฉพาะ leaf จริง)
-  const prepStatusByTitle = React.useMemo(() => {
-    const parents = new Set(prepItems.filter((x) => x.parent_item_id).map((x) => x.parent_item_id));
-    const map = {};
-    prepItems.forEach((x) => {
-      const isLeaf = x.kind !== 'product' || !parents.has(x.id);
-      if (isLeaf && x.title) map[x.title.trim()] = x.status;
-    });
-    return map;
-  }, [prepItems]);
-  const prepChip = (title) => {
-    const st = prepStatusByTitle[(title || '').trim()];
-    return st ? PREP_CHIP[st] : null;
-  };
 
   // Timeline State
   const [updates, setUpdates] = useState(service?.service_updates || []);
@@ -149,12 +126,11 @@ const ServiceDetail = ({ service, onBack, onEdit, onDelete, showProfit, setShowP
 
   const getStatusDisplay = (status, reason) => {
     switch (status) {
-      case 'Assessing': return { color: 'bg-cyan-100 text-cyan-700 border-cyan-200', icon: ClipboardList, label: 'รอประเมิน' };
       case 'Waiting':
         if (reason === 'รอคิว') return { color: 'bg-orange-100 text-orange-700 border-orange-200', icon: PauseCircle, label: 'รอคิว' };
         if (reason === 'รออะไหล่') return { color: 'bg-red-100 text-red-700 border-red-200', icon: AlertCircle, label: 'รออะไหล่' };
         return { color: 'bg-yellow-100 text-yellow-800 border-yellow-200', icon: Clock, label: reason ? `รอ: ${reason}` : 'รอทำ' };
-
+      
       case 'In Progress': return { color: 'bg-blue-100 text-blue-700 border-blue-200', icon: Wrench, label: 'ส่งทำ' };
       case 'Tested': return { color: 'bg-purple-100 text-purple-700 border-purple-200', icon: PlayCircle, label: 'ทดสอบแล้ว' };
       case 'Delivered': return { color: 'bg-teal-100 text-teal-700 border-teal-200', icon: Truck, label: 'รอส่ง' };
@@ -297,15 +273,7 @@ const ServiceDetail = ({ service, onBack, onEdit, onDelete, showProfit, setShowP
                  </div>
               </div>
 
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-bold text-gray-800 flex items-center gap-2"><Wrench size={18}/> รายการซ่อม</h3>
-                {can('assembly', 'prepare') && (
-                  <button onClick={() => setPrepSignal((s) => s + 1)}
-                    className="text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-100 px-3 py-1.5 rounded-xl flex items-center gap-1.5 active:scale-95 transition-all">
-                    <ListChecks size={14} /> เช็คลิสต์เตรียมอะไหล่
-                  </button>
-                )}
-              </div>
+              <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><Wrench size={18}/> รายการซ่อม</h3>
               <div className="space-y-4 mb-6">
                   {service.service_items?.map((item, i) => (
                     <div key={i} className="border border-gray-100 rounded-xl p-4 bg-gray-50/50">
@@ -313,10 +281,6 @@ const ServiceDetail = ({ service, onBack, onEdit, onDelete, showProfit, setShowP
                            <div>
                               <p className="font-bold text-gray-800">{item.description}</p>
                               <span className="text-[10px] bg-white border px-2 py-0.5 rounded text-gray-500">{item.type}</span>
-                              {(!item.sub_items || item.sub_items.length === 0) && (() => {
-                                const c = prepChip(item.description);
-                                return c ? <span className={`ml-1.5 text-[10px] px-2 py-0.5 rounded-full font-semibold ${c.cls}`}>{c.label}</span> : null;
-                              })()}
                            </div>
                            <div className="text-right">
                               <p className="font-bold text-indigo-700">฿{item.sell_price.toLocaleString()}</p>
@@ -325,18 +289,12 @@ const ServiceDetail = ({ service, onBack, onEdit, onDelete, showProfit, setShowP
                         </div>
                         {item.sub_items && item.sub_items.length > 0 && (
                             <div className="mt-3 pl-4 border-l-2 border-indigo-100 space-y-1">
-                                {item.sub_items.map((sub, sIdx) => {
-                                    const c = prepChip(sub.description);
-                                    return (
-                                    <div key={sIdx} className="flex items-center justify-between gap-2 text-xs text-gray-600">
-                                        <span className="min-w-0 truncate">• {sub.description} <span className="text-[9px] text-gray-400">({sub.type})</span></span>
-                                        <span className="flex items-center gap-2 shrink-0">
-                                            {c && <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-semibold ${c.cls}`}>{c.label}</span>}
-                                            <span>฿{Number(sub.price).toLocaleString()}</span>
-                                        </span>
+                                {item.sub_items.map((sub, sIdx) => (
+                                    <div key={sIdx} className="flex justify-between text-xs text-gray-600">
+                                        <span>• {sub.description} <span className="text-[9px] text-gray-400">({sub.type})</span></span>
+                                        <span>฿{Number(sub.price).toLocaleString()}</span>
                                     </div>
-                                    );
-                                })}
+                                ))}
                             </div>
                         )}
                     </div>
@@ -362,9 +320,6 @@ const ServiceDetail = ({ service, onBack, onEdit, onDelete, showProfit, setShowP
                  </div>
               </div>
            </div>
-
-           {/* การจัดเตรียมของ — เช็คลิสต์เตรียมอะไหล่ (ระบบเดียวกับฝั่งคำสั่งซื้อ) */}
-           <ServicePrep service={service} onItemsChange={setPrepItems} openSignal={prepSignal} />
 
            {/* Timeline Feed (Facebook Style) */}
            <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
@@ -605,6 +560,16 @@ const ServiceDetail = ({ service, onBack, onEdit, onDelete, showProfit, setShowP
           )}
         </div>
       )}
+
+      {/* การจัดเตรียมของ — ระบบเดียวกับหน้าคำสั่งซื้อ (OrderPrep) */}
+      <div className="mt-4">
+        <ServicePrep service={service} />
+      </div>
+
+      {/* การ์ดงานประกอบของงานซ่อมนี้ */}
+      <div className="mt-4">
+        <WorkCardStrip refType="service" refId={service.id} refLabel={service.service_number} />
+      </div>
 
       {/* Audit Log */}
       <AuditLogPanel resourceType="service" resourceId={service.id} title="ประวัติการเปลี่ยนแปลง" compact />
