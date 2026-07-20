@@ -19,7 +19,8 @@ const ServiceForm = ({ onCancel, onSuccess, initialData }) => {
   const meRef = () => profile ? { id: profile.id, name: `${profile.first_name} ${profile.last_name}` } : null;
   const [loading, setLoading] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
-  const [deductStock, setDeductStock] = useState(true);
+  // ปิดเป็นค่าเริ่มต้น — การตัดสต๊อกจริงทำที่ระบบเตรียมของ/งานประกอบ (ดึงจากสต๊อก) ไม่ผูกกับการสร้างงาน
+  const [deductStock, setDeductStock] = useState(false);
   
   const getLocalDate = () => new Date().toISOString().split('T')[0];
 
@@ -203,7 +204,7 @@ const ServiceForm = ({ onCancel, onSuccess, initialData }) => {
             quantity: item.quantity || 1,
             note: `งานซ่อม ${formData.service_number}`,
             reference_type: 'service',
-            reference_id: serviceId,
+            // ห้ามส่ง reference_id — คอลัมน์เป็น uuid แต่ services.id เป็นตัวเลข insert จะพัง (เลขงานอยู่ใน note แล้ว)
             created_by: meRef()?.id || profile?.id,
           }]).select('id').single();
           if (txError) throw txError;
@@ -212,7 +213,6 @@ const ServiceForm = ({ onCancel, onSuccess, initialData }) => {
             variantId: item.variant_id || null,
             quantity: item.quantity || 1,
             referenceType: 'service',
-            referenceId: serviceId,
             stockTransactionId: txRow?.id,
             profileId: meRef()?.id || profile?.id,
             syncSummary: true,
@@ -396,7 +396,7 @@ const ServiceForm = ({ onCancel, onSuccess, initialData }) => {
                   <div className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${deductStock ? 'translate-x-5' : 'translate-x-0'}`} />
                 </div>
                 <label className="text-sm font-medium text-teal-800 cursor-pointer" onClick={() => setDeductStock(v => !v)}>
-                  ตัดสต๊อกอัตโนมัติเมื่อบันทึก
+                  ตัดสต๊อกทันทีเมื่อบันทึก <span className="text-xs text-teal-600 font-normal">(ปกติไม่ต้องเปิด — ไปตัดตอนเตรียมของ/งานประกอบ)</span>
                 </label>
               </div>
             )}

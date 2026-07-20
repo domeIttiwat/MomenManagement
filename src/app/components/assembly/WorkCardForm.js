@@ -152,25 +152,44 @@ const WorkCardForm = ({ initialData = null, presetRef = null, profile, onClose, 
 
   const overloaded = assignees.filter((a) => (workload[a.id] || 0) >= WIP_LIMIT);
 
-  // ค้นหาออเดอร์/งานซ่อมเพื่อผูก
-  // ตัดออก: ยังไม่จ่ายเงิน (เสนอราคา / รอประเมิน) และงานที่จบหรือยกเลิกไปแล้ว
+  // งานที่ผูกได้: whitelist เฉพาะที่จ่ายเงิน/มัดจำ/ตกลงทำแล้ว และยังไม่จบ — โหลดชุดเดียวแล้วค้นหาฝั่งหน้าจอ
+  // ค้นได้ทั้ง เลขออเดอร์ / ชื่อ-ชื่อเล่นลูกค้า / เบอร์โทร / ชื่อรุ่นรถ-สินค้า / อาการซ่อม
+  const [refAll, setRefAll] = useState([]);
   useEffect(() => {
-    if (!refPicking) return;
-    const t = setTimeout(async () => {
+    if (!refPicking) { setRefAll([]); setRefResults([]); return; }
+    (async () => {
       if (refPicking === 'order') {
-        let q = supabase.from('orders').select('id, order_number, status, customer_cache, images, order_items(product_name)').order('created_at', { ascending: false }).limit(15);
-        if (refSearch.trim()) q = q.ilike('order_number', `%${refSearch.trim()}%`);
-        const { data } = await q;
-        setRefResults((data || []).filter((o) => !['Quotation', 'Completed', 'Cancelled'].includes(o.status)));
+        const { data } = await supabase.from('orders')
+          .select('id, order_number, status, customer_cache, images, order_items(product_name)')
+          .in('status', ['Deposit', 'Paid', 'Assembling', 'Shipping'])
+          .order('created_at', { ascending: false }).limit(100);
+        setRefAll(data || []);
       } else {
-        let q = supabase.from('services').select('id, service_number, status, customer_cache, images, service_items(description)').order('created_at', { ascending: false }).limit(15);
-        if (refSearch.trim()) q = q.ilike('service_number', `%${refSearch.trim()}%`);
-        const { data } = await q;
-        setRefResults((data || []).filter((s) => !['Assessing', 'Completed', 'Cancelled'].includes(s.status)));
+        const { data } = await supabase.from('services')
+          .select('id, service_number, status, customer_cache, images, service_items(description)')
+          .in('status', ['Waiting', 'In Progress', 'Tested', 'Delivered'])
+          .order('created_at', { ascending: false }).limit(100);
+        setRefAll(data || []);
       }
-    }, 250);
-    return () => clearTimeout(t);
-  }, [refSearch, refPicking]);
+    })();
+  }, [refPicking]);
+
+  useEffect(() => {
+    const q = refSearch.trim().toLowerCase();
+    const match = (r) => {
+      if (!q) return true;
+      const cc = r.customer_cache || {};
+      const hay = [
+        refPicking === 'order' ? r.order_number : r.service_number,
+        cc.first_name, cc.last_name, cc.nickname, cc.phone,
+        ...(refPicking === 'order'
+          ? (r.order_items || []).map((x) => x.product_name)
+          : (r.service_items || []).map((x) => x.description)),
+      ].filter(Boolean).join(' ').toLowerCase();
+      return hay.includes(q);
+    };
+    setRefResults(refAll.filter(match).slice(0, 30));
+  }, [refSearch, refAll, refPicking]);
 
   // ป้ายสถานะไทยของงานที่จะผูก
   const REF_STATUS_TH = {
@@ -379,7 +398,7 @@ const WorkCardForm = ({ initialData = null, presetRef = null, profile, onClose, 
                   <div className="relative">
                     <Search className="absolute left-3 top-3 text-gray-400" size={16} />
                     <input autoFocus value={refSearch} onChange={(e) => setRefSearch(e.target.value)}
-                      placeholder={refPicking === 'order' ? 'ค้นหาเลขออเดอร์...' : 'ค้นหาเลขใบงานซ่อม...'}
+                      placeholder={refPicking === 'order' ? 'ค้นหา: รุ่นรถ / ชื่อลูกค้า / เลขออเดอร์...' : 'ค้นหา: อาการ / ชื่อลูกค้า / เลขใบงาน...'}
                       className="w-full pl-10 pr-3 py-2.5 bg-white border border-gray-200 rounded-xl text-sm outline-none focus:border-indigo-400" />
                     <button onClick={() => setRefPicking(null)} className="absolute right-2 top-2 p-1 text-gray-400 hover:bg-gray-100 rounded-full"><X size={16} /></button>
                   </div>
@@ -416,7 +435,7 @@ const WorkCardForm = ({ initialData = null, presetRef = null, profile, onClose, 
                         </button>
                       );
                     })}
-                    {refResults.length === 0 && <p className="text-xs text-gray-400 text-center py-3">— ไม่พบงานที่ผูกได้ (งานที่ยังไม่จ่ายเงินหรือจบแล้วจะไม่แสดง) —</p>}
+                    {refResults.length === 0 && <p className="text-xs text-gray-400 text-center py-3">— ไม่พบ (แสดงเฉพาะงานที่มัดจำ/จ่ายเงิน/ตกลงทำแล้ว และยังไม่จบ) —</p>}
                   </div>
                 </div>
               ) : (

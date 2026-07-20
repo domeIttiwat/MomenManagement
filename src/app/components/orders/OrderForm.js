@@ -60,7 +60,8 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
   const meRef = () => profile ? { id: profile.id, name: `${profile.first_name} ${profile.last_name}` } : null;
   const [loading, setLoading] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
-  const [deductStock, setDeductStock] = useState(true);
+  // ปิดเป็นค่าเริ่มต้น — การตัดสต๊อกจริงทำที่ระบบเตรียมของ/งานประกอบ (ดึงจากสต๊อก) ไม่ผูกกับการสร้างออเดอร์
+  const [deductStock, setDeductStock] = useState(false);
 
   // State for Suggestion Modal
   const [suggestionProduct, setSuggestionProduct] = useState(null);
@@ -419,7 +420,13 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
         await supabase.from('order_updates').delete().eq('order_id', orderId);
         await supabase.from('order_assignees').delete().eq('order_id', orderId);
       } else {
-        const { data } = await supabase.from('orders').insert([{ ...orderPayload, created_by: meRef() }]).select().single();
+        const { data, error: insErr } = await supabase.from('orders').insert([{ ...orderPayload, created_by: meRef() }]).select().single();
+        if (insErr) {
+          // โชว์สาเหตุจริงแทน "reading 'id' of null"
+          if (insErr.code === '23505') throw new Error(`เลขออเดอร์ "${formData.order_number}" ถูกใช้ไปแล้ว — เปลี่ยนเลขออเดอร์แล้วกดบันทึกใหม่`);
+          throw insErr;
+        }
+        if (!data?.id) throw new Error('บันทึกออเดอร์ไม่สำเร็จ — ไม่ได้รับข้อมูลกลับจากระบบ ลองใหม่อีกครั้ง');
         orderId = data.id;
       }
 
@@ -450,7 +457,7 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
             quantity: item.quantity,
             note: `ออเดอร์ ${formData.order_number}`,
             reference_type: 'order',
-            reference_id: orderId,
+            // ห้ามส่ง reference_id — คอลัมน์เป็น uuid แต่ orders.id เป็นตัวเลข insert จะพัง (เลขออเดอร์อยู่ใน note แล้ว)
             created_by: meRef()?.id || profile?.id,
           }]).select('id').single();
           if (txError) throw txError;
@@ -459,7 +466,6 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
             variantId: item.variant_id || null,
             quantity: item.quantity,
             referenceType: 'order',
-            referenceId: orderId,
             stockTransactionId: txRow?.id,
             profileId: meRef()?.id || profile?.id,
             syncSummary: true,
@@ -625,7 +631,7 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
                     <div className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${deductStock ? 'translate-x-5' : 'translate-x-0'}`} />
                   </div>
                   <label className="text-sm font-medium text-teal-800 cursor-pointer" onClick={() => setDeductStock(v => !v)}>
-                    ตัดสต๊อกอัตโนมัติเมื่อบันทึก
+                    ตัดสต๊อกทันทีเมื่อบันทึก <span className="text-xs text-teal-600 font-normal">(ปกติไม่ต้องเปิด — ไปตัดตอนเตรียมของ/งานประกอบ)</span>
                   </label>
                 </div>
               )}

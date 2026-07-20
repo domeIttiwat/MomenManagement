@@ -19,6 +19,8 @@ const fmtTime = (iso) => {
  */
 const MaterialPrepPanel = ({ referenceType, referenceId, noteLabel = '', customerName = null }) => {
   const { can, profile } = useAuth();
+  // stock_transactions.reference_id เป็น uuid — ถ้า id อ้างอิงเป็นตัวเลข (order/service) ห้ามส่ง ไม่งั้น insert พังทั้งก้อน
+  const safeRefId = typeof referenceId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(referenceId) ? referenceId : null;
 
   const [withdrawals, setWithdrawals] = useState([]);
   const [formOpen, setFormOpen] = useState(false);
@@ -85,12 +87,12 @@ const MaterialPrepPanel = ({ referenceType, referenceId, noteLabel = '', custome
         product_id: product.id, variant_id: variant?.id || null,
         transaction_type: 'stock_out', quantity: qty,
         store_id: item.location?.store?.id || null, location_id: item.location_id || null,
-        note: autoNote('เบิกใช้งาน'), reference_type: referenceType, reference_id: referenceId, created_by: profile?.id,
+        note: autoNote('เบิกใช้งาน'), reference_type: referenceType, reference_id: safeRefId, created_by: profile?.id,
       }]).select('id').single();
       if (txError) throw txError;
       const lotResult = await allocateFifoStockOut({
         productId: product.id, variantId: variant?.id || null, locationId: item.location_id || null,
-        quantity: qty, referenceType, referenceId, stockTransactionId: txRow?.id, profileId: profile?.id, syncSummary: true,
+        quantity: qty, referenceType, referenceId: safeRefId, stockTransactionId: txRow?.id, profileId: profile?.id, syncSummary: true,
       });
       await supabase.from('stock_transactions').update({ unit_cost_thb: lotResult.weightedUnitCost, total_cost_thb: lotResult.totalCost }).eq('id', txRow.id);
       resetForm();
@@ -113,7 +115,7 @@ const MaterialPrepPanel = ({ referenceType, referenceId, noteLabel = '', custome
         product_id: tx.product_id, variant_id: tx.variant_id || null,
         transaction_type: 'stock_in', quantity: tx.quantity,
         store_id: tx.store_id || null, location_id: tx.location_id || null,
-        note, reference_type: referenceType, reference_id: referenceId, created_by: profile?.id,
+        note, reference_type: referenceType, reference_id: safeRefId, created_by: profile?.id,
         unit_cost_thb: unit, total_cost_thb: unit * tx.quantity,
       }]);
       await createStockLot({
