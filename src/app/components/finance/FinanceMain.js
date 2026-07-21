@@ -1263,6 +1263,54 @@ const ExpenseTrendCard = ({ scoped, categories, mode, start, end }) => {
 
   const chartData = compare ? data.map(r => ({ ...r, prev: prevArr[r.k] ?? 0 })) : data;
 
+  // รายการจริงของแต่ละแท่ง/จุด — เอาเมาส์ชี้แล้วเห็นว่าวันนั้นจ่ายอะไรบ้าง หมวดไหน เท่าไหร่
+  const txnsByKey = useMemo(() => {
+    const keyOf = (d) => mode === 'month' ? new Date(d).getDate() : new Date(d).getMonth();
+    const m = {};
+    expTxns.forEach(t => {
+      const g = grp(t.category_id);
+      if (sel.length > 0 && !sel.includes(g.id)) return; // เลือกหมวดอยู่ → ลิสต์เฉพาะหมวดที่เลือก
+      const k = keyOf(t.txn_date);
+      (m[k] = m[k] || []).push({
+        name: t.note || t.category?.name || 'รายจ่าย',
+        cat: catById[t.category_id]?.name || g.name,
+        color: g.color,
+        amount: Number(t.amount || 0),
+      });
+    });
+    Object.values(m).forEach(list => list.sort((a, b) => b.amount - a.amount));
+    return m;
+  }, [expTxns, mode, sel.join(','), catById]); // eslint-disable-line
+
+  const TrendTip = ({ active, payload, label }) => {
+    if (!active || !payload?.length) return null;
+    const row = payload[0]?.payload || {};
+    const list = txnsByKey[row.k] || [];
+    const MAX = 12;
+    return (
+      <div className="bg-white rounded-2xl shadow-xl border border-stone-200 p-3 min-w-[220px] max-w-[320px]">
+        <div className="flex items-center justify-between gap-4 pb-1.5 border-b border-stone-100">
+          <span className="text-[11px] font-bold text-gray-500">{mode === 'month' ? `วันที่ ${label}` : label}</span>
+          <span className="text-sm font-black text-gray-900">{baht(row.total || 0)}</span>
+        </div>
+        {compare && row.prev != null && <p className="text-[10px] text-gray-400 mt-1">ช่วงก่อนหน้า {baht(row.prev)}</p>}
+        <div className="mt-1.5 space-y-1">
+          {list.slice(0, MAX).map((r, i) => (
+            <div key={i} className="flex items-center gap-1.5 text-[11px] leading-tight">
+              <span className="w-2.5 h-[3px] rounded-full shrink-0" style={{ backgroundColor: r.color }} />
+              <span className="flex-1 min-w-0 truncate text-gray-600">
+                {r.name}<span className="text-gray-400"> · {r.cat}</span>
+              </span>
+              <span className="font-bold text-gray-800 shrink-0">{baht(r.amount)}</span>
+            </div>
+          ))}
+          {list.length > MAX && <p className="text-[10px] text-gray-400 text-center pt-0.5">+ อีก {list.length - MAX} รายการ</p>}
+          {list.length === 0 && <p className="text-[10px] text-gray-400 text-center py-1">ไม่มีรายการในช่องนี้</p>}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="bg-white rounded-3xl border border-gray-100 shadow-sm p-5">
       <div className="flex items-start justify-between gap-3 flex-wrap mb-3">
@@ -1296,7 +1344,7 @@ const ExpenseTrendCard = ({ scoped, categories, mode, start, end }) => {
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
               <XAxis dataKey="label" tick={{ fontSize: 11 }} stroke="#94a3b8" interval="preserveStartEnd" minTickGap={4} />
               <YAxis tick={{ fontSize: 11 }} stroke="#94a3b8" tickFormatter={(v) => v >= 1000 ? `${v / 1000}k` : v} />
-              <Tooltip formatter={(v) => baht(v)} contentStyle={{ borderRadius: 12, border: '1px solid #e7e5e4', fontSize: 12 }} />
+              <Tooltip content={<TrendTip />} cursor={{ fill: 'rgba(120,113,108,0.06)' }} wrapperStyle={{ zIndex: 20 }} />
               <Legend wrapperStyle={{ fontSize: 12 }} />
               {axis.todayLabel != null && <ReferenceLine x={axis.todayLabel} stroke="#78716c" strokeDasharray="4 3" label={{ value: 'วันนี้', position: 'top', fontSize: 10, fill: '#78716c' }} />}
               {chartType === 'bar'
@@ -1441,8 +1489,12 @@ const ReconcileModal = ({ systemBalance, monthCtx = null, recons = [], categorie
   const [note, setNote] = useState('');
   const [files, setFiles] = useState([]);
   const [saving, setSaving] = useState(false);
+  // โหมดง่าย (ค่าเริ่มต้น): กรอกยอดเดียวว่าจะให้ระบบเหลือเท่าไหร่ | โหมดแยกบัญชี: นับทีละบัญชีแบบเดิม
+  const [multiMode, setMultiMode] = useState(false);
+  const [targetStr, setTargetStr] = useState('');
 
-  const counted = lines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
+  const counted = multiMode ? lines.reduce((s, l) => s + (Number(l.amount) || 0), 0) : (Number(targetStr) || 0);
+  const hasInput = multiMode ? lines.some(l => l.amount !== '') : targetStr !== '';
   const diff = counted - systemBalance;
   const even = Math.round(diff * 100) === 0;
   const over = diff > 0;
@@ -1453,8 +1505,8 @@ const ReconcileModal = ({ systemBalance, monthCtx = null, recons = [], categorie
 
   const save = async () => {
     if (!reason.trim()) return alert('กรอกเหตุผลการปรับยอด');
-    if (lines.every(l => !l.amount)) return alert('กรอกยอดเงินจริงอย่างน้อย 1 บัญชี');
-    if (!window.confirm(even ? 'ยอดตรงพอดี จะบันทึกการกระทบยอดนี้ไว้?' : `ยืนยันปรับยอด: ${over ? 'เงินเกิน' : 'เงินขาด'} ${baht(Math.abs(diff))} ?`)) return;
+    if (!hasInput) return alert(multiMode ? 'กรอกยอดเงินจริงอย่างน้อย 1 บัญชี' : 'กรอกยอดที่ต้องการให้ระบบเหลือก่อน');
+    if (!window.confirm(even ? 'ยอดตรงพอดี จะบันทึกการกระทบยอดนี้ไว้?' : `ยืนยันปรับยอด ${over ? 'เพิ่ม' : 'ลด'} ${baht(Math.abs(diff))} — หลังบันทึก ยอดในระบบจะเหลือ ${baht(counted)} ?`)) return;
     setSaving(true);
     try {
       const images = [];
@@ -1475,13 +1527,28 @@ const ReconcileModal = ({ systemBalance, monthCtx = null, recons = [], categorie
         if (error) throw error;
         txnId = tx?.id || null;
       }
-      const accounts = lines.filter(l => l.amount).map(l => ({ name: l.name.trim() || 'ไม่ระบุ', amount: Number(l.amount) || 0 }));
+      const accounts = multiMode
+        ? lines.filter(l => l.amount).map(l => ({ name: l.name.trim() || 'ไม่ระบุ', amount: Number(l.amount) || 0 }))
+        : [{ name: 'ยอดรวม', amount: counted }];
       const { error: rerr } = await supabase.from('finance_reconciliations').insert([{ recon_date: date, system_balance: systemBalance, counted_total: counted, diff, accounts, reason: reason.trim(), note: note.trim() || null, images, txn_id: txnId, created_by: meRef() }]);
       if (rerr) throw rerr;
       await logAction({ resource_type: 'finance', action: 'create', resource_label: `ปรับยอด ${even ? 'ตรงพอดี' : over ? 'เกิน' : 'ขาด'} ${baht(Math.abs(diff))}`, created_by: meRef() });
       onSaved();
     } catch (err) { alert('บันทึกไม่สำเร็จ: ' + err.message); }
     finally { setSaving(false); }
+  };
+
+  // ยกเลิกการปรับยอดที่ทำผิด — ลบรายการปรับยอด+บันทึกกระทบยอด ยอดในระบบกลับเป็นเหมือนก่อนปรับ
+  const cancelRecon = async (r) => {
+    const d = Number(r.diff);
+    if (!window.confirm(`ยกเลิกการปรับยอดวันที่ ${reconDateLabel(r.recon_date)} (${Math.round(d * 100) === 0 ? 'ตรงพอดี' : (d > 0 ? 'เกิน ' : 'ขาด ') + baht(Math.abs(d))})?\nรายการปรับยอดจะถูกลบ และยอดในระบบกลับเป็นเหมือนก่อนปรับ`)) return;
+    try {
+      if (r.txn_id) await supabase.from('finance_transactions').delete().eq('id', r.txn_id);
+      const { error } = await supabase.from('finance_reconciliations').delete().eq('id', r.id);
+      if (error) throw error;
+      await logAction({ resource_type: 'finance', action: 'delete', resource_label: `ยกเลิกปรับยอด ${baht(Math.abs(d))} (${reconDateLabel(r.recon_date)})`, created_by: meRef() });
+      onSaved();
+    } catch (err) { alert('ยกเลิกไม่สำเร็จ: ' + err.message); }
   };
 
   return (
@@ -1508,33 +1575,53 @@ const ReconcileModal = ({ systemBalance, monthCtx = null, recons = [], categorie
         </div>
 
         <div>
-          <div className="flex items-center justify-between mb-2">
-            <label className="text-sm font-bold text-gray-700">ยอดเงินจริงที่นับได้ (แยกบัญชี)</label>
-            <input type="date" value={date} onChange={e => setDate(e.target.value)} className="text-xs px-2 py-1.5 bg-gray-50 border border-gray-200 rounded-lg outline-none" />
+          <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
+            <label className="text-sm font-bold text-gray-700">{multiMode ? 'ยอดเงินจริงที่นับได้ (แยกบัญชี)' : 'จะปรับให้ระบบเหลือเงินเท่าไหร่?'}</label>
+            <div className="flex items-center gap-2">
+              <button onClick={() => setMultiMode(v => !v)} className="text-[11px] font-bold text-stone-500 hover:text-stone-700 underline">
+                {multiMode ? '← กรอกยอดเดียวแบบง่าย' : 'นับแยกหลายบัญชี?'}
+              </button>
+              <input type="date" value={date} onChange={e => setDate(e.target.value)} className="text-xs px-2 py-1.5 bg-gray-50 border border-gray-200 rounded-lg outline-none" />
+            </div>
           </div>
-          <div className="space-y-2">
-            {lines.map((l, i) => (
-              <div key={i} className="flex items-center gap-2">
-                <input value={l.name} onChange={e => setLine(i, 'name', e.target.value)} placeholder="ชื่อบัญชี เช่น ธนาคาร SCB, เงินสด" className={`${inputCls} flex-1`} />
-                <input type="number" min="0" value={l.amount} onChange={e => setLine(i, 'amount', e.target.value)} placeholder="0" className={`${inputCls} w-32 text-right font-bold`} />
-                <button onClick={() => rmLine(i)} className="p-1.5 text-gray-300 hover:text-red-500 shrink-0"><Trash2 size={16} /></button>
+          {multiMode ? (
+            <>
+              <div className="space-y-2">
+                {lines.map((l, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <input value={l.name} onChange={e => setLine(i, 'name', e.target.value)} placeholder="ชื่อบัญชี เช่น ธนาคาร SCB, เงินสด" className={`${inputCls} flex-1`} />
+                    <input type="number" min="0" value={l.amount} onChange={e => setLine(i, 'amount', e.target.value)} placeholder="0" className={`${inputCls} w-32 text-right font-bold`} />
+                    <button onClick={() => rmLine(i)} className="p-1.5 text-gray-300 hover:text-red-500 shrink-0"><Trash2 size={16} /></button>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-          <button onClick={addLine} className="mt-2 text-sm font-semibold text-stone-600 hover:bg-stone-100 px-2.5 py-1.5 rounded-lg flex items-center gap-1"><Plus size={14} /> เพิ่มบัญชี</button>
+              <button onClick={addLine} className="mt-2 text-sm font-semibold text-stone-600 hover:bg-stone-100 px-2.5 py-1.5 rounded-lg flex items-center gap-1"><Plus size={14} /> เพิ่มบัญชี</button>
+            </>
+          ) : (
+            <div className="relative">
+              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-xl font-black text-gray-300">฿</span>
+              <input type="number" min="0" autoFocus value={targetStr} onChange={e => setTargetStr(e.target.value)}
+                placeholder="กรอกยอดเงินจริงที่นับได้ตอนนี้"
+                className="w-full pl-10 pr-4 py-4 bg-stone-50 border-2 border-stone-200 focus:border-stone-500 rounded-2xl outline-none text-2xl font-black text-right text-gray-900" />
+            </div>
+          )}
         </div>
 
-        {/* สรุปส่วนต่าง */}
+        {/* สรุปให้เห็นชัด: ระบบมีเท่าไหร่ → จะให้เหลือเท่าไหร่ → ปรับเท่าไหร่ */}
         <div className="rounded-2xl border border-stone-200 p-4 space-y-1.5">
-          <div className="flex justify-between text-sm"><span className="text-gray-500">นับได้รวม</span><span className="font-bold text-gray-800">{baht(counted)}</span></div>
-          <div className="flex justify-between text-sm"><span className="text-gray-500">ยอดในระบบ</span><span className="font-bold text-gray-800">{baht(systemBalance)}</span></div>
+          <div className="flex justify-between text-sm"><span className="text-gray-500">1. ยอดในระบบตอนนี้</span><span className="font-bold text-gray-800">{baht(systemBalance)}</span></div>
+          <div className="flex justify-between text-sm"><span className="text-gray-500">2. จะปรับให้เหลือ</span><span className="font-bold text-gray-800">{hasInput ? baht(counted) : '— กรอกด้านบน —'}</span></div>
           <div className="flex justify-between items-center pt-1.5 border-t border-stone-100">
-            <span className="text-sm font-bold text-gray-700">ส่วนต่าง</span>
-            <span className="text-lg font-black" style={{ color: even ? '#78716c' : over ? EARTH.income : EARTH.expense }}>
-              {even ? 'ตรงพอดี' : `${over ? 'เกิน ' : 'ขาด '}${baht(Math.abs(diff))}`}
+            <span className="text-sm font-bold text-gray-700">3. ยอดที่ระบบจะปรับ</span>
+            <span className="text-lg font-black" style={{ color: !hasInput ? '#a8a29e' : even ? '#78716c' : over ? EARTH.income : EARTH.expense }}>
+              {!hasInput ? '—' : even ? 'ตรงพอดี ไม่ต้องปรับ' : `${over ? 'ปรับเพิ่ม +' : 'ปรับลด −'}${baht(Math.abs(diff))}`}
             </span>
           </div>
-          {!even && <p className="text-[11px] text-gray-400">ระบบจะบันทึกรายการ{over ? 'รายรับ (เงินเกิน)' : 'รายจ่าย (เงินขาด)'} {baht(Math.abs(diff))} เพื่อปรับยอดให้ตรงกับเงินจริง</p>}
+          {hasInput && !even && (
+            <p className="text-[11px] text-gray-400">
+              ระบบจะบันทึกรายการ{over ? 'รายรับ (เงินเกิน)' : 'รายจ่าย (เงินขาด)'} {baht(Math.abs(diff))} → หลังบันทึก ยอดในระบบ = <b className="text-gray-600">{baht(counted)}</b>
+            </p>
+          )}
         </div>
 
         <div>
@@ -1570,6 +1657,10 @@ const ReconcileModal = ({ systemBalance, monthCtx = null, recons = [], categorie
                       <p className="text-xs text-gray-500 truncate">{r.reason || '—'}</p>
                       <p className="text-[11px] text-gray-400">นับได้ {baht(r.counted_total)} / ระบบ {baht(r.system_balance)}{r.created_by?.name ? ` · โดย ${r.created_by.name}` : ''}</p>
                     </div>
+                    <button onClick={() => cancelRecon(r)} title="ยกเลิกการปรับยอดนี้ (ยอดกลับเป็นเหมือนก่อนปรับ)"
+                      className="shrink-0 text-[11px] font-bold text-gray-400 hover:text-red-500 hover:bg-red-50 px-2 py-1.5 rounded-lg transition-colors">
+                      ยกเลิก
+                    </button>
                   </div>
                 );
               })}

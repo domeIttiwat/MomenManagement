@@ -295,6 +295,16 @@ const WorkCardDetail = ({ card: initialCard, onClose, onChanged, onEdit }) => {
       }));
     } catch { /* โหลดตัวเลือกไม่ได้ */ }
   };
+  // ย้อนชิ้นที่ "ประกอบแล้ว" กลับเป็นรอประกอบ (เช่น ติ๊กเทสต์/ติ๊กผิด) — งานจะเด้งกลับเข้าเช็คลิสต์ช่างเอง
+  const revertAssembled = async (x) => {
+    if (!confirm(`ย้อน "${x.title}" กลับเป็นรอประกอบ? งานนี้จะกลับเข้าเช็คลิสต์ช่างอีกครั้ง`)) return;
+    await supabase.from(prepItemTable).update({ assembled_at: null, assembled_by: null }).eq('id', x.id);
+    await supabase.from('work_card_items').update({ done: false, done_by: null, done_at: null }).eq('prep_item_id', x.id);
+    await refreshCardItems();
+    logCard('item_change', `ย้อนเป็นรอประกอบ: ${x.title}`);
+    await loadPrepInfo();
+  };
+
   const prepRepickFrom = async (it, locationId) => {
     setPrepRepickFor(null);
     try {
@@ -574,6 +584,13 @@ const WorkCardDetail = ({ card: initialCard, onClose, onChanged, onEdit }) => {
   const confirmDeleteCard = async () => {
     if (delText.trim() !== 'ลบ') return;
     setDelOpen(false);
+    // คืนสถานะ "ประกอบแล้ว" ของชิ้นส่วนในการ์ดนี้กลับเป็นรอประกอบ — ลบการ์ดเทสต์แล้วงานไม่หายจากลิสต์ช่าง
+    try {
+      const donePartIds = items.filter((x) => x.kind === 'part' && x.prep_item_id && x.done).map((x) => x.prep_item_id);
+      if (donePartIds.length) {
+        await supabase.from(prepItemTable).update({ assembled_at: null, assembled_by: null }).in('id', donePartIds);
+      }
+    } catch { /* ล้างไม่ได้ก็ลบการ์ดต่อ */ }
     await logAction({ resource_type: 'assembly', resource_id: card.id, action: 'delete', resource_label: card.title, created_by: meRef() });
     await supabase.from('work_cards').delete().eq('id', card.id);
     onChanged(); onClose();
@@ -881,6 +898,13 @@ const WorkCardDetail = ({ card: initialCard, onClose, onChanged, onEdit }) => {
                                       </div>
                                     )}
                                   </div>
+                                  {/* โซนประกอบแล้ว: ย้อนกลับเป็นรอประกอบได้ (แก้เคสติ๊กเทสต์/ติ๊กผิด) */}
+                                  {prepAllowed && prepEditMode && tone === 'done' && (
+                                    <button onClick={() => revertAssembled(x)}
+                                      className="text-[11px] font-semibold text-gray-400 hover:text-indigo-600 hover:bg-gray-100 px-2 py-1.5 rounded-lg shrink-0">
+                                      ย้อนเป็นรอประกอบ
+                                    </button>
+                                  )}
                                   {/* คนมีสิทธิ์เตรียมของ อัปเดตจากตรงนี้ได้เลย — ช่างคนอื่นเห็นสถานะอย่างเดียว */}
                                   {prepAllowed && prepEditMode && tone !== 'done' && (
                                     <div className="flex items-center gap-1 shrink-0">
