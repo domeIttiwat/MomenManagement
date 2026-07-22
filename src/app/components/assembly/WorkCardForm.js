@@ -160,14 +160,15 @@ const WorkCardForm = ({ initialData = null, presetRef = null, profile, onClose, 
     (async () => {
       if (refPicking === 'order') {
         const { data } = await supabase.from('orders')
-          .select('id, order_number, status, customer_cache, images, order_items(product_name)')
+          .select('id, order_number, status, customer_cache, notes, images, order_items(product_name)')
           .in('status', ['Deposit', 'Paid', 'Assembling', 'Shipping'])
           .order('created_at', { ascending: false }).limit(100);
         setRefAll(data || []);
       } else {
+        // งานซ่อม: รวม "รอประเมิน" ด้วย — บางงานเริ่มเตรียม/วางแผนก่อนประเมินเสร็จ
         const { data } = await supabase.from('services')
-          .select('id, service_number, status, customer_cache, images, service_items(description)')
-          .in('status', ['Waiting', 'In Progress', 'Tested', 'Delivered'])
+          .select('id, service_number, status, customer_cache, notes, images, service_items(description)')
+          .in('status', ['Assessing', 'Waiting', 'In Progress', 'Tested', 'Delivered'])
           .order('created_at', { ascending: false }).limit(100);
         setRefAll(data || []);
       }
@@ -179,9 +180,12 @@ const WorkCardForm = ({ initialData = null, presetRef = null, profile, onClose, 
     const match = (r) => {
       if (!q) return true;
       const cc = r.customer_cache || {};
+      // ค้นได้จากทุกอย่างในงานนั้น: เลข / ชื่อ-สกุล-ชื่อเล่น-เบอร์ลูกค้า / รายการสินค้า-อาการ / หมายเหตุ / สถานะ
       const hay = [
         refPicking === 'order' ? r.order_number : r.service_number,
         cc.first_name, cc.last_name, cc.nickname, cc.phone,
+        r.notes,
+        REF_STATUS_TH[r.status] || r.status,
         ...(refPicking === 'order'
           ? (r.order_items || []).map((x) => x.product_name)
           : (r.service_items || []).map((x) => x.description)),
@@ -194,7 +198,7 @@ const WorkCardForm = ({ initialData = null, presetRef = null, profile, onClose, 
   // ป้ายสถานะไทยของงานที่จะผูก
   const REF_STATUS_TH = {
     Deposit: 'มัดจำ', Paid: 'ชำระแล้ว', Assembling: 'ส่งประกอบ', Shipping: 'เตรียมส่ง',
-    Waiting: 'รอทำ', 'In Progress': 'ส่งทำ', Tested: 'ทดสอบแล้ว', Delivered: 'รอส่ง',
+    Assessing: 'รอประเมิน', Waiting: 'รอคิว', 'In Progress': 'ส่งทำ', Tested: 'ทดสอบแล้ว', Delivered: 'รอส่ง',
   };
   const imgUrl = (v) => (typeof v === 'string' ? v : v?.url || null);
   const custImgOf = (cc) => imgUrl(cc?.images?.[0]);

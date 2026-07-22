@@ -1,10 +1,12 @@
 'use client';
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Hammer, Plus, Loader2, Clock, Flag, Link2, Inbox, CheckCircle2, Target, ArrowUp, ArrowDown, ShoppingCart, History, ClipboardCheck, BarChart3, Trophy } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useMemo, useRef, useLayoutEffect } from 'react';
+import { Hammer, Plus, Loader2, Clock, Flag, Link2, Inbox, CheckCircle2, Target, ArrowUp, ArrowDown, ShoppingCart, History, ClipboardCheck, BarChart3, Trophy, LayoutGrid, List as ListIcon, Wrench, Bike, GripVertical } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
 import WorkCardForm from './WorkCardForm';
 import WorkCardDetail from './WorkCardDetail';
+import TagControl, { TagChips, firstTagColor } from '@/app/components/common/TagControl';
+import { fetchUserTags, createTag, deleteTag, fetchTagLinks, toggleTagLink } from '@/lib/userTags';
 
 // ระบบงานประกอบ (ก.ค. 2026): บอร์ด "งาน Focus ช่วงนี้" สองคอลัมน์
 // ซ้าย = มอบหมายแล้วยังไม่เสร็จ | ขวา = เสร็จแล้วรอตรวจ → ตรวจแล้ว "ยกออก" เข้าประวัติ
@@ -20,6 +22,14 @@ const STATUS_META = {
   blocked: { label: 'ยังไม่เสร็จ', chip: 'bg-blue-50 text-blue-600', bar: 'bg-blue-400' },
   done: { label: 'เสร็จแล้ว', chip: 'bg-emerald-100 text-emerald-700', bar: 'bg-emerald-500' },
 };
+
+// ประเภทงาน — ให้เห็นชัดว่าใบไหนซ่อม ใบไหนประกอบรถใหม่
+const TYPE_META = {
+  service: { label: 'งานซ่อม', chip: 'bg-orange-500 text-white', Icon: Wrench },
+  order: { label: 'ประกอบรถใหม่', chip: 'bg-indigo-600 text-white', Icon: Bike },
+  none: { label: 'งานทั่วไป', chip: 'bg-slate-500 text-white', Icon: Hammer },
+};
+const typeOf = (c) => TYPE_META[c.ref_type === 'service' ? 'service' : c.ref_type === 'order' ? 'order' : 'none'];
 
 const ageText = (from) => {
   const days = Math.max(0, Math.floor((Date.now() - new Date(from).getTime()) / 86400000));
@@ -41,6 +51,83 @@ const AssemblyMain = ({ initialNavData = null }) => {
   const [selected, setSelected] = useState(null);
   const [formOpen, setFormOpen] = useState(false);
   const [editCard, setEditCard] = useState(null);
+
+  // มุมมองการ์ด/ลิสต์ (จำค่าไว้ในเครื่อง)
+  const [view, setView] = useState(() => { try { return localStorage.getItem('asm_view') || 'card'; } catch { return 'card'; } });
+  const setViewPersist = (v) => { setView(v); try { localStorage.setItem('asm_view', v); } catch { /* ignore */ } };
+
+  // Tag ส่วนตัว (เหมือนหน้าขาย/งานซ่อม — ของใครของมัน)
+  const [myTags, setMyTags] = useState([]);
+  const [tagLinks, setTagLinks] = useState({});
+  const [tagFilter, setTagFilter] = useState('');
+  useEffect(() => {
+    if (!profile?.id) return;
+    fetchUserTags(profile.id).then(setMyTags);
+    fetchTagLinks(profile.id, 'work_card').then(setTagLinks);
+  }, [profile?.id]);
+  const handleToggleTag = async (cardId, tagId) => {
+    setTagLinks((prev) => {
+      const cur = prev[cardId] || [];
+      return { ...prev, [cardId]: cur.includes(tagId) ? cur.filter((t) => t !== tagId) : [...cur, tagId] };
+    });
+    try { await toggleTagLink(tagId, 'work_card', cardId); } catch { fetchTagLinks(profile.id, 'work_card').then(setTagLinks); }
+  };
+  const handleCreateTag = async (name, color) => {
+    const t = await createTag(profile.id, name, color);
+    setMyTags((prev) => [...prev, t]);
+    return t;
+  };
+  const handleDeleteTag = async (tagId) => {
+    await deleteTag(tagId);
+    setMyTags((prev) => prev.filter((t) => t.id !== tagId));
+    fetchTagLinks(profile.id, 'work_card').then(setTagLinks);
+  };
+
+  // ลากจัดลำดับเอง
+  const dragRef = useRef(null);
+  const [dragOverId, setDragOverId] = useState(null); // ไฮไลต์ใบที่กำลังจะวางทับ
+
+  // FLIP animation: จำตำแหน่งเดิมของทุกการ์ด แล้วให้มัน "ไหล" ไปตำแหน่งใหม่แทนการวาร์ป
+  const flipNodes = useRef(new Map()); // id → element
+  const flipRects = useRef(new Map()); // id → ตำแหน่งล่าสุด
+  const flipRef = (id) => (el) => { if (el) flipNodes.current.set(id, el); else flipNodes.current.delete(id); };
+  useLayoutEffect(() => {
+    const next = new Map();
+    flipNodes.current.forEach((el, id) => { if (el.isConnected) next.set(id, el.getBoundingClientRect()); });
+    next.forEach((rect, id) => {
+      const prev = flipRects.current.get(id);
+      const el = flipNodes.current.get(id);
+      if (!prev || !el) return;
+      const dx = prev.left - rect.left;
+      const dy = prev.top - rect.top;
+      if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
+      el.style.transition = 'none';
+      el.style.transform = `translate(${dx}px, ${dy}px)`;
+      requestAnimationFrame(() => {
+        el.style.transition = 'transform 320ms cubic-bezier(.2,.8,.2,1)';
+        el.style.transform = '';
+        const clear = () => { el.style.transition = ''; el.removeEventListener('transitionend', clear); };
+        el.addEventListener('transitionend', clear);
+      });
+    });
+    flipRects.current = next;
+  });
+  const sortCards = (list) => [...list].sort((a, b) =>
+    ((a.sort_order ?? 1e9) - (b.sort_order ?? 1e9))
+    || ((b.priority === 'urgent') - (a.priority === 'urgent'))
+    || (new Date(a.created_at) - new Date(b.created_at)));
+  const dropOn = async (zoneList, targetId) => {
+    const dragId = dragRef.current; dragRef.current = null;
+    if (!dragId || dragId === targetId) return;
+    const ids = zoneList.map((c) => c.id);
+    if (!ids.includes(dragId)) return; // ลากข้ามโซนไม่ได้ (ใช้ปุ่มดึงเข้าโฟกัส/พักแทน)
+    const arr = ids.filter((id) => id !== dragId);
+    const ti = targetId ? arr.indexOf(targetId) : arr.length;
+    arr.splice(ti === -1 ? arr.length : ti, 0, dragId);
+    const orderMap = {}; arr.forEach((id, i) => { orderMap[id] = (i + 1) * 10; });
+    setCards((prev) => prev.map((c) => (orderMap[c.id] != null ? { ...c, sort_order: orderMap[c.id] } : c)));
+    await Promise.all(arr.map((id) => supabase.from('work_cards').update({ sort_order: orderMap[id] }).eq('id', id)));
+  };
 
   // สถิติช่าง
   const [statsPeriod, setStatsPeriod] = useState('month'); // day | month | 30d | all
@@ -123,14 +210,15 @@ const AssemblyMain = ({ initialNavData = null }) => {
   }, [initialNavData?.timestamp]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const grouped = useMemo(() => {
-    const live = cards.filter((c) => !c.archived_at);
+    let live = cards.filter((c) => !c.archived_at);
+    if (tagFilter) live = live.filter((c) => (tagLinks[c.id] || []).includes(tagFilter)); // กรองตาม Tag ส่วนตัว
     return {
-      doingCol: live.filter((c) => c.focus_date && c.status !== 'done'),   // ซ้าย: โฟกัสอยู่ ยังไม่เสร็จ
-      doneCol: live.filter((c) => c.status === 'done'),                     // ขวา: เสร็จแล้ว รอตรวจ
-      queue: live.filter((c) => !c.focus_date && c.status !== 'done'),      // คิวงาน
-      history: cards.filter((c) => c.archived_at).slice(0, 80),             // ยกออกแล้ว
+      doingCol: sortCards(live.filter((c) => c.focus_date && c.status !== 'done')),   // ซ้าย: โฟกัสอยู่ ยังไม่เสร็จ
+      doneCol: sortCards(live.filter((c) => c.status === 'done')),                     // ขวา: เสร็จแล้ว รอตรวจ
+      queue: sortCards(live.filter((c) => !c.focus_date && c.status !== 'done')),      // คิวงาน
+      history: cards.filter((c) => c.archived_at).slice(0, 80),                        // ยกออกแล้ว
     };
-  }, [cards]);
+  }, [cards, tagFilter, tagLinks]); // eslint-disable-line
 
   // ── สถิติช่าง: นับจากบันทึกการติ๊กจริง (ใครติ๊ก เมื่อไหร่) + เก็บรายละเอียดให้กดกางดูได้ ──
   const fetchStats = useCallback(async () => {
@@ -260,10 +348,13 @@ const AssemblyMain = ({ initialNavData = null }) => {
   };
 
   // ── การ์ดใบเดียวบนบอร์ด ──
-  const CardTile = ({ c, zone }) => {
+  const CardTile = ({ c, zone, zoneList = [] }) => {
     const st = stats[c.id] || { total: 0, done: 0, matPending: 0 };
     const meta = STATUS_META[c.status] || STATUS_META.todo;
     const mine = (c.assignees || []).some((a) => a.id === profile?.id);
+    const tm = typeOf(c);
+    const cardTagIds = tagLinks[c.id] || [];
+    const tagColor = firstTagColor(myTags, cardTagIds);
     const ref = c.ref_type && c.ref_id ? refData[`${c.ref_type}:${c.ref_id}`] : null;
     const rawCust = ref?.customer?.images?.[0];
     const custImg = typeof rawCust === 'string' ? rawCust : rawCust?.url || null;
@@ -278,11 +369,19 @@ const AssemblyMain = ({ initialNavData = null }) => {
     const isPolish = c.rework_count > 0 && c.status !== 'done'; // การ์ดที่ถูกส่งกลับมาเก็บงาน — ต้องเด่น
     return (
       <div onClick={() => setSelected(c)}
-        className={`w-full text-left bg-white rounded-2xl border shadow-sm hover:shadow-md transition-all p-4 relative overflow-hidden cursor-pointer ${isPolish ? 'border-violet-300 ring-2 ring-violet-200 bg-violet-50/40' : mine ? 'border-indigo-200' : 'border-gray-100'}`}>
-        <span className={`absolute left-0 top-0 bottom-0 w-1.5 ${isPolish ? 'bg-violet-500' : meta.bar}`} />
+        ref={flipRef(c.id)}
+        draggable
+        onDragStart={() => { dragRef.current = c.id; }}
+        onDragOver={(e) => { e.preventDefault(); if (dragRef.current && dragRef.current !== c.id) setDragOverId(c.id); }}
+        onDragLeave={() => setDragOverId((p) => (p === c.id ? null : p))}
+        onDragEnd={() => { setDragOverId(null); dragRef.current = null; }}
+        onDrop={(e) => { e.preventDefault(); setDragOverId(null); dropOn(zoneList, c.id); }}
+        className={`w-full text-left bg-white rounded-2xl border shadow-sm hover:shadow-md transition-all p-4 relative cursor-pointer ${dragOverId === c.id ? 'ring-2 ring-teal-400 border-teal-300' : isPolish ? 'border-violet-300 ring-2 ring-violet-200 bg-violet-50/40' : mine ? 'border-indigo-200' : 'border-gray-100'}`}
+        style={!isPolish && tagColor ? { backgroundColor: `${tagColor}10`, borderColor: `${tagColor}66` } : undefined}>
+        <span className={`absolute left-0 top-0 bottom-0 w-1.5 rounded-l-2xl ${isPolish ? 'bg-violet-500' : meta.bar}`} />
         {/* แถบม่วงเด่นๆ: งานถูกส่งกลับมาเก็บเพิ่ม */}
         {isPolish && (
-          <div className="-mx-4 -mt-4 mb-2.5 px-4 py-2 bg-violet-500 text-white text-[11px] font-bold flex items-center gap-1.5">
+          <div className="-mx-4 -mt-4 mb-2.5 px-4 py-2 bg-violet-500 text-white text-[11px] font-bold flex items-center gap-1.5 rounded-t-2xl">
             ✨ กลับมาเก็บงานเพิ่ม รอบ #{c.rework_count} — เปิดดูคอมเมนต์ว่าต้องเก็บจุดไหน
           </div>
         )}
@@ -294,8 +393,11 @@ const AssemblyMain = ({ initialNavData = null }) => {
         </span>
         <div className="pl-2">
           <div className="flex items-center gap-1.5 flex-wrap pr-12">
+            {/* ประเภทงานชัดๆ: ซ่อม ส้ม / ประกอบรถใหม่ น้ำเงิน / ทั่วไป เทา */}
+            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 ${tm.chip}`}><tm.Icon size={10} /> {tm.label}</span>
             {c.priority === 'urgent' && <span className="text-[10px] font-bold bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full flex items-center gap-0.5"><Flag size={9} /> ด่วน</span>}
             {c.ref_label && <span className="text-[10px] font-bold bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded-full flex items-center gap-0.5"><Link2 size={9} /> {c.ref_label}</span>}
+            <TagChips tags={myTags} itemTagIds={cardTagIds} />
             <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${meta.chip}`}>{meta.label}</span>
             {st.matPending > 0 && <span className="text-[10px] font-bold bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded-full flex items-center gap-0.5"><ShoppingCart size={9} /> ขอของเพิ่ม {st.matPending}</span>}
             {c.rework_count > 0 && c.status === 'done' && (
@@ -311,7 +413,7 @@ const AssemblyMain = ({ initialNavData = null }) => {
             <div className="mt-1.5">
               <div className="flex items-center gap-1.5 min-w-0">
                 <span className="w-5 h-5 rounded-full overflow-hidden bg-gray-100 shrink-0 flex items-center justify-center text-[9px] font-bold text-gray-500">
-                  {custImg ? <img src={custImg} className="w-full h-full object-cover" /> : (custName[0] || '?')}
+                  {custImg ? <img src={custImg} draggable={false} className="w-full h-full object-cover" /> : (custName[0] || '?')}
                 </span>
                 <span className="text-xs font-semibold text-gray-700 truncate">
                   {custName}{ref.customer?.nickname ? ` (${ref.customer.nickname})` : ''}
@@ -337,7 +439,7 @@ const AssemblyMain = ({ initialNavData = null }) => {
           {allImgs.length > 0 && (
             <div className="flex gap-1.5 mt-2">
               {allImgs.slice(0, 3).map((img, i) => (
-                <img key={i} src={img} className="w-12 h-12 rounded-lg object-cover border border-gray-100" />
+                <img key={i} src={img} draggable={false} className="w-12 h-12 rounded-lg object-cover border border-gray-100" />
               ))}
               {allImgs.length > 3 && <span className="w-12 h-12 rounded-lg bg-gray-100 flex items-center justify-center text-[10px] font-bold text-gray-500">+{allImgs.length - 3}</span>}
             </div>
@@ -360,7 +462,9 @@ const AssemblyMain = ({ initialNavData = null }) => {
           )}
 
           {/* ปุ่มลัดตามโซน */}
-          <div className="flex gap-1.5 mt-2.5" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center gap-1.5 mt-2.5" onClick={(e) => e.stopPropagation()}>
+            <TagControl tags={myTags} itemTagIds={cardTagIds}
+              onToggle={(tagId) => handleToggleTag(c.id, tagId)} onCreate={handleCreateTag} onDeleteTag={handleDeleteTag} align="left" />
             {zone === 'queue' && (
               <button onClick={() => pullToFocus(c)}
                 className="text-[11px] font-bold text-teal-700 bg-teal-50 hover:bg-teal-100 border border-teal-200 px-2.5 py-1.5 rounded-lg flex items-center gap-1 active:scale-95">
@@ -386,6 +490,55 @@ const AssemblyMain = ({ initialNavData = null }) => {
   };
 
   // แท็บคิวงาน/ประวัติ/สถิติ — เปิดปิดต่อตำแหน่งได้ที่ จัดการทีมงาน → สิทธิ์การใช้งาน
+  // ── แถวลิสต์ (มุมมองลิสต์) ──
+  const ListRow = ({ c, zone, zoneList = [] }) => {
+    const st = stats[c.id] || { total: 0, done: 0, matPending: 0 };
+    const tm = typeOf(c);
+    const ref = c.ref_type && c.ref_id ? refData[`${c.ref_type}:${c.ref_id}`] : null;
+    const custName = ref ? (`${ref.customer?.first_name || ''} ${ref.customer?.last_name || ''}`.trim()) : '';
+    const cardTagIds = tagLinks[c.id] || [];
+    const tagColor = firstTagColor(myTags, cardTagIds);
+    const from = c.focus_date ? new Date(c.focus_date) : new Date(c.created_at);
+    const days = Math.max(0, Math.floor((Date.now() - from.getTime()) / 86400000));
+    const isPolish = c.rework_count > 0 && c.status !== 'done';
+    return (
+      <div onClick={() => setSelected(c)} draggable
+        ref={flipRef(c.id)}
+        onDragStart={() => { dragRef.current = c.id; }}
+        onDragOver={(e) => { e.preventDefault(); if (dragRef.current && dragRef.current !== c.id) setDragOverId(c.id); }}
+        onDragLeave={() => setDragOverId((p) => (p === c.id ? null : p))}
+        onDragEnd={() => { setDragOverId(null); dragRef.current = null; }}
+        onDrop={(e) => { e.preventDefault(); setDragOverId(null); dropOn(zoneList, c.id); }}
+        className={`flex items-center gap-2.5 px-3 py-2.5 bg-white border rounded-xl cursor-pointer hover:shadow-sm transition-all ${dragOverId === c.id ? 'ring-2 ring-teal-400 border-teal-300' : isPolish ? 'border-violet-300 ring-1 ring-violet-200' : 'border-gray-100'}`}
+        style={!isPolish && tagColor ? { backgroundColor: `${tagColor}10`, boxShadow: `inset 4px 0 0 ${tagColor}` } : undefined}>
+        <GripVertical size={14} className="text-gray-200 shrink-0 cursor-grab" title="ลากเพื่อจัดลำดับ" />
+        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 shrink-0 ${tm.chip}`}><tm.Icon size={10} /> {tm.label}</span>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-bold text-gray-800 truncate">{c.title} <TagChips tags={myTags} itemTagIds={cardTagIds} /></p>
+          <p className="text-[11px] text-gray-400 truncate">
+            {custName}{c.ref_label ? ` · ${c.ref_label}` : ''}
+            {isPolish ? <span className="text-violet-600 font-bold"> · ✨ รอบเก็บงาน #{c.rework_count}</span> : ''}
+          </p>
+        </div>
+        {ref?.prep?.ready > 0 && <span className="text-[10px] font-bold bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full shrink-0">พร้อม {ref.prep.ready}</span>}
+        {st.matPending > 0 && <span className="text-[10px] font-bold bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded-full shrink-0">ขอของ {st.matPending}</span>}
+        {st.total > 0 && <span className={`text-[11px] font-bold shrink-0 ${st.done === st.total ? 'text-emerald-600' : 'text-gray-500'}`}>{st.done}/{st.total}</span>}
+        <span className={`text-[11px] font-bold shrink-0 ${days >= 7 ? 'text-red-500' : days >= 3 ? 'text-amber-500' : 'text-gray-400'}`}>{days === 0 ? 'วันนี้' : `${days} วัน`}</span>
+        <div className="shrink-0 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+          <TagControl tags={myTags} itemTagIds={cardTagIds}
+            onToggle={(tagId) => handleToggleTag(c.id, tagId)} onCreate={handleCreateTag} onDeleteTag={handleDeleteTag} align="right" />
+          {zone === 'queue' && <button onClick={() => pullToFocus(c)} className="text-[11px] font-bold text-teal-700 bg-teal-50 border border-teal-200 px-2 py-1 rounded-lg active:scale-95">ดึงเข้าโฟกัส</button>}
+          {zone === 'doing' && <button onClick={() => backToQueue(c)} className="text-[11px] font-semibold text-gray-400 hover:bg-gray-100 px-2 py-1 rounded-lg">พัก</button>}
+          {zone === 'done' && <button onClick={() => { if (confirm(`ตรวจงาน "${c.title}" เรียบร้อยแล้ว ยกออกจากบอร์ด?`)) archiveCard(c); }} className="text-[11px] font-bold text-white bg-emerald-600 hover:bg-emerald-700 px-2 py-1 rounded-lg active:scale-95">ตรวจแล้ว ยกออก</button>}
+        </div>
+      </div>
+    );
+  };
+
+  const renderZoneItems = (list, zone) => (view === 'list'
+    ? list.map((c) => <ListRow key={c.id} c={c} zone={zone} zoneList={list} />)
+    : list.map((c) => <CardTile key={c.id} c={c} zone={zone} zoneList={list} />));
+
   const TABS = [
     { id: 'focus', label: `งาน Focus (${grouped.doingCol.length + grouped.doneCol.length})`, icon: Target },
     ...(can('assembly', 'queue') ? [{ id: 'queue', label: `คิวงาน (${grouped.queue.length})`, icon: Inbox }] : []),
@@ -412,8 +565,8 @@ const AssemblyMain = ({ initialNavData = null }) => {
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-1.5 flex gap-1">
+      {/* Tabs + ตัวกรอง Tag + สลับการ์ด/ลิสต์ */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-1.5 flex gap-1 items-center">
         {TABS.map((t) => {
           const Icon = t.icon;
           return (
@@ -423,6 +576,19 @@ const AssemblyMain = ({ initialNavData = null }) => {
             </button>
           );
         })}
+        {myTags.length > 0 && (
+          <select value={tagFilter} onChange={(e) => setTagFilter(e.target.value)}
+            className={`text-xs font-bold border rounded-xl px-2 py-2.5 outline-none max-w-[120px] shrink-0 ${tagFilter ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-gray-50 border-gray-200 text-gray-500'}`}>
+            <option value="">ทุก Tag</option>
+            {myTags.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+        )}
+        <div className="flex bg-gray-100 rounded-xl p-0.5 shrink-0">
+          <button onClick={() => setViewPersist('card')} title="มุมมองการ์ด"
+            className={`p-2 rounded-lg transition-all ${view === 'card' ? 'bg-white text-slate-700 shadow-sm' : 'text-gray-400'}`}><LayoutGrid size={15} /></button>
+          <button onClick={() => setViewPersist('list')} title="มุมมองลิสต์"
+            className={`p-2 rounded-lg transition-all ${view === 'list' ? 'bg-white text-slate-700 shadow-sm' : 'text-gray-400'}`}><ListIcon size={15} /></button>
+        </div>
       </div>
 
       {loading ? (
@@ -437,7 +603,7 @@ const AssemblyMain = ({ initialNavData = null }) => {
               <span className="text-xs font-bold text-gray-400 bg-white border border-gray-200 rounded-full px-2.5 py-0.5">{grouped.doingCol.length}</span>
             </div>
             <div className="space-y-2.5">
-              {grouped.doingCol.map((c) => <CardTile key={c.id} c={c} zone="doing" />)}
+              {renderZoneItems(grouped.doingCol, 'doing')}
               {grouped.doingCol.length === 0 && (
                 <div className="text-center py-10 text-gray-400 text-sm border-2 border-dashed border-gray-200 rounded-2xl bg-white/50">
                   ยังไม่มีงานโฟกัส — ดึงจาก "คิวงาน" หรือสร้างงานใหม่
@@ -453,7 +619,7 @@ const AssemblyMain = ({ initialNavData = null }) => {
               <span className="text-xs font-bold text-emerald-600 bg-white border border-emerald-200 rounded-full px-2.5 py-0.5">{grouped.doneCol.length}</span>
             </div>
             <div className="space-y-2.5">
-              {grouped.doneCol.map((c) => <CardTile key={c.id} c={c} zone="done" />)}
+              {renderZoneItems(grouped.doneCol, 'done')}
               {grouped.doneCol.length === 0 && (
                 <div className="text-center py-10 text-gray-400 text-sm border-2 border-dashed border-emerald-100 rounded-2xl bg-white/50">
                   งานที่ทำเสร็จจะย้ายมารอตรวจที่นี่
@@ -469,9 +635,13 @@ const AssemblyMain = ({ initialNavData = null }) => {
             <p className="font-semibold text-gray-500">คิวงานว่าง</p>
           </div>
         ) : (
+          view === 'list' ? (
+            <div className="space-y-2">{renderZoneItems(grouped.queue, 'queue')}</div>
+          ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-3">
-            {grouped.queue.map((c) => <CardTile key={c.id} c={c} zone="queue" />)}
+            {renderZoneItems(grouped.queue, 'queue')}
           </div>
+          )
         )
       ) : tab === 'stats' ? (
         /* ── สถิติช่าง ── */

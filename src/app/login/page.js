@@ -125,7 +125,7 @@ export default function Login() {
               <div className="flex-1">
                 <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">ชื่อ *</label>
                 <input
-                  className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none"
+                  className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-gray-900 placeholder-gray-400"
                   type="text"
                   value={firstName}
                   onChange={e => setFirstName(e.target.value)}
@@ -136,7 +136,7 @@ export default function Login() {
               <div className="flex-1">
                 <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">นามสกุล</label>
                 <input
-                  className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none"
+                  className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-gray-900 placeholder-gray-400"
                   type="text"
                   value={lastName}
                   onChange={e => setLastName(e.target.value)}
@@ -148,7 +148,7 @@ export default function Login() {
           <div>
             <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Email</label>
             <input
-              className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none"
+              className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-gray-900 placeholder-gray-400"
               type="email"
               value={email}
               onChange={e => setEmail(e.target.value)}
@@ -159,7 +159,7 @@ export default function Login() {
             <div>
               <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Password</label>
               <input
-                className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none"
+                className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-gray-900 placeholder-gray-400"
                 type="password"
                 value={password}
                 onChange={e => setPassword(e.target.value)}
