@@ -1,6 +1,6 @@
 'use client';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { X, Check, Plus, Trash2, Loader2, Clock, Flag, Link2, Package, Send, Image as ImageIcon, Pencil, Hand, ShoppingCart, ThumbsUp, CornerDownRight, Eye, CheckCircle2, Phone, UserRound, Bike, StickyNote } from 'lucide-react';
+import { X, Check, Plus, Trash2, Loader2, Clock, Flag, Link2, Package, Send, Image as ImageIcon, Pencil, Hand, ShoppingCart, ThumbsUp, CornerDownRight, Eye, CheckCircle2, Phone, UserRound, Bike, StickyNote, Undo2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
 import { logAction } from '@/lib/auditLog';
@@ -484,7 +484,7 @@ const WorkCardDetail = ({ card: initialCard, onClose, onChanged, onEdit }) => {
 
   const addMaterial = async () => {
     if (!newMat.trim()) return;
-    logCard('item_change', `ขอของเพิ่ม: ${newMat.trim()}`);
+    logCard('material_request', newMat.trim());
     await addItem('material', newMat);
     await notifyUsers({ userIds: cardPeople(card), title: `ขอของเพิ่ม: ${newMat.trim()} (${card.title})`, linkId: card.id, actorId: profile?.id });
     setNewMat('');
@@ -514,8 +514,16 @@ const WorkCardDetail = ({ card: initialCard, onClose, onChanged, onEdit }) => {
     const patch = { done: true, done_by: meRef(), done_at: new Date().toISOString() };
     setItems((prev) => prev.map((x) => (x.id === it.id ? { ...x, ...patch } : x)));
     await supabase.from('work_card_items').update(patch).eq('id', it.id);
-    logCard('item_change', `จัดของให้: ${it.title}`);
+    logCard('material_fulfill', `${it.title}${it.qty > 1 ? ` ×${it.qty}` : ''} — ขอโดย ${it.added_by?.name || '-'}`);
     await notifyUsers({ userIds: cardPeople(card), title: `จัดของให้แล้ว: ${it.title} (${card.title})`, linkId: card.id, actorId: profile?.id });
+  };
+
+  // ติ๊กผิด → ย้อนกลับเป็น "รอจัดให้" (ไม่ส่งแจ้งเตือน — แค่แก้สถานะเงียบๆ แต่ลง Log ไว้)
+  const unfulfillMaterial = async (it) => {
+    const patch = { done: false, done_by: null, done_at: null };
+    setItems((prev) => prev.map((x) => (x.id === it.id ? { ...x, ...patch } : x)));
+    await supabase.from('work_card_items').update(patch).eq('id', it.id);
+    logCard('material_undo', `${it.title} — ขอโดย ${it.added_by?.name || '-'}`);
   };
 
   // ── รับงานกลาง ──
@@ -1097,7 +1105,14 @@ const WorkCardDetail = ({ card: initialCard, onClose, onChanged, onEdit }) => {
                       ) : (
                         <span className="text-[10px] font-bold text-amber-600 bg-amber-100 px-2 py-1 rounded-full shrink-0">รอจัดให้</span>
                       ))}
-                      {manage && !it.done && <button onClick={() => deleteItem(it)} className="text-gray-200 hover:text-red-400 p-1 shrink-0"><Trash2 size={13} /></button>}
+                      {/* ติ๊กผิด → ย้อนกลับเป็นรอจัดให้ได้ (เฉพาะคนมีสิทธิ์จัดการ) */}
+                      {manage && it.done && (
+                        <button onClick={() => unfulfillMaterial(it)} title="ติ๊กผิด — ย้อนกลับเป็นรอจัดให้"
+                          className="text-gray-300 hover:text-amber-600 p-1 shrink-0 active:scale-95">
+                          <Undo2 size={14} />
+                        </button>
+                      )}
+                      {manage && <button onClick={() => deleteItem(it)} title="ลบรายการนี้" className="text-gray-200 hover:text-red-400 p-1 shrink-0"><Trash2 size={13} /></button>}
                     </div>
                   ))}
                   {/* ขาดอะไรพิมพ์ขอมาได้เลย */}

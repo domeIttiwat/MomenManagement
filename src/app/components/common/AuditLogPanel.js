@@ -1,6 +1,6 @@
 'use client';
 import React, { useState, useEffect, useCallback } from 'react';
-import { Clock, User, ChevronDown, ChevronUp, RefreshCw, PlusCircle, Edit2, Trash2, Layers, Package, CheckCircle2, Undo2 } from 'lucide-react';
+import { Clock, User, ChevronDown, ChevronUp, RefreshCw, PlusCircle, Edit2, Trash2, Layers, Package, CheckCircle2, Undo2, ShoppingCart, PackageCheck } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 
 // ============================================================
@@ -14,6 +14,10 @@ const ACTION_CONFIG = {
   item_change:  { label: 'อัปเดตรายการ',   color: 'bg-amber-100 text-amber-700 border-amber-200',  dot: 'bg-amber-500',  Icon: Package },
   check:        { label: 'ติ๊กเสร็จ',      color: 'bg-emerald-100 text-emerald-700 border-emerald-200', dot: 'bg-emerald-500', Icon: CheckCircle2 },
   uncheck:      { label: 'ยกเลิกติ๊ก',     color: 'bg-rose-100 text-rose-700 border-rose-200',     dot: 'bg-rose-500',   Icon: Undo2 },
+  // ของที่ต้องใช้เพิ่ม (ขอของหน้างาน) — แยกจาก item_change ให้อ่าน Log รู้เรื่อง
+  material_request: { label: 'ขอของเพิ่ม',    color: 'bg-orange-100 text-orange-700 border-orange-200', dot: 'bg-orange-500', Icon: ShoppingCart },
+  material_fulfill: { label: 'จัดของให้แล้ว',  color: 'bg-teal-100 text-teal-700 border-teal-200',      dot: 'bg-teal-500',   Icon: PackageCheck },
+  material_undo:    { label: 'ย้อนจัดของ',    color: 'bg-rose-100 text-rose-700 border-rose-200',      dot: 'bg-rose-500',   Icon: Undo2 },
 };
 
 const RESOURCE_LABELS = {
