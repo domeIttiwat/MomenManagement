@@ -1,13 +1,14 @@
 'use client';
 import React, { useState, useEffect, useCallback, useMemo, useRef, useLayoutEffect } from 'react';
-import { Hammer, Plus, Loader2, Clock, Flag, Link2, Inbox, CheckCircle2, Target, ArrowUp, ArrowDown, ShoppingCart, History, ClipboardCheck, BarChart3, Trophy, LayoutGrid, List as ListIcon, Wrench, Bike, GripVertical } from 'lucide-react';
+import { Hammer, Plus, Loader2, Clock, Flag, Link2, Inbox, CheckCircle2, Target, ArrowUp, ArrowDown, ShoppingCart, History, ClipboardCheck, BarChart3, Trophy, LayoutGrid, List as ListIcon, Wrench, Bike, GripVertical, ChevronDown, ChevronUp } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
 import WorkCardForm from './WorkCardForm';
 import WorkCardDetail from './WorkCardDetail';
 import TagControl, { TagChips, firstTagColor } from '@/app/components/common/TagControl';
 import { fetchUserTags, createTag, deleteTag, fetchTagLinks, toggleTagLink } from '@/lib/userTags';
-import { notifyUsers } from './workNotify';
+import { notifyUsers, cardPeople } from './workNotify';
+import { logAction } from '@/lib/auditLog';
 
 // ระบบงานประกอบ (ก.ค. 2026): บอร์ด "งาน Focus ช่วงนี้" สองคอลัมน์
 // ซ้าย = มอบหมายแล้วยังไม่เสร็จ | ขวา = เสร็จแล้วรอตรวจ → ตรวจแล้ว "ยกออก" เข้าประวัติ
@@ -41,11 +42,17 @@ const ageText = (from) => {
   return `${Math.floor(m / 12)} ปี ${m % 12} ด.`;
 };
 
+// เวลาแบบสั้น ใช้ในแถบรวมของที่ขอเพิ่ม
+const dtShort = (v) => (v ? new Date(v).toLocaleString('th-TH', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '');
+
 const AssemblyMain = ({ initialNavData = null }) => {
-  const { profile, can } = useAuth();
+  const { profile, can, role, isImpersonating } = useAuth();
   const meRef = () => (profile ? { id: profile.id, name: `${profile.first_name} ${profile.last_name}` } : null);
+  const isBoss = ['Supervisor', 'Admin'].includes(role?.name);
   const [cards, setCards] = useState([]);
   const [stats, setStats] = useState({});
+  const [matItems, setMatItems] = useState([]); // ของที่ขอเพิ่ม (kind='material') ของทุกการ์ด — ใช้ในแถบรวมบนแท็บ Focus
+  const [matOpen, setMatOpen] = useState(null); // null = ยังไม่เคยกด → เปิดอัตโนมัติเมื่อมีของรอจัด
   const [refData, setRefData] = useState({}); // ข้อมูลออเดอร์/งานซ่อมที่การ์ดผูกอยู่: ลูกค้า รายการ รูป หมายเหตุ
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('focus'); // focus | queue | history
@@ -187,7 +194,8 @@ const AssemblyMain = ({ initialNavData = null }) => {
     try {
       const ids = (data || []).map((c) => c.id);
       if (ids.length) {
-        const { data: its } = await supabase.from('work_card_items').select('card_id, kind, done').in('card_id', ids);
+        const { data: its } = await supabase.from('work_card_items')
+          .select('id, card_id, kind, done, title, qty, added_by, created_at, done_by, done_at, stock_pick').in('card_id', ids);
         const m = {};
         (its || []).forEach((it) => {
           const s = (m[it.card_id] = m[it.card_id] || { total: 0, done: 0, matPending: 0 });
@@ -195,7 +203,8 @@ const AssemblyMain = ({ initialNavData = null }) => {
           else { s.total += 1; if (it.done) s.done += 1; }
         });
         setStats(m);
-      } else setStats({});
+        setMatItems((its || []).filter((x) => x.kind === 'material'));
+      } else { setStats({}); setMatItems([]); }
     } catch { /* ignore */ }
     setLoading(false);
   }, []);
@@ -330,6 +339,35 @@ const AssemblyMain = ({ initialNavData = null }) => {
     if (h < 1) return '< 1 ชม.';
     if (h < 48) return `${Math.round(h)} ชม.`;
     return `${(h / 24).toFixed(1)} วัน`;
+  };
+
+  // ── แถบรวม "ของที่ช่างขอเพิ่ม" เฉพาะการ์ดที่โฟกัสอยู่ ──
+  const focusMats = useMemo(() => {
+    const focusCards = cards.filter((c) => !c.archived_at && c.focus_date);
+    const byId = {};
+    focusCards.forEach((c) => { byId[c.id] = c; });
+    const list = matItems.filter((x) => byId[x.card_id]).map((x) => ({ ...x, card: byId[x.card_id] }));
+    return {
+      pending: list.filter((x) => !x.done).sort((a, b) => new Date(a.created_at) - new Date(b.created_at)), // ค้างนานสุดขึ้นก่อน
+      fulfilled: list.filter((x) => x.done).sort((a, b) => new Date(b.done_at) - new Date(a.done_at)),
+    };
+  }, [cards, matItems]);
+  const matPanelOpen = matOpen ?? focusMats.pending.length > 0; // มีของรอจัด → กางให้เลย
+
+  // จัดของให้จากแถบรวม — พฤติกรรมเดียวกับติ๊กในการ์ด (log + แจ้งเตือนผู้เกี่ยวข้อง)
+  const fulfillFromPanel = async (mIt) => {
+    const patch = { done: true, done_by: meRef(), done_at: new Date().toISOString() };
+    setMatItems((prev) => prev.map((x) => (x.id === mIt.id ? { ...x, ...patch } : x)));
+    setStats((prev) => {
+      const s = prev[mIt.card_id]; if (!s) return prev;
+      return { ...prev, [mIt.card_id]: { ...s, matPending: Math.max(0, s.matPending - 1) } };
+    });
+    await supabase.from('work_card_items').update(patch).eq('id', mIt.id);
+    logAction({
+      resource_type: 'assembly', resource_id: mIt.card_id, action: 'material_fulfill',
+      resource_label: `${mIt.title}${mIt.qty > 1 ? ` ×${mIt.qty}` : ''} — ขอโดย ${mIt.added_by?.name || '-'}`, created_by: meRef(),
+    });
+    await notifyUsers({ userIds: cardPeople(mIt.card), title: `จัดของให้แล้ว: ${mIt.title} (${mIt.card.title})`, linkId: mIt.card_id, actorId: profile?.id });
   };
 
   const pullToFocus = async (c) => {
@@ -603,7 +641,70 @@ const AssemblyMain = ({ initialNavData = null }) => {
       {loading ? (
         <div className="text-center py-20 text-gray-400"><Loader2 size={22} className="animate-spin inline" /></div>
       ) : tab === 'focus' ? (
-        /* ── บอร์ด Focus: 2 คอลัมน์ ── */
+        <>
+        {/* ── แถบรวม "ของที่ช่างขอเพิ่ม" จากทุกการ์ดที่โฟกัส — เห็นภาพเดียวว่าค้างอะไร ใครขอ จัดไปแล้วอะไร ── */}
+        {(focusMats.pending.length > 0 || focusMats.fulfilled.length > 0) && (
+          <div className="mb-4 bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
+            <button onClick={() => setMatOpen(!matPanelOpen)} className="w-full flex items-center gap-2 px-4 py-3 text-left">
+              <ShoppingCart size={15} className={focusMats.pending.length > 0 ? 'text-amber-600' : 'text-gray-400'} />
+              <span className="font-bold text-gray-800 text-sm">ของที่ช่างขอเพิ่ม</span>
+              {focusMats.pending.length > 0
+                ? <span className="text-[10px] font-bold bg-amber-500 text-white px-2 py-0.5 rounded-full">รอจัด {focusMats.pending.length}</span>
+                : <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded-full">จัดครบแล้ว</span>}
+              <span className="text-[11px] text-gray-400 ml-auto">{matPanelOpen ? 'ซ่อน' : 'ดูรายการ'}</span>
+              {matPanelOpen ? <ChevronUp size={14} className="text-gray-400" /> : <ChevronDown size={14} className="text-gray-400" />}
+            </button>
+            {matPanelOpen && (
+              <div className="px-4 pb-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {/* รอจัดให้ — ค้างนานสุดขึ้นก่อน */}
+                <div>
+                  <p className="text-[11px] font-bold text-amber-700 mb-1.5">รอจัดให้ ({focusMats.pending.length})</p>
+                  <div className="space-y-1.5">
+                    {focusMats.pending.map((x) => (
+                      <div key={x.id} className="flex items-center gap-2.5 p-2.5 rounded-xl border bg-amber-50/50 border-amber-200">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm text-gray-800">{x.title}{x.qty > 1 ? ` ×${x.qty}` : ''}</p>
+                          <p className="text-[10px] text-gray-500 mt-0.5">
+                            <button onClick={() => setSelected(x.card)} className="font-bold text-indigo-600 hover:underline">{x.card.title}</button>
+                            {' '}· ขอโดย {x.added_by?.name?.split(' ')[0] || '-'} · {dtShort(x.created_at)}
+                          </p>
+                        </div>
+                        {(isBoss || (!isImpersonating && x.card.created_by?.id === profile?.id)) && (
+                          <button onClick={() => fulfillFromPanel(x)}
+                            className="text-xs font-bold text-white bg-amber-500 hover:bg-amber-600 px-3 py-1.5 rounded-lg shrink-0 active:scale-95">
+                            จัดให้แล้ว
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                    {focusMats.pending.length === 0 && <p className="text-xs text-gray-400 py-3 text-center">ไม่มีของค้างจัด</p>}
+                  </div>
+                </div>
+                {/* จัดให้แล้ว — ล่าสุดขึ้นก่อน */}
+                <div>
+                  <p className="text-[11px] font-bold text-emerald-700 mb-1.5">จัดให้แล้ว ({focusMats.fulfilled.length})</p>
+                  <div className="space-y-1.5">
+                    {focusMats.fulfilled.slice(0, 12).map((x) => (
+                      <div key={x.id} className="flex items-center gap-2.5 p-2.5 rounded-xl border bg-emerald-50/50 border-emerald-100">
+                        <CheckCircle2 size={16} className="text-emerald-500 shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm text-gray-600">{x.title}{x.qty > 1 ? ` ×${x.qty}` : ''}</p>
+                          <p className="text-[10px] text-gray-500 mt-0.5">
+                            <button onClick={() => setSelected(x.card)} className="font-bold text-indigo-600 hover:underline">{x.card.title}</button>
+                            {' '}· ขอโดย {x.added_by?.name?.split(' ')[0] || '-'} · จัดโดย {x.done_by?.name?.split(' ')[0] || '-'} · {dtShort(x.done_at)}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                    {focusMats.fulfilled.length > 12 && <p className="text-[10px] text-gray-400 text-center pt-1">แสดง 12 รายการล่าสุด — ทั้งหมดดูได้ในการ์ดหรือ Log</p>}
+                    {focusMats.fulfilled.length === 0 && <p className="text-xs text-gray-400 py-3 text-center">ยังไม่มีรายการที่จัดแล้ว</p>}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+        {/* ── บอร์ด Focus: 2 คอลัมน์ ── */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
           {/* ซ้าย: ยังทำไม่เสร็จ */}
           <div className="bg-gray-50/80 rounded-3xl border border-gray-100 p-3.5">
@@ -637,6 +738,7 @@ const AssemblyMain = ({ initialNavData = null }) => {
             </div>
           </div>
         </div>
+        </>
       ) : tab === 'queue' ? (
         grouped.queue.length === 0 ? (
           <div className="bg-white rounded-3xl border border-dashed border-gray-200 py-20 text-center">
