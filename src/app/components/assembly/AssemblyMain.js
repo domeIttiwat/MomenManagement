@@ -7,6 +7,7 @@ import WorkCardForm from './WorkCardForm';
 import WorkCardDetail from './WorkCardDetail';
 import TagControl, { TagChips, firstTagColor } from '@/app/components/common/TagControl';
 import { fetchUserTags, createTag, deleteTag, fetchTagLinks, toggleTagLink } from '@/lib/userTags';
+import { notifyUsers } from './workNotify';
 
 // ระบบงานประกอบ (ก.ค. 2026): บอร์ด "งาน Focus ช่วงนี้" สองคอลัมน์
 // ซ้าย = มอบหมายแล้วยังไม่เสร็จ | ขวา = เสร็จแล้วรอตรวจ → ตรวจแล้ว "ยกออก" เข้าประวัติ
@@ -335,6 +336,14 @@ const AssemblyMain = ({ initialNavData = null }) => {
     const fd = localDate();
     setCards((prev) => prev.map((x) => (x.id === c.id ? { ...x, focus_date: fd } : x)));
     await supabase.from('work_cards').update({ focus_date: fd, updated_at: new Date().toISOString() }).eq('id', c.id);
+    // งานเพิ่งโผล่ใน timeline ช่าง → แจ้งผู้รับผิดชอบตอนนี้ (ตอนสร้างเข้าคิวไม่แจ้ง / คนกดเองไม่ได้รับ)
+    await notifyUsers({
+      userIds: (c.assignees || []).map((a) => a?.id),
+      title: `งานเข้าโฟกัสแล้ว: ${c.title}`,
+      body: 'งานขึ้นใน timeline ของคุณแล้ว เริ่มทำได้เลย',
+      linkId: c.id,
+      actorId: profile?.id,
+    });
   };
   const backToQueue = async (c) => {
     setCards((prev) => prev.map((x) => (x.id === c.id ? { ...x, focus_date: null } : x)));

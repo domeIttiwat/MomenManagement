@@ -307,6 +307,16 @@ const WorkCardForm = ({ initialData = null, presetRef = null, profile, onClose, 
             card_id: initialData.id, title: t, kind: 'task', sort_order: 300 + i, added_by: meRef(),
           })));
         }
+        // เพิ่งติ๊กจากคิว → เข้าโฟกัสในหน้าแก้ไข = งานเพิ่งโผล่ใน timeline ช่าง → แจ้งผู้รับผิดชอบ
+        if (focusToday && !initialData?.focus_date) {
+          await notifyUsers({
+            userIds: assignees.map((a) => a.id),
+            title: `งานเข้าโฟกัสแล้ว: ${payload.title}`,
+            body: refLabel ? `ผูกกับ ${refLabel}` : null,
+            linkId: initialData.id,
+            actorId: profile?.id,
+          });
+        }
         onSaved();
       } else {
         const { data: card, error } = await supabase.from('work_cards')
@@ -318,13 +328,16 @@ const WorkCardForm = ({ initialData = null, presetRef = null, profile, onClose, 
         if (partRows.length) await supabase.from('work_card_items').upsert(partRows, { onConflict: 'prep_item_id', ignoreDuplicates: true });
         const taskRows = tasks.map((t, i) => ({ card_id: card.id, title: t, kind: 'task', sort_order: 100 + i, added_by: meRef() }));
         if (taskRows.length) await supabase.from('work_card_items').insert(taskRows);
-        await notifyUsers({
-          userIds: assignees.map((a) => a.id),
-          title: `งานใหม่: ${card.title}`,
-          body: refLabel ? `ผูกกับ ${refLabel}` : null,
-          linkId: card.id,
-          actorId: profile?.id,
-        });
+        // แจ้งช่างเฉพาะตอนงานเข้าโฟกัส (โผล่ใน timeline จริง) — สร้างเข้าคิวเฉยๆ ยังไม่แจ้ง รอแจ้งตอนดึงเข้าโฟกัส
+        if (focusToday) {
+          await notifyUsers({
+            userIds: assignees.map((a) => a.id),
+            title: `งานใหม่เข้าโฟกัส: ${card.title}`,
+            body: refLabel ? `ผูกกับ ${refLabel}` : null,
+            linkId: card.id,
+            actorId: profile?.id,
+          });
+        }
         onSaved(card);
       }
     } catch (err) { alert('บันทึกไม่สำเร็จ: ' + err.message); }
