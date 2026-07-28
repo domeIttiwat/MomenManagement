@@ -10,6 +10,8 @@ import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
 import { logAction } from '@/lib/auditLog';
+import TagControl, { TagChips, firstTagColor } from '@/app/components/common/TagControl';
+import { fetchSharedTags, createSharedTag, deleteSharedTag, fetchSharedTagLinks, toggleSharedTagLink } from '@/lib/sharedTags';
 import ImageLightbox from '@/app/components/common/ImageLightbox'; // แสดงรูปต้องใช้ตัวนี้เสมอ (GOTCHA #18)
 
 // สร้าง <optgroup> ของ "ชนิด" จัดตาม "หมวด" (ไม่โชว์ตัวที่เป็นหมวด)
@@ -332,13 +334,40 @@ const FinanceMain = () => {
     return Object.values(buckets).sort((a, b) => a.k - b.k);
   }, [flowTxns, mode, trendAxis]);
 
+  // ---- Tag กลางของทีม (ทุกคนเห็นเหมือนกัน) ติดที่รายการรายรับรายจ่าย ----
+  const [finTags, setFinTags] = useState([]);
+  const [finTagLinks, setFinTagLinks] = useState({});
+  useEffect(() => {
+    fetchSharedTags('finance').then(setFinTags);
+    fetchSharedTagLinks('finance', 'finance_txn').then(setFinTagLinks);
+  }, []);
+  const toggleFinTag = async (txnId, tagId) => {
+    setFinTagLinks(prev => {
+      const cur = prev[txnId] || [];
+      return { ...prev, [txnId]: cur.includes(tagId) ? cur.filter(x => x !== tagId) : [...cur, tagId] };
+    });
+    try { await toggleSharedTagLink(tagId, 'finance_txn', txnId); }
+    catch { fetchSharedTagLinks('finance', 'finance_txn').then(setFinTagLinks); }
+  };
+  const createFinTag = async (name, color) => {
+    const t = await createSharedTag('finance', name, color, profile ? { id: profile.id, name: `${profile.first_name} ${profile.last_name}` } : null);
+    setFinTags(prev => [...prev, t]);
+    return t;
+  };
+  const deleteFinTag = async (tagId) => {
+    await deleteSharedTag(tagId);
+    setFinTags(prev => prev.filter(t => t.id !== tagId));
+    fetchSharedTagLinks('finance', 'finance_txn').then(setFinTagLinks);
+  };
+
   // ---- list (search + type) — ซ่อนรายการ Offset จากคนที่ไม่มีสิทธิ์ ----
   const list = useMemo(() => visibleTxns.filter(t => {
     if (typeFilter !== 'all' && t.type !== typeFilter) return false;
     if (!search) return true;
-    const hay = `${t.note || ''} ${t.category?.name || ''}`.toLowerCase();
+    const tagNames = (finTagLinks[t.id] || []).map(id => finTags.find(x => x.id === id)?.name || '').join(' ');
+    const hay = `${t.note || ''} ${t.category?.name || ''} ${tagNames}`.toLowerCase();
     return hay.includes(search.toLowerCase());
-  }), [visibleTxns, typeFilter, search]);
+  }), [visibleTxns, typeFilter, search, finTags, finTagLinks]);
 
   const deleteTx = async (t) => {
     const warn = t.source !== 'manual' ? 'รายการนี้มาจากระบบอัตโนมัติ (ออเดอร์/บริการ) — ถ้าออเดอร์มีการอัปเดตยอดจ่ายอีก ระบบอาจสร้างรายการนี้กลับมา\n\nยืนยันลบ?' : 'ลบรายการนี้?';
@@ -664,8 +693,11 @@ const FinanceMain = () => {
         {loading ? <div className="py-16 text-center text-gray-400"><Loader2 className="animate-spin inline" size={22} /></div>
           : list.length === 0 ? <div className="py-16 text-center text-gray-400 text-sm">ไม่มีรายการในช่วงนี้</div> : (
             <div className="divide-y divide-gray-50">
-              {list.map(t => (
-                <div key={t.id} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50/60 group">
+              {list.map(t => {
+                const rowTagColor = firstTagColor(finTags, finTagLinks[t.id] || []); // ไฮไลต์แถวตามสีแท็กแรก
+                return (
+                <div key={t.id} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50/60 group"
+                  style={rowTagColor ? { backgroundColor: `${rowTagColor}16`, boxShadow: `inset 5px 0 0 ${rowTagColor}` } : undefined}>
                   <span className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ backgroundColor: (t.type === 'income' ? EARTH.income : EARTH.expense) + '1f', color: t.type === 'income' ? EARTH.income : EARTH.expense }}>
                     {t.type === 'income' ? <ArrowUpCircle size={18} /> : <ArrowDownCircle size={18} />}
                   </span>
@@ -674,6 +706,7 @@ const FinanceMain = () => {
                       {t.category && <span className="text-[11px] font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: (t.category.color || '#94a3b8') + '22', color: t.category.color || '#64748b' }}>{t.category.name}</span>}
                       <span className="text-sm text-gray-700 truncate">{t.note || (t.type === 'income' ? 'รายรับ' : 'รายจ่าย')}</span>
                       {t.source === 'recurring' ? <span className="text-[10px] text-stone-500 bg-stone-100 px-1.5 py-0.5 rounded">ประจำ</span> : t.source !== 'manual' && <span className="text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">อัตโนมัติ</span>}
+                      <TagChips tags={finTags} itemTagIds={finTagLinks[t.id] || []} />
                     </div>
                     <p className="text-xs text-gray-400 mt-0.5">{fmtDateTime(t.txn_at || t.txn_date)} · {methodLabel(t.method)} · <span className="text-gray-500 font-medium">{txnOrigin(t)}</span></p>
                   </div>
@@ -684,6 +717,11 @@ const FinanceMain = () => {
                     </button>
                   )}
                   <span className="font-bold text-sm shrink-0" style={{ color: t.type === 'income' ? EARTH.income : EARTH.expense }}>{t.type === 'income' ? '+' : '-'}{baht(t.amount)}</span>
+                  <span className="shrink-0" onClick={e => e.stopPropagation()}>
+                    <TagControl tags={finTags} itemTagIds={finTagLinks[t.id] || []}
+                      onToggle={(tagId) => toggleFinTag(t.id, tagId)} onCreate={createFinTag} onDeleteTag={deleteFinTag}
+                      align="right" headerLabel="Tag ทีม — ทุกคนเห็นเหมือนกัน" buttonTitle="Tag ทีม (ทุกคนเห็น)" />
+                  </span>
                   {(canEdit || canDelete) && (
                     <div className="flex items-center gap-1 shrink-0 sm:opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
                       {canEdit && <button onClick={() => setTxModal(t)} className="p-1.5 text-gray-400 hover:text-stone-700"><Pencil size={15} /></button>}
@@ -691,7 +729,8 @@ const FinanceMain = () => {
                     </div>
                   )}
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
       </div>

@@ -27,7 +27,7 @@ export const TagChips = ({ tags = [], itemTagIds = [] }) => {
 export const firstTagColor = (tags = [], itemTagIds = []) =>
   tags.find((t) => itemTagIds.includes(t.id))?.color || null;
 
-const TagControl = ({ tags = [], itemTagIds = [], onToggle, onCreate, onDeleteTag = null, align = 'right' }) => {
+const TagControl = ({ tags = [], itemTagIds = [], onToggle, onCreate, onDeleteTag = null, align = 'right', headerLabel = 'Tag ของฉัน — คนอื่นไม่เห็น', buttonTitle = 'Tag ส่วนตัว (คนอื่นไม่เห็น)' }) => {
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState('');
@@ -42,7 +42,7 @@ const TagControl = ({ tags = [], itemTagIds = [], onToggle, onCreate, onDeleteTa
 
   return (
     <span className="relative inline-block" onClick={(e) => e.stopPropagation()}>
-      <button type="button" onClick={() => setOpen((v) => !v)} title="Tag ส่วนตัว (คนอื่นไม่เห็น)"
+      <button type="button" onClick={() => setOpen((v) => !v)} title={buttonTitle}
         className={`p-1 rounded-lg transition-colors ${activeColor ? 'hover:bg-gray-100' : 'text-gray-300 hover:text-indigo-500 hover:bg-gray-100'}`}
         style={activeColor ? { color: activeColor } : undefined}>
         <Tag size={15} className={activeColor ? 'fill-current' : ''} />
@@ -52,7 +52,7 @@ const TagControl = ({ tags = [], itemTagIds = [], onToggle, onCreate, onDeleteTa
         <>
           <span className="fixed inset-0 z-[80] block" onClick={() => setOpen(false)} />
           <span className={`absolute z-[90] top-7 ${align === 'right' ? 'right-0' : 'left-0'} w-60 bg-white border border-gray-200 rounded-2xl shadow-xl p-2 block text-left cursor-default`}>
-            <span className="block text-[10px] font-bold text-gray-400 uppercase tracking-wide px-2 pt-1 pb-1.5">Tag ของฉัน — คนอื่นไม่เห็น</span>
+            <span className="block text-[10px] font-bold text-gray-400 uppercase tracking-wide px-2 pt-1 pb-1.5">{headerLabel}</span>
 
             <span className="block max-h-52 overflow-y-auto">
               {tags.length === 0 && !creating && (
