@@ -10,6 +10,7 @@ import OrderForm from './OrderForm';
 import OrderDetail from './OrderDetail';
 import OrderCard from './OrderCard';
 import OrderPrepCard from './OrderPrepCard';
+import { paymentTotals } from '@/lib/paymentSave';
 
 const enrichOrdersFrameRequirement = async (orders) => {
   const productIds = [...new Set(
@@ -224,11 +225,15 @@ const OrderMain = ({ initialNavData, onViewCustomer }) => {
   const filteredAndSorted = useMemo(() => {
     let result = [...orders];
 
-    if (!showHistory) {
+    // ตัวกรองค้างชำระ/รอเงินเข้า ต้องเห็นครบทุกใบรวมงานที่จบแล้ว
+    // (ออเดอร์ Completed ที่ยังค้างจ่ายจะได้ไม่หลุดสายตา — ให้ตรงกับการ์ดลูกหนี้หน้าการเงิน)
+    const payFilterActive = filterStatus === '_outstanding' || filterStatus === '_pending_settle';
+
+    if (!showHistory && !payFilterActive) {
       result = result.filter(o => o.status !== 'Completed' && o.status !== 'Cancelled');
     }
 
-    if (!showQuotation) {
+    if (!showQuotation && !payFilterActive) {
       result = result.filter(o => o.status !== 'Quotation');
     }
 
@@ -242,7 +247,15 @@ const OrderMain = ({ initialNavData, onViewCustomer }) => {
     }
 
     if (filterStatus !== 'All') {
-      result = result.filter(o => o.status === filterStatus);
+      if (filterStatus === '_outstanding') {
+        // ค้างชำระ: ยอดจ่ายยังไม่ครบ (ไม่นับใบเสนอราคา/ยกเลิก)
+        result = result.filter(o => o.status !== 'Cancelled' && o.status !== 'Quotation' && paymentTotals(o.order_payments || [], o.grand_total || 0).outstanding > 0);
+      } else if (filterStatus === '_pending_settle') {
+        // รอเงินเข้า: มีรายการบัตรที่ยังไม่ยืนยันเงินเข้าบัญชี
+        result = result.filter(o => paymentTotals(o.order_payments || [], o.grand_total || 0).pending > 0);
+      } else {
+        result = result.filter(o => o.status === filterStatus);
+      }
     }
 
     if (tagFilter) {
@@ -396,6 +409,8 @@ const OrderMain = ({ initialNavData, onViewCustomer }) => {
                <option value="Shipping">เตรียมส่ง</option>
                <option value="Completed">เรียบร้อย</option>
                <option value="Cancelled">ยกเลิก</option>
+               <option value="_outstanding">— ค้างชำระ</option>
+               <option value="_pending_settle">— รอเงินเข้า (บัตร)</option>
              </select>
              <Filter size={16} className="absolute left-3.5 top-3.5 text-gray-400 pointer-events-none"/>
           </div>

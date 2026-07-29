@@ -16,6 +16,7 @@ import PaintEditor from './PaintEditor';
 import PaintBadge from '@/app/components/common/PaintBadge';
 import { allocateFifoStockOut } from '@/lib/stockLots';
 import { dtLocalInput, localToISO } from '@/lib/datetime';
+import { savePaymentsDiff, settlementFieldsFor, paymentUpdateFor } from '@/lib/paymentSave';
 import {
   FRAME_STATUS,
   FRAME_STATUS_OPTIONS,
@@ -415,8 +416,9 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
         // ลบข้อมูลเก่าทั้งหมด (Strategy: Delete & Re-insert)
         // ข้อดี: ง่ายและจัดการลำดับได้ดี
         // ข้อเสีย: ถ้าข้อมูลใน formData ไม่อัปเดต ข้อมูลจริงจะหาย (เราแก้ด้วย useEffect fetchFreshData ข้างบนแล้ว)
+        // หมายเหตุ: order_payments ไม่ใช้วิธีนี้แล้ว — เซฟแบบ diff ผ่าน savePaymentsDiff
+        // เพื่อรักษาข้อมูล settlement (วันเงินเข้าจริง/ยอดเข้าจริง/คนยืนยัน) ของแถวเดิม
         await supabase.from('order_items').delete().eq('order_id', orderId);
-        await supabase.from('order_payments').delete().eq('order_id', orderId);
         await supabase.from('order_updates').delete().eq('order_id', orderId);
         await supabase.from('order_assignees').delete().eq('order_id', orderId);
       } else {
@@ -501,18 +503,38 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
         })));
       }
 
-      if (formData.payments.length > 0) {
-        const paymentsPayload = formData.payments.map(p => ({
-          order_id: orderId,
-          amount: p.amount,
-          payment_date: localToISO(p.date),
-          type: p.type,
-          payment_method: p.method || 'Transfer',
-          fee_percent: p.fee_percent || 0,
-          fee_amount: p.fee_amount || 0
-        }));
-        await supabase.from('order_payments').insert(paymentsPayload);
-      }
+      // เซฟรายการชำระแบบ diff: แถวเดิมคงไว้ (ไม่แตะ settlement), ลบเฉพาะที่ผู้ใช้ลบ, insert เฉพาะแถวใหม่
+      await savePaymentsDiff({
+        table: 'order_payments',
+        refCol: 'order_id',
+        refId: orderId,
+        payments: formData.payments,
+        toRow: (p) => {
+          const iso = localToISO(p.date);
+          return {
+            order_id: orderId,
+            amount: p.amount,
+            payment_date: iso,
+            type: p.type,
+            payment_method: p.method || 'Transfer',
+            fee_percent: p.fee_percent || 0,
+            fee_amount: p.fee_amount || 0,
+            ...settlementFieldsFor(p, iso),
+          };
+        },
+        toUpdateRow: (p) => {
+          const iso = localToISO(p.date);
+          return {
+            amount: p.amount,
+            payment_date: iso,
+            type: p.type,
+            payment_method: p.method || 'Transfer',
+            fee_percent: p.fee_percent || 0,
+            fee_amount: p.fee_amount || 0,
+            ...paymentUpdateFor(p, iso),
+          };
+        },
+      });
 
       const logFields = (d, total) => ({
         order_number: d?.order_number, status: d?.status, frame_status: d?.frame_status,

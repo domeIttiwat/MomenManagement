@@ -8,6 +8,7 @@ import AuditLogPanel from '@/app/components/common/AuditLogPanel';
 import ServiceList from './ServiceList';
 import ServiceForm from './ServiceForm';
 import ServiceDetail from './ServiceDetail';
+import { paymentTotals } from '@/lib/paymentSave';
 
 const ServiceMain = () => {
   const { can, profile } = useAuth();
@@ -126,7 +127,10 @@ const ServiceMain = () => {
   const filteredAndSorted = useMemo(() => {
     let result = [...services];
 
-    if (!showHistory) {
+    // ตัวกรองค้างชำระ/รอเงินเข้า ต้องเห็นครบทุกใบรวมงานที่จบแล้ว (เหมือนฝั่งออเดอร์)
+    const payFilterActive = filterStatus === '_outstanding' || filterStatus === '_pending_settle';
+
+    if (!showHistory && !payFilterActive) {
       result = result.filter(item => item.status !== 'Completed' && item.status !== 'Cancelled');
     }
 
@@ -140,7 +144,13 @@ const ServiceMain = () => {
     }
 
     if (filterStatus !== 'All') {
-      result = result.filter(item => item.status === filterStatus);
+      if (filterStatus === '_outstanding') {
+        result = result.filter(item => item.status !== 'Cancelled' && paymentTotals(item.service_payments || [], item.grand_total || 0).outstanding > 0);
+      } else if (filterStatus === '_pending_settle') {
+        result = result.filter(item => paymentTotals(item.service_payments || [], item.grand_total || 0).pending > 0);
+      } else {
+        result = result.filter(item => item.status === filterStatus);
+      }
     }
 
     if (tagFilter) {
@@ -237,6 +247,8 @@ const ServiceMain = () => {
                  <option value="Delivered">รอส่ง</option>
                  <option value="Completed">เรียบร้อย</option>
                  <option value="Cancelled">ยกเลิก</option>
+                 <option value="_outstanding">— ค้างชำระ</option>
+                 <option value="_pending_settle">— รอเงินเข้า (บัตร)</option>
                </select>
                <Filter size={16} className="absolute left-3.5 top-3.5 text-gray-400 pointer-events-none"/>
             </div>

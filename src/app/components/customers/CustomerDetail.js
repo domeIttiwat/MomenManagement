@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowLeft, Edit, Trash2, MapPin, Phone, MessageSquare, Facebook, Instagram, MessageCircle, X, ShoppingBag, TrendingUp, DollarSign, Eye, EyeOff, Package, ExternalLink, Map } from 'lucide-react';
+import { ArrowLeft, Edit, Trash2, MapPin, Phone, MessageSquare, Facebook, Instagram, MessageCircle, X, ShoppingBag, TrendingUp, DollarSign, Eye, EyeOff, Package, ExternalLink, Map, AlertCircle, Wrench } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/app/context/AuthContext';
 import AuditLogPanel from '@/app/components/common/AuditLogPanel';
+import { paymentTotals } from '@/lib/paymentSave';
 
 const CustomerDetail = ({ customer, onBack, onEdit, onDelete, onViewOrder }) => {
   const { can } = useAuth();
@@ -10,6 +11,7 @@ const CustomerDetail = ({ customer, onBack, onEdit, onDelete, onViewOrder }) => 
   const [orders, setOrders] = useState([]);
   const [loadingOrders, setLoadingOrders] = useState(false);
   const [showProfit, setShowProfit] = useState(false);
+  const [services, setServices] = useState([]);
 
   if (!customer) return null;
 
@@ -18,19 +20,40 @@ const CustomerDetail = ({ customer, onBack, onEdit, onDelete, onViewOrder }) => 
       setLoadingOrders(true);
       const { data } = await supabase
         .from('orders')
-        .select('*, order_items(*)')
+        .select('*, order_items(*), order_payments(*)')
         .eq('customer_id', customer.id)
         .order('order_date', { ascending: false });
-      
+
       if (data) setOrders(data);
       setLoadingOrders(false);
     };
 
+    const fetchServices = async () => {
+      const { data } = await supabase
+        .from('services')
+        .select('id, service_number, status, received_date, grand_total, service_payments(*)')
+        .eq('customer_id', customer.id)
+        .order('received_date', { ascending: false });
+      if (data) setServices(data);
+    };
+
     fetchOrders();
+    fetchServices();
   }, [customer.id]);
 
   const totalOrders = orders.length;
   const grandTotalSpent = orders.reduce((sum, o) => sum + (o.grand_total || 0), 0);
+
+  // ยอดค้างชำระรวมของลูกค้า (ออเดอร์ + งานซ่อม, ไม่นับใบเสนอราคา/ยกเลิก)
+  const owingDocs = [
+    ...orders
+      .filter(o => o.status !== 'Cancelled' && o.status !== 'Quotation')
+      .map(o => ({ kind: 'order', doc: o, ...paymentTotals(o.order_payments || [], o.grand_total || 0) })),
+    ...services
+      .filter(s => s.status !== 'Cancelled')
+      .map(s => ({ kind: 'service', doc: s, ...paymentTotals(s.service_payments || [], s.grand_total || 0) })),
+  ].filter(d => d.outstanding > 0);
+  const totalOwed = owingDocs.reduce((s, d) => s + d.outstanding, 0);
   
   const grandTotalProfit = orders.reduce((sum, o) => {
     const orderCost = o.order_items?.reduce((c, i) => c + (i.cost_price * i.quantity), 0) || 0;
@@ -184,7 +207,44 @@ const CustomerDetail = ({ customer, onBack, onEdit, onDelete, onViewOrder }) => 
                 <p className="text-3xl font-black text-emerald-700">+฿{grandTotalProfit.toLocaleString()}</p>
               </div>
             )}
+            {totalOwed > 0 && (
+              <div className="bg-red-50 p-5 rounded-2xl shadow-sm border border-red-100 flex flex-col justify-between">
+                <div className="flex justify-between items-start mb-2">
+                  <p className="text-red-600 text-xs font-bold uppercase tracking-wider">ค้างชำระ</p>
+                  <AlertCircle size={20} className="text-red-500 bg-white p-1 rounded-md shadow-sm"/>
+                </div>
+                <p className="text-3xl font-black text-red-600">฿{totalOwed.toLocaleString()}</p>
+                <p className="text-[11px] text-red-400 mt-0.5">{owingDocs.length} ใบที่ยังจ่ายไม่ครบ</p>
+              </div>
+            )}
           </div>
+
+          {/* รายการที่ค้างชำระ */}
+          {totalOwed > 0 && (
+            <div className="bg-white rounded-3xl shadow-sm border border-red-100 overflow-hidden">
+              <div className="px-6 py-4 border-b border-red-50 bg-red-50/40 flex items-center gap-2">
+                <AlertCircle size={16} className="text-red-500"/>
+                <h3 className="font-bold text-red-700 text-sm">รายการค้างชำระ</h3>
+              </div>
+              <div className="divide-y divide-gray-50">
+                {owingDocs.map((d, i) => (
+                  <div key={i}
+                    onClick={() => d.kind === 'order' && onViewOrder && onViewOrder(d.doc)}
+                    className={`px-6 py-3 flex items-center gap-3 ${d.kind === 'order' ? 'cursor-pointer hover:bg-red-50/30' : ''}`}>
+                    {d.kind === 'order' ? <ShoppingBag size={14} className="text-indigo-400 shrink-0"/> : <Wrench size={14} className="text-amber-500 shrink-0"/>}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-gray-800">{d.kind === 'order' ? d.doc.order_number : d.doc.service_number}</p>
+                      <p className="text-[11px] text-gray-400">{d.kind === 'order' ? 'ออเดอร์' : 'งานซ่อม'} · {new Date(d.kind === 'order' ? d.doc.order_date : d.doc.received_date).toLocaleDateString('th-TH')}{d.paid > 0 ? ` · ชำระแล้ว ฿${d.paid.toLocaleString()}` : ' · ยังไม่ได้ชำระ'}</p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="text-sm font-bold text-red-600">ค้าง ฿{d.outstanding.toLocaleString()}</p>
+                      <p className="text-[10px] text-gray-400">จาก ฿{Number(d.doc.grand_total || 0).toLocaleString()}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Order History */}
           <div className="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">

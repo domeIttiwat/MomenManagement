@@ -1,6 +1,7 @@
 import React from 'react';
-import { Package, User, Clock, CheckCircle2, MessageCircle, Facebook, Instagram, Phone, Wrench } from 'lucide-react';
+import { Package, User, Clock, CheckCircle2, MessageCircle, Facebook, Instagram, Phone, Wrench, Hourglass } from 'lucide-react';
 import TagControl, { TagChips, firstTagColor } from '@/app/components/common/TagControl';
+import { paymentTotals } from '@/lib/paymentSave';
 import {
   getFrameStatusLabel,
   getFrameStatusStyle,
@@ -137,6 +138,27 @@ const OrderListItem = ({ order, showProfit, onClick, tags = [], itemTagIds = [],
       </td>
       <td className="px-6 py-4 text-right align-top">
         <span className="font-bold text-gray-900">฿{order.grand_total.toLocaleString()}</span>
+        {(() => {
+          if (order.status === 'Cancelled' || order.status === 'Quotation') return null;
+          const { paid, pending, outstanding } = paymentTotals(order.order_payments || [], order.grand_total || 0);
+          return (
+            <div className="flex flex-col items-end gap-0.5 mt-1">
+              {outstanding > 0 && (
+                <span className="text-[10px] font-bold text-red-600 bg-red-50 border border-red-100 px-1.5 py-0.5 rounded whitespace-nowrap">
+                  ค้าง ฿{outstanding.toLocaleString()}
+                </span>
+              )}
+              {outstanding > 0 && paid > 0 && (
+                <span className="text-[9px] text-gray-400 whitespace-nowrap">ชำระแล้ว ฿{paid.toLocaleString()}</span>
+              )}
+              {pending > 0 && (
+                <span className="text-[10px] font-bold text-purple-700 bg-purple-50 border border-purple-100 px-1.5 py-0.5 rounded whitespace-nowrap flex items-center gap-0.5">
+                  <Hourglass size={9}/> รอเงินเข้า ฿{pending.toLocaleString()}
+                </span>
+              )}
+            </div>
+          );
+        })()}
       </td>
       {showProfit && (
         <td className="px-6 py-4 text-right bg-emerald-50/30 align-top">

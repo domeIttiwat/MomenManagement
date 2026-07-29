@@ -1,6 +1,7 @@
 import React from 'react';
-import { Wrench, Calendar, User, Clock, Wallet, CheckCircle2, AlertCircle, Truck, PauseCircle, XCircle, PlayCircle, ClipboardList } from 'lucide-react';
+import { Wrench, Calendar, User, Clock, Wallet, CheckCircle2, AlertCircle, Truck, PauseCircle, XCircle, PlayCircle, ClipboardList, Hourglass } from 'lucide-react';
 import TagControl, { TagChips, firstTagColor } from '@/app/components/common/TagControl';
+import { paymentTotals } from '@/lib/paymentSave';
 
 const ServiceListItem = ({ service, onClick, tags = [], itemTagIds = [], onToggleTag = null, onCreateTag = null, onDeleteTag = null }) => {
   const tagColor = firstTagColor(tags, itemTagIds);
@@ -163,6 +164,23 @@ const ServiceListItem = ({ service, onClick, tags = [], itemTagIds = [], onToggl
       </td>
       <td className="px-6 py-4 text-right font-bold text-gray-900">
          ฿{service.grand_total.toLocaleString()}
+         {(() => {
+           if (service.status === 'Cancelled') return null;
+           const { paid, pending, outstanding } = paymentTotals(service.service_payments || [], service.grand_total || 0);
+           return (
+             <div className="flex flex-col items-end gap-0.5 mt-1 font-normal">
+               {outstanding > 0 && (
+                 <span className="text-[10px] font-bold text-red-600 bg-red-50 border border-red-100 px-1.5 py-0.5 rounded whitespace-nowrap">ค้าง ฿{outstanding.toLocaleString()}</span>
+               )}
+               {outstanding > 0 && paid > 0 && (
+                 <span className="text-[9px] text-gray-400 whitespace-nowrap">ชำระแล้ว ฿{paid.toLocaleString()}</span>
+               )}
+               {pending > 0 && (
+                 <span className="text-[10px] font-bold text-purple-700 bg-purple-50 border border-purple-100 px-1.5 py-0.5 rounded whitespace-nowrap flex items-center gap-0.5"><Hourglass size={9}/> รอเงินเข้า ฿{pending.toLocaleString()}</span>
+               )}
+             </div>
+           );
+         })()}
       </td>
     </tr>
   );

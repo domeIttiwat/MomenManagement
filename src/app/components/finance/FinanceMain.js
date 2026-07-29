@@ -13,6 +13,7 @@ import { logAction } from '@/lib/auditLog';
 import TagControl, { TagChips, firstTagColor } from '@/app/components/common/TagControl';
 import { fetchSharedTags, createSharedTag, deleteSharedTag, fetchSharedTagLinks, toggleSharedTagLink } from '@/lib/sharedTags';
 import ImageLightbox from '@/app/components/common/ImageLightbox'; // แสดงรูปต้องใช้ตัวนี้เสมอ (GOTCHA #18)
+import SettlementReceivables from './SettlementReceivables';
 
 // สร้าง <optgroup> ของ "ชนิด" จัดตาม "หมวด" (ไม่โชว์ตัวที่เป็นหมวด)
 const renderCatOptions = (categories, type) => {
@@ -36,6 +37,8 @@ const METHODS = [
   { key: 'other', label: 'อื่นๆ' },
 ];
 const methodLabel = (k) => METHODS.find(m => m.key === k)?.label || k || '—';
+// ตัวเลือกตอนกรอก — ไม่มีพร้อมเพย์ (METHODS เต็มยังเก็บไว้ใช้แสดง label ข้อมูลเก่า)
+const PICK_METHODS = METHODS.filter(m => m.key !== 'promptpay');
 const baht = (n) => `฿${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
 const pad = (n) => String(n).padStart(2, '0');
 const toStr = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -478,22 +481,26 @@ const FinanceMain = () => {
               <p className="text-[11px] text-gray-400">รายจ่ายเดือนนี้</p>
               <p className="text-lg font-black" style={{ color: EARTH.expense }}>{baht(opExpense)}</p>
             </div>
-            {Math.round(adjNet * 100) !== 0 && (<>
-              <span className="text-gray-300 font-black">{adjNet >= 0 ? '+' : '−'}</span>
-              <div className="flex-1 min-w-[90px]">
-                <p className="text-[11px] text-gray-400">ปรับยอด</p>
-                <p className="text-lg font-black" style={{ color: adjNet >= 0 ? EARTH.income : EARTH.expense }}>{baht(Math.abs(adjNet))}</p>
-              </div>
-            </>)}
             <span className="text-gray-300 font-black">=</span>
             <div className="flex-1 min-w-[130px] rounded-2xl px-3 py-2 text-white" style={{ background: 'linear-gradient(135deg, #5b4a3c, #3d3833)' }}>
               <p className="text-[11px] text-white/55">คงเหลือสิ้นเดือน (เงินจริงที่ควรมี)</p>
               <p className="text-xl font-black">{baht(endingThisMonth)}</p>
             </div>
           </div>
-          <p className="text-[11px] text-gray-400 mt-2.5 pt-2.5 border-t border-stone-100">กำไร/ขาดทุนจากการดำเนินงานเดือนนี้ (รับ − จ่าย): <span className="font-bold" style={{ color: net >= 0 ? EARTH.net : EARTH.expense }}>{baht(net)}</span></p>
+          <p className="text-[11px] text-gray-400 mt-2.5 pt-2.5 border-t border-stone-100">
+            กำไร/ขาดทุนจากการดำเนินงานเดือนนี้ (รับ − จ่าย): <span className="font-bold" style={{ color: net >= 0 ? EARTH.net : EARTH.expense }}>{baht(net)}</span>
+            {Math.round(adjNet * 100) !== 0 && (
+              <span className="ml-3 text-gray-300">|</span>
+            )}
+            {Math.round(adjNet * 100) !== 0 && (
+              <span className="ml-3">ปรับยอดเดือนนี้: <span className="font-bold" style={{ color: adjNet >= 0 ? EARTH.income : EARTH.expense }}>{adjNet >= 0 ? '+' : '−'}{baht(Math.abs(adjNet))}</span> (รวมอยู่ในยอดคงเหลือแล้ว)</span>
+            )}
+          </p>
         </div>
       )}
+
+      {/* เงินรอเข้าบัญชี (บัตร) + ลูกหนี้ค้างชำระ — เงินที่ยังไม่อยู่ในยอดคงเหลือ */}
+      <SettlementReceivables canEdit={canEdit} byRef={meRef()} onChanged={refreshAll} />
 
       {/* เป้าหมายโฟกัส — แสดงเฉพาะมุมมองรายเดือน */}
       {mode === 'month' && (
@@ -898,7 +905,7 @@ const RecurringModal = ({ categories, profile, onClose, onChanged, canDelete }) 
               <input type="number" min="1" max="31" value={day} onChange={e => setDay(e.target.value)} className={`${inputCls} text-center`} />
             </div>
             <select value={method} onChange={e => setMethod(e.target.value)} className={inputCls}>
-              {METHODS.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}
+              {PICK_METHODS.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}
             </select>
           </div>
           <input value={note} onChange={e => setNote(e.target.value)} placeholder="รายละเอียด (เช่น เงินเดือนพนักงาน)" className={inputCls} />
@@ -916,7 +923,7 @@ const TxModal = ({ txn, defaultType, categories, profile, onClose, onSaved }) =>
   const [amount, setAmount] = useState(txn?.amount ?? '');
   const [categoryId, setCategoryId] = useState(txn?.category_id || '');
   const [dt, setDt] = useState(toLocalDT(txn?.txn_at || (txn?.txn_date ? txn.txn_date + 'T00:00' : null)));
-  const [method, setMethod] = useState(txn?.method || 'cash');
+  const [method, setMethod] = useState(txn?.method || 'bank'); // default = โอน (ร้านจ่าย/รับผ่านธนาคารเป็นหลัก)
   const [note, setNote] = useState(txn?.note || '');
   const [images, setImages] = useState(txn?.images || []);
   const [files, setFiles] = useState([]);
@@ -990,7 +997,7 @@ const TxModal = ({ txn, defaultType, categories, profile, onClose, onSaved }) =>
           <div>
             <label className="block text-xs font-bold text-gray-500 mb-1.5">ช่องทาง</label>
             <select value={method} onChange={e => setMethod(e.target.value)} className={inputCls}>
-              {METHODS.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}
+              {PICK_METHODS.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}
             </select>
           </div>
         </div>
@@ -1156,13 +1163,12 @@ const QuickExpense = ({ categories, profile, onSaved }) => {
   const expCats = categories.filter(c => c.type === 'expense' && c.is_active !== false && !c.is_group);
   const [amount, setAmount] = useState('');
   const [categoryId, setCategoryId] = useState('');
-  const [method, setMethod] = useState('cash');
+  const [method, setMethod] = useState('bank'); // default = โอน (ร้านจ่ายผ่านธนาคารเป็นหลัก)
   const [note, setNote] = useState('');
   const [dt, setDt] = useState(toLocalDT());
   const [files, setFiles] = useState([]);
   const [saving, setSaving] = useState(false);
   const [savedFlash, setSavedFlash] = useState(false);
-  const [showMore, setShowMore] = useState(false);
   const [preview, setPreview] = useState(null); // ดูรูปที่แนบเป็น popup ก่อนบันทึก
   useEffect(() => { if (!categoryId && expCats[0]) setCategoryId(String(expCats[0].id)); }, [expCats]); // eslint-disable-line
 
@@ -1210,8 +1216,15 @@ const QuickExpense = ({ categories, profile, onSaved }) => {
         <label className="text-xs text-gray-500 flex items-center gap-1.5">วันที่ &amp; เวลา
           <input type="datetime-local" value={dt} onChange={e => setDt(e.target.value)} className="text-xs px-2 py-1.5 bg-gray-50 border border-gray-200 rounded-lg outline-none" />
         </label>
-        <button onClick={() => setShowMore(s => !s)} className="text-xs font-semibold text-stone-600 hover:underline">{showMore ? 'ซ่อนช่องทาง' : 'เลือกช่องทางจ่าย'}</button>
-        {showMore && <select value={method} onChange={e => setMethod(e.target.value)} className="text-xs px-2 py-1.5 bg-gray-50 border border-gray-200 rounded-lg outline-none">{METHODS.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}</select>}
+        <span className="text-xs text-gray-500">ช่องทางจ่าย</span>
+        <div className="bg-gray-50 border border-gray-200 rounded-xl p-0.5 flex">
+          {PICK_METHODS.map(m => (
+            <button key={m.key} type="button" onClick={() => setMethod(m.key)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${method === m.key ? 'bg-stone-700 text-white shadow-sm' : 'text-gray-500 hover:bg-white'}`}>
+              {m.label}
+            </button>
+          ))}
+        </div>
       </div>
       {/* แนบรูปบิล — เห็นตัวอย่าง, หลายรูป, ถ่ายรูปได้ */}
       <div className="flex items-center gap-2 mt-2.5 flex-wrap">

@@ -1,6 +1,7 @@
 import React from 'react';
-import { Wrench, Calendar, User, Clock, CheckCircle2, AlertCircle, Truck, Wallet, PauseCircle, XCircle, PlayCircle, ClipboardList } from 'lucide-react';
+import { Wrench, Calendar, User, Clock, CheckCircle2, AlertCircle, Truck, Wallet, PauseCircle, XCircle, PlayCircle, ClipboardList, Hourglass } from 'lucide-react';
 import TagControl, { TagChips, firstTagColor } from '@/app/components/common/TagControl';
+import { paymentTotals } from '@/lib/paymentSave';
 
 const ServiceCard = ({ service, onClick, tags = [], itemTagIds = [], onToggleTag = null, onCreateTag = null, onDeleteTag = null }) => {
   const tagColor = firstTagColor(tags, itemTagIds);
@@ -144,6 +145,20 @@ const ServiceCard = ({ service, onClick, tags = [], itemTagIds = [], onToggleTag
                    <Wallet size={8}/> {payStatus.label}
                 </span>
               )}
+              {(() => {
+                if (service.status === 'Cancelled') return null;
+                const { pending, outstanding } = paymentTotals(service.service_payments || [], service.grand_total || 0);
+                return (
+                  <>
+                    {outstanding > 0 && (
+                      <span className="text-[9px] font-bold text-red-600 bg-red-50 border border-red-100 px-1.5 py-0.5 rounded whitespace-nowrap">ค้าง ฿{outstanding.toLocaleString()}</span>
+                    )}
+                    {pending > 0 && (
+                      <span className="text-[9px] font-bold text-purple-700 bg-purple-50 border border-purple-100 px-1.5 py-0.5 rounded whitespace-nowrap flex items-center gap-0.5"><Hourglass size={8}/> รอเข้า ฿{pending.toLocaleString()}</span>
+                    )}
+                  </>
+                );
+              })()}
             </div>
           )}
         </div>

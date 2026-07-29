@@ -13,6 +13,7 @@ import ServiceBillPreview from './ServiceBillPreview';
 import ServiceUpdateManager from './ServiceUpdateManager';
 import { allocateFifoStockOut } from '@/lib/stockLots';
 import { dtLocalInput, localToISO, nowLocalInput } from '@/lib/datetime';
+import { savePaymentsDiff, settlementFieldsFor, paymentUpdateFor } from '@/lib/paymentSave';
 
 const ServiceForm = ({ onCancel, onSuccess, initialData }) => {
   const { profile } = useAuth();
@@ -174,7 +175,7 @@ const ServiceForm = ({ onCancel, onSuccess, initialData }) => {
         
         await supabase.from('service_items').delete().eq('service_id', serviceId);
         await supabase.from('service_assignees').delete().eq('service_id', serviceId);
-        await supabase.from('service_payments').delete().eq('service_id', serviceId);
+        // service_payments เซฟแบบ diff ด้านล่าง — ห้าม delete ทั้งชุด ไม่งั้นข้อมูลเงินเข้าบัญชีหาย
         await supabase.from('service_updates').delete().eq('service_id', serviceId);
       } else {
         const { data, error } = await supabase.from('services').insert([{ ...payload, created_by: meRef() }]).select().single();
@@ -251,16 +252,36 @@ const ServiceForm = ({ onCancel, onSuccess, initialData }) => {
         })));
       }
 
-      if (formData.payments.length > 0) {
-        await supabase.from('service_payments').insert(formData.payments.map(p => ({
-          service_id: serviceId,
-          amount: p.amount,
-          payment_date: localToISO(p.date),
-          type: p.type,
-          method: p.method,
-          fee_amount: p.fee_amount
-        })));
-      }
+      // เซฟรายการชำระแบบ diff: แถวเดิมคงไว้ (ไม่แตะ settlement), ลบเฉพาะที่ผู้ใช้ลบ, insert เฉพาะแถวใหม่
+      await savePaymentsDiff({
+        table: 'service_payments',
+        refCol: 'service_id',
+        refId: serviceId,
+        payments: formData.payments,
+        toRow: (p) => {
+          const iso = localToISO(p.date);
+          return {
+            service_id: serviceId,
+            amount: p.amount,
+            payment_date: iso,
+            type: p.type,
+            method: p.method,
+            fee_amount: p.fee_amount,
+            ...settlementFieldsFor(p, iso),
+          };
+        },
+        toUpdateRow: (p) => {
+          const iso = localToISO(p.date);
+          return {
+            amount: p.amount,
+            payment_date: iso,
+            type: p.type,
+            method: p.method,
+            fee_amount: p.fee_amount,
+            ...paymentUpdateFor(p, iso),
+          };
+        },
+      });
 
       const logFields = (d, total) => ({
         service_number: d?.service_number, status: d?.status,

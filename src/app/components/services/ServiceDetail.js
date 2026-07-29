@@ -6,11 +6,22 @@ import ServiceBillPreview from './ServiceBillPreview';
 import AuditLogPanel from '@/app/components/common/AuditLogPanel';
 import ServicePrep from './ServicePrep';
 import WorkCardStrip from '../assembly/WorkCardStrip';
+import { SettlementChip, ConfirmSettleModal, PaymentSummaryBar } from '@/app/components/common/PaymentSettlement';
 
 const ServiceDetail = ({ service, onBack, onEdit, onDelete, showProfit, setShowProfit }) => {
-  const { can } = useAuth();
+  const { can, profile } = useAuth();
+  const meRef = () => profile ? { id: profile.id, name: `${profile.first_name} ${profile.last_name}` } : null;
   const [showBill, setShowBill] = useState(false);
   const [lightboxImg, setLightboxImg] = useState(null);
+  const [settleModalPay, setSettleModalPay] = useState(null);
+  const canSettle = can('finance', 'edit') || can('finance', 'create');
+  // เก็บ payments ไว้ใน state เพื่อ refresh หลังยืนยันเงินเข้าได้โดยไม่ต้องออกจากหน้า
+  const [payments, setPayments] = useState(service?.service_payments || []);
+  useEffect(() => { setPayments(service?.service_payments || []); }, [service?.id, service?.service_payments]);
+  const refreshPayments = async () => {
+    const { data } = await supabase.from('service_payments').select('*').eq('service_id', service.id);
+    if (data) setPayments(data);
+  };
 
   // Timeline State
   const [updates, setUpdates] = useState(service?.service_updates || []);
@@ -464,11 +475,12 @@ const ServiceDetail = ({ service, onBack, onEdit, onDelete, showProfit, setShowP
         <div className="space-y-6">
            <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
               <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><CreditCard size={18} className="text-indigo-500"/> ประวัติการชำระเงิน</h3>
+              <PaymentSummaryBar payments={payments} grandTotal={service.grand_total || 0} />
               <div className="space-y-3 relative">
-                {service.service_payments && service.service_payments.length > 0 ? (
+                {payments && payments.length > 0 ? (
                   <>
                     <div className="absolute left-[19px] top-2 bottom-2 w-0.5 bg-gray-100"></div>
-                    {service.service_payments.map((pay, i) => (
+                    {payments.map((pay, i) => (
                       <div key={i} className="flex gap-4 relative z-10">
                         <div className={`w-10 h-10 rounded-full flex items-center justify-center border-4 border-white shadow-sm shrink-0 ${pay.type === 'deposit' ? 'bg-amber-100 text-amber-600' : 'bg-emerald-100 text-emerald-600'}`}>
                           <DollarSign size={16} />
@@ -489,6 +501,25 @@ const ServiceDetail = ({ service, onBack, onEdit, onDelete, showProfit, setShowP
                             </div>
                             <span className="font-bold text-gray-900">฿{pay.amount.toLocaleString()}</span>
                           </div>
+                          {(pay.method === 'CreditCard' || (pay.settlement_status || 'settled') === 'pending') && (
+                            <div className="flex items-center justify-between gap-2 mt-2 pt-2 border-t border-dashed border-gray-200">
+                              <SettlementChip payment={pay} />
+                              {canSettle && (
+                                (pay.settlement_status || 'settled') === 'pending' ? (
+                                  <button onClick={() => setSettleModalPay(pay)} className="text-[10px] font-bold text-white bg-indigo-600 hover:bg-indigo-700 px-2.5 py-1 rounded-lg">
+                                    ยืนยันเงินเข้า
+                                  </button>
+                                ) : (
+                                  <button onClick={() => setSettleModalPay(pay)} className="text-[10px] text-gray-400 hover:text-indigo-600 underline">
+                                    แก้ไข
+                                  </button>
+                                )
+                              )}
+                            </div>
+                          )}
+                          {(pay.settlement_status || 'settled') === 'settled' && pay.settled_amount != null && Number(pay.settled_amount) < Number(pay.amount) && (
+                            <p className="text-[10px] text-purple-500 mt-1">เข้าจริง ฿{Number(pay.settled_amount).toLocaleString()} (ค่าธรรมเนียม ฿{(Number(pay.amount) - Number(pay.settled_amount)).toLocaleString()})</p>
+                          )}
                         </div>
                       </div>
                     ))}
@@ -547,6 +578,16 @@ const ServiceDetail = ({ service, onBack, onEdit, onDelete, showProfit, setShowP
       </div>
 
       {showBill && <ServiceBillPreview service={service} onClose={() => setShowBill(false)} />}
+
+      {settleModalPay && (
+        <ConfirmSettleModal
+          payment={{ ...settleModalPay, _doc_label: service.service_number }}
+          table="service_payments"
+          byRef={meRef()}
+          onClose={() => setSettleModalPay(null)}
+          onDone={refreshPayments}
+        />
+      )}
 
       {/* Audit Footer */}
       {(service.created_by || service.updated_by) && (

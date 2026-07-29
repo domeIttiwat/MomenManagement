@@ -7,6 +7,7 @@ import BillPreview from './BillPreview';
 import ImageUploader from './ImageUploader';
 import PaintBadge from '@/app/components/common/PaintBadge';
 import AuditLogPanel from '@/app/components/common/AuditLogPanel';
+import { SettlementChip, ConfirmSettleModal, PaymentSummaryBar } from '@/app/components/common/PaymentSettlement';
 import OrderPrep from './OrderPrep';
 import WorkCardStrip from '../assembly/WorkCardStrip';
 import {
@@ -25,6 +26,8 @@ const OrderDetail = ({ order, onBack, onEdit, onDelete, showProfit, setShowProfi
   const meRef = () => profile ? { id: profile.id, name: `${profile.first_name} ${profile.last_name}` } : null;
   const [showBill, setShowBill] = useState(false);
   const [lightboxImg, setLightboxImg] = useState(null);
+  const [settleModalPay, setSettleModalPay] = useState(null); // payment ที่กำลังยืนยันเงินเข้า
+  const canSettle = can('finance', 'edit') || can('finance', 'create');
   const [frameSaving, setFrameSaving] = useState(false);
   const [frameStatus, setFrameStatus] = useState(order?.frame_status || FRAME_STATUS.NOT_REQUIRED);
   
@@ -57,6 +60,12 @@ const OrderDetail = ({ order, onBack, onEdit, onDelete, showProfit, setShowProfi
   const fetchUpdates = async () => {
     const { data } = await supabase.from('order_updates').select('*').eq('order_id', order.id).order('created_at', { ascending: true });
     if (data) setUpdates(data);
+  };
+
+  // ดึงรายการชำระล่าสุดหลังยืนยันเงินเข้า แล้วส่งขึ้นไปให้ลิสต์อัปเดตด้วย
+  const refreshPayments = async () => {
+    const { data } = await supabase.from('order_payments').select('*').eq('order_id', order.id);
+    if (data) onOrderUpdated?.({ ...order, order_payments: data });
   };
   
   // (ฟังก์ชัน handleFileSelect, removeNewImage, handlePostUpdate, ฯลฯ เหมือนเดิม)
@@ -500,6 +509,7 @@ const OrderDetail = ({ order, onBack, onEdit, onDelete, showProfit, setShowProfi
 
            <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
               <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><CreditCard size={18} className="text-indigo-500"/> ประวัติการชำระเงิน</h3>
+              <PaymentSummaryBar payments={order.order_payments || []} grandTotal={order.grand_total || 0} />
               <div className="space-y-3 relative">
                 {order.order_payments && order.order_payments.length > 0 ? (
                   <>
@@ -525,6 +535,25 @@ const OrderDetail = ({ order, onBack, onEdit, onDelete, showProfit, setShowProfi
                             </div>
                             <span className="font-bold text-gray-900">฿{pay.amount.toLocaleString()}</span>
                           </div>
+                          {(pay.payment_method === 'CreditCard' || (pay.settlement_status || 'settled') === 'pending') && (
+                            <div className="flex items-center justify-between gap-2 mt-2 pt-2 border-t border-dashed border-gray-200">
+                              <SettlementChip payment={pay} />
+                              {canSettle && (
+                                (pay.settlement_status || 'settled') === 'pending' ? (
+                                  <button onClick={() => setSettleModalPay(pay)} className="text-[10px] font-bold text-white bg-indigo-600 hover:bg-indigo-700 px-2.5 py-1 rounded-lg">
+                                    ยืนยันเงินเข้า
+                                  </button>
+                                ) : (
+                                  <button onClick={() => setSettleModalPay(pay)} className="text-[10px] text-gray-400 hover:text-indigo-600 underline">
+                                    แก้ไข
+                                  </button>
+                                )
+                              )}
+                            </div>
+                          )}
+                          {(pay.settlement_status || 'settled') === 'settled' && pay.settled_amount != null && Number(pay.settled_amount) < Number(pay.amount) && (
+                            <p className="text-[10px] text-purple-500 mt-1">เข้าจริง ฿{Number(pay.settled_amount).toLocaleString()} (ค่าธรรมเนียม ฿{(Number(pay.amount) - Number(pay.settled_amount)).toLocaleString()})</p>
+                          )}
                         </div>
                       </div>
                     ))}
@@ -740,6 +769,24 @@ const OrderDetail = ({ order, onBack, onEdit, onDelete, showProfit, setShowProfi
       </div>
 
       {showBill && <BillPreview order={order} onClose={() => setShowBill(false)} />}
+
+      {settleModalPay && (
+        <ConfirmSettleModal
+          payment={{ ...settleModalPay, _doc_label: order.order_number }}
+          table="order_payments"
+          byRef={meRef()}
+          onClose={() => setSettleModalPay(null)}
+          onDone={async () => {
+            await logAction({
+              resource_type: 'order', resource_id: order.id, action: 'update',
+              resource_label: `${order.order_number} · ยืนยันเงินเข้า`,
+              new_data: { payment_id: settleModalPay.id, amount: settleModalPay.amount },
+              created_by: meRef(),
+            });
+            refreshPayments();
+          }}
+        />
+      )}
 
       {/* Audit Footer */}
       {(order.created_by || order.updated_by) && (

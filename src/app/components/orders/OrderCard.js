@@ -1,6 +1,7 @@
 import React from 'react';
-import { Package, Calendar, User, FileText, Clock, Banknote, Landmark, CreditCard, Facebook, Instagram, MessageCircle, Phone, Wrench } from 'lucide-react';
+import { Package, Calendar, User, FileText, Clock, Banknote, Landmark, CreditCard, Facebook, Instagram, MessageCircle, Phone, Wrench, Hourglass } from 'lucide-react';
 import TagControl, { TagChips, firstTagColor } from '@/app/components/common/TagControl';
+import { paymentTotals } from '@/lib/paymentSave';
 import {
   getFrameStatusLabel,
   getFrameStatusStyle,
@@ -124,6 +125,20 @@ const OrderCard = ({ order, showProfit, onClick, tags = [], itemTagIds = [], onT
                 {totalProfit > 0 ? '+' : ''}{totalProfit.toLocaleString()}
               </p>
             )}
+            {(() => {
+              if (order.status === 'Cancelled' || order.status === 'Quotation') return null;
+              const { pending, outstanding } = paymentTotals(order.order_payments || [], order.grand_total || 0);
+              return (
+                <div className="flex flex-col items-end gap-0.5 mt-1">
+                  {outstanding > 0 && (
+                    <span className="text-[9px] font-bold text-red-600 bg-red-50 border border-red-100 px-1.5 py-0.5 rounded whitespace-nowrap">ค้าง ฿{outstanding.toLocaleString()}</span>
+                  )}
+                  {pending > 0 && (
+                    <span className="text-[9px] font-bold text-purple-700 bg-purple-50 border border-purple-100 px-1.5 py-0.5 rounded whitespace-nowrap flex items-center gap-0.5"><Hourglass size={8}/> รอเข้า ฿{pending.toLocaleString()}</span>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         </div>
 

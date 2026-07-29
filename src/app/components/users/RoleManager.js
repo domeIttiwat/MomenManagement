@@ -44,6 +44,7 @@ const ACTIONS = [
   { id: 'adjust', label: 'ปรับยอด/กระทบยอด (การเงิน) · กำหนดยอดใหม่ (สต๊อก)', onlyFor: ['finance', 'stock'] },
   { id: 'offset', label: 'เห็นหมวด Offset (ลับ)', onlyFor: ['finance'] },
   { id: 'close_period', label: 'ปิด/เปิดงวด (สิ้นเดือน)', onlyFor: ['finance'] },
+  { id: 'payment_manage', label: 'แก้ไข/ลบรายการชำระเงิน (ออเดอร์/งานซ่อม)', onlyFor: ['finance'] },
 ];
 
 const RoleManager = () => {
