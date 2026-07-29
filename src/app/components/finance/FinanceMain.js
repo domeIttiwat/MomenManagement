@@ -126,6 +126,8 @@ const FinanceMain = () => {
   const [cogs, setCogs] = useState(0);
   const [budgets, setBudgets] = useState([]);
   const [monthSpent, setMonthSpent] = useState({});
+  const [monthSpentRows, setMonthSpentRows] = useState([]); // รายการรายจ่ายเดือนนี้ (โชว์ตอน hover การ์ดโฟกัส)
+  const [hoverBudget, setHoverBudget] = useState(null); // id เป้าหมายที่เมาส์ลอยอยู่
   const [budgetModal, setBudgetModal] = useState(null); // { categoryId, categoryName, existing }
   const [systemBalance, setSystemBalance] = useState(0); // ยอดคงเหลือที่ DB session มองเห็น (อาจไม่รวม offset ถ้าไม่มีสิทธิ์)
   const [offsetPeriodSum, setOffsetPeriodSum] = useState(0);     // ยอดรวม offset ของช่วงที่เลือก (RPC, เลขรวมเท่านั้น)
@@ -173,13 +175,15 @@ const FinanceMain = () => {
     setBudgets(data || []);
   }, []);
   // ยอดจ่ายของ "เดือนนี้" ต่อหมวด (สำหรับการ์ดเป้าหมาย — ไม่ขึ้นกับช่วงที่เลือกดู)
+  // เก็บรายการดิบไว้ด้วย เพื่อโชว์ tooltip ตอน hover การ์ดว่าจ่ายอะไรไปบ้าง
   const fetchMonthSpent = useCallback(async () => {
     const now = new Date();
     const ms = toStr(new Date(now.getFullYear(), now.getMonth(), 1));
     const me = toStr(new Date(now.getFullYear(), now.getMonth() + 1, 1));
-    const { data } = await supabase.from('finance_transactions').select('category_id, amount').eq('type', 'expense').gte('txn_date', ms).lt('txn_date', me);
+    const { data } = await supabase.from('finance_transactions').select('category_id, amount, txn_date, note').eq('type', 'expense').gte('txn_date', ms).lt('txn_date', me).order('txn_date', { ascending: false });
     const m = {}; (data || []).forEach(r => { m[r.category_id] = (m[r.category_id] || 0) + Number(r.amount || 0); });
     setMonthSpent(m);
+    setMonthSpentRows(data || []);
   }, []);
   // ยอดเงินคงเหลือในระบบ = SUM(income) - SUM(expense) ทั้งหมด (ไม่ขึ้นกับช่วงที่เลือกดู)
   const fetchBalance = useCallback(async () => {
@@ -287,7 +291,7 @@ const FinanceMain = () => {
     const target = Number(b.target_amount) || 0;
     const pct = target > 0 ? Math.round((spent / target) * 100) : 0;
     const cardColor = b.color || b.category?.color || EARTH.expense;
-    return { ...b, spent, target, pct, remaining: target - spent, cardColor };
+    return { ...b, memberIds, spent, target, pct, remaining: target - spent, cardColor };
   }).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || b.target - a.target);
   const focusTotals = focusData.reduce((a, f) => ({ target: a.target + f.target, spent: a.spent + f.spent }), { target: 0, spent: 0 });
   focusTotals.remaining = focusTotals.target - focusTotals.spent;
@@ -562,12 +566,34 @@ const FinanceMain = () => {
                     {focusData.map((f, idx) => {
                       const col = f.cardColor;
                       const over = f.spent > f.target;
+                      // รายการที่ประกอบเป็นยอด "จ่าย" ของการ์ดนี้ (เดือนนี้) — โชว์ตอน hover
+                      const cardTxns = monthSpentRows.filter(r => f.memberIds.includes(r.category_id));
                       return (
                         <Draggable key={f.id} draggableId={String(f.id)} index={idx} isDragDisabled={!canEdit}>
                           {(dr, snap) => (
                             <div ref={dr.innerRef} {...dr.draggableProps}
-                              className={`relative rounded-2xl bg-white border border-stone-100 group transition-shadow ${snap.isDragging ? 'shadow-xl' : 'shadow-sm hover:shadow-md'}`}
+                              onMouseEnter={() => setHoverBudget(f.id)}
+                              onMouseLeave={() => setHoverBudget(prev => prev === f.id ? null : prev)}
+                              className={`relative rounded-2xl bg-white border border-stone-100 group transition-shadow ${snap.isDragging ? 'shadow-xl' : 'shadow-sm hover:shadow-md'} ${hoverBudget === f.id && cardTxns.length > 0 ? 'z-30' : ''}`}
                               style={{ ...dr.draggableProps.style }}>
+                              {/* Tooltip: รายการจ่ายของหมวดนี้เดือนนี้ */}
+                              {hoverBudget === f.id && !snap.isDragging && cardTxns.length > 0 && (
+                                <div className="absolute left-2 right-2 top-full mt-1 z-40 bg-white rounded-xl border border-stone-200 shadow-xl p-3 pointer-events-none animate-in fade-in duration-150">
+                                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1.5">{cardTxns.length} รายการเดือนนี้</p>
+                                  <div className="space-y-1">
+                                    {cardTxns.slice(0, 8).map((t, i) => (
+                                      <div key={i} className="flex items-center gap-2 text-[11px]">
+                                        <span className="text-gray-400 w-12 shrink-0">{new Date(t.txn_date + 'T00:00:00').toLocaleDateString('th-TH', { day: 'numeric', month: 'short' })}</span>
+                                        <span className="text-gray-600 truncate flex-1">{t.note || '—'}</span>
+                                        <span className="font-bold text-gray-800 whitespace-nowrap">{baht(t.amount)}</span>
+                                      </div>
+                                    ))}
+                                    {cardTxns.length > 8 && (
+                                      <p className="text-[10px] text-gray-400 pt-0.5">+ อีก {cardTxns.length - 8} รายการ (ดูได้ในลิสต์รายจ่ายด้านล่าง)</p>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
                               <div className="p-4">
                                 {/* หัว: ชื่อ + ปุ่มจัดการ */}
                                 <div className="flex items-center gap-1.5 mb-3">
