@@ -14,6 +14,7 @@ import TagControl, { TagChips, firstTagColor } from '@/app/components/common/Tag
 import { fetchSharedTags, createSharedTag, deleteSharedTag, fetchSharedTagLinks, toggleSharedTagLink } from '@/lib/sharedTags';
 import ImageLightbox from '@/app/components/common/ImageLightbox'; // แสดงรูปต้องใช้ตัวนี้เสมอ (GOTCHA #18)
 import SettlementReceivables from './SettlementReceivables';
+import { BUDGET_ICONS, budgetIcon } from './budgetIcons';
 
 // สร้าง <optgroup> ของ "ชนิด" จัดตาม "หมวด" (ไม่โชว์ตัวที่เป็นหมวด)
 const renderCatOptions = (categories, type) => {
@@ -598,6 +599,7 @@ const FinanceMain = () => {
                                 {/* หัว: ชื่อ + ปุ่มจัดการ */}
                                 <div className="flex items-center gap-1.5 mb-3">
                                   {canEdit && <span {...dr.dragHandleProps} className="text-stone-300 hover:text-stone-500 cursor-grab active:cursor-grabbing shrink-0" title="ลากเพื่อสลับ"><GripVertical size={15} /></span>}
+                                  {(() => { const Ic = budgetIcon(f.icon); return Ic ? <span className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: col + '1f', color: col }}><Ic size={15} /></span> : null; })()}
                                   <span className="text-sm font-bold text-gray-800 truncate flex-1">{f.category?.name || 'หมวด'}</span>
                                   {canEdit && (
                                     <span className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -787,8 +789,15 @@ const BudgetModal = ({ categoryId, categoryName, existing, categories, profile, 
   const meRef = () => (profile ? { id: profile.id, name: `${profile.first_name} ${profile.last_name}` } : null);
   const [catId, setCatId] = useState(categoryId ? String(categoryId) : '');
   const [target, setTarget] = useState(existing?.target_amount ?? '');
+  const [icon, setIcon] = useState(existing?.icon || '');
+  const [iconSearch, setIconSearch] = useState('');
   const [saving, setSaving] = useState(false);
   const picker = !categoryId; // เปิดจากปุ่ม "ตั้งเป้าหมาย" → ให้เลือกหมวดเอง
+
+  // กรองไอคอนตามคำค้น (ไทย/อังกฤษ)
+  const iconResults = iconSearch.trim()
+    ? BUDGET_ICONS.filter(i => i.kw.includes(iconSearch.trim().toLowerCase()) || i.name.includes(iconSearch.trim().toLowerCase()))
+    : BUDGET_ICONS;
 
   const expOptions = () => {
     const exp = (categories || []).filter(c => c.type === 'expense' && c.is_active !== false);
@@ -808,7 +817,7 @@ const BudgetModal = ({ categoryId, categoryName, existing, categories, profile, 
     if (!(t > 0)) return alert('กรอกเป้าหมาย (มากกว่า 0)');
     setSaving(true);
     try {
-      await supabase.from('finance_budgets').upsert([{ category_id: cid, target_amount: t, created_by: meRef(), updated_at: new Date().toISOString() }], { onConflict: 'category_id' });
+      await supabase.from('finance_budgets').upsert([{ category_id: cid, target_amount: t, icon: icon || null, created_by: meRef(), updated_at: new Date().toISOString() }], { onConflict: 'category_id' });
       onSaved();
     } catch (err) { alert('บันทึกไม่สำเร็จ: ' + err.message); } finally { setSaving(false); }
   };
@@ -836,6 +845,24 @@ const BudgetModal = ({ categoryId, categoryName, existing, categories, profile, 
           <label className="block text-xs font-bold text-gray-500 mb-1.5">เป้าหมายต่อเดือน (บาท)</label>
           <input type="number" min="0" value={target} onChange={e => setTarget(e.target.value)} autoFocus onKeyDown={e => { if (e.key === 'Enter') save(); }} className="w-full px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-2xl font-black text-gray-900 outline-none focus:border-stone-500" placeholder="เช่น 20000" />
           <p className="text-[11px] text-gray-400 mt-1">การ์ดโฟกัสจะแสดงว่าจ่ายไปแล้วเท่าไร เหลือเท่าไรจะถึงเป้า (นับยอดของเดือนปัจจุบัน)</p>
+        </div>
+        {/* เลือกไอคอนประจำการ์ด */}
+        <div>
+          <div className="flex items-center gap-2 mb-1.5">
+            <label className="text-xs font-bold text-gray-500">ไอคอน</label>
+            {icon && (() => { const Ic = budgetIcon(icon); return Ic ? <span className="w-6 h-6 rounded-lg bg-stone-100 text-stone-700 flex items-center justify-center"><Ic size={14} /></span> : null; })()}
+            {icon && <button type="button" onClick={() => setIcon('')} className="text-[10px] text-gray-400 hover:text-red-500 underline">ไม่ใช้ไอคอน</button>}
+          </div>
+          <input value={iconSearch} onChange={e => setIconSearch(e.target.value)} placeholder="ค้นหา เช่น ไฟ น้ำ รถ การตลาด..." className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm outline-none focus:border-stone-500 mb-2" />
+          <div className="grid grid-cols-8 gap-1 max-h-36 overflow-y-auto pr-1">
+            {iconResults.map(({ name, Icon }) => (
+              <button key={name} type="button" onClick={() => setIcon(name)} title={name}
+                className={`aspect-square rounded-lg flex items-center justify-center transition-colors ${icon === name ? 'bg-stone-700 text-white shadow-sm' : 'bg-gray-50 text-gray-500 hover:bg-stone-100 hover:text-stone-700'}`}>
+                <Icon size={16} />
+              </button>
+            ))}
+            {iconResults.length === 0 && <p className="col-span-8 text-center text-xs text-gray-400 py-3">ไม่พบไอคอน — ลองคำอื่น</p>}
+          </div>
         </div>
         <div className="flex justify-between items-center pt-2 border-t border-gray-100">
           {existing ? <button onClick={remove} className="text-sm text-red-500 hover:bg-red-50 px-3 py-2 rounded-xl font-semibold flex items-center gap-1"><Trash2 size={14} /> เอาออก</button> : <span />}
