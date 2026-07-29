@@ -354,10 +354,18 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
     });
   }, [formData.items]);
 
+  // ยอดค้างชำระตามข้อมูลในฟอร์มตอนนี้ (ใช้กันปิดงานทั้งที่ยังค้างจ่าย)
+  const totalPaidNow = formData.payments.reduce((s, p) => s + Number(p.amount || 0), 0);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!formData.customer) return alert('กรุณาเลือกลูกค้า');
     if (formData.items.length === 0) return alert('กรุณาเพิ่มสินค้า');
+    // ห้ามปิดงานเป็น "เสร็จสิ้น" ถ้ายังมียอดค้างชำระ
+    const outstandingNow = Math.max(0, Math.round((grandTotal - totalPaidNow) * 100) / 100);
+    if (formData.status === 'Completed' && outstandingNow > 0) {
+      return alert(`ปิดงานเป็น "เสร็จสิ้น" ไม่ได้ — ลูกค้ายังค้างชำระ ฿${outstandingNow.toLocaleString()}\n\nบันทึกการชำระให้ครบก่อน แล้วค่อยเปลี่ยนสถานะเป็นเสร็จสิ้น`);
+    }
     
     setLoading(true);
     try {
@@ -596,6 +604,12 @@ const OrderForm = ({ onCancel, onSuccess, initialData }) => {
                   <label className={labelClass}>สถานะ</label>
                   <select className={inputClass} value={formData.status} onChange={e => {
                       const status = e.target.value;
+                      // กันเลือก "เสร็จสิ้น" ทั้งที่ยังค้างชำระ — แจ้งเตือนทันที
+                      const outstandingNow = Math.max(0, Math.round((grandTotal - totalPaidNow) * 100) / 100);
+                      if (status === 'Completed' && outstandingNow > 0) {
+                        alert(`เปลี่ยนเป็น "เสร็จสิ้น" ไม่ได้ — ลูกค้ายังค้างชำระ ฿${outstandingNow.toLocaleString()}\n\nบันทึกการชำระให้ครบก่อน แล้วค่อยปิดงาน`);
+                        return;
+                      }
                       const completedAt = status === 'Completed' && !formData.completed_at ? getLocalDate() : formData.completed_at;
                       setFormData({...formData, status, completed_at: completedAt});
                     }}>

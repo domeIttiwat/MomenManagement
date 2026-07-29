@@ -100,8 +100,17 @@ const ServiceForm = ({ onCancel, onSuccess, initialData }) => {
     grand_total: grandTotal
   };
 
+  // ยอดค้างชำระตามข้อมูลในฟอร์มตอนนี้ (ใช้กันปิดงานทั้งที่ยังค้างจ่าย)
+  const totalPaidNow = formData.payments.reduce((s, p) => s + Number(p.amount || 0), 0);
+  const outstandingNow = Math.max(0, Math.round((grandTotal - totalPaidNow) * 100) / 100);
+
   const handleStatusChange = (e) => {
     const status = e.target.value;
+    // กันเลือก "เรียบร้อย" ทั้งที่ยังค้างชำระ — แจ้งเตือนทันที
+    if (status === 'Completed' && outstandingNow > 0) {
+      alert(`เปลี่ยนเป็น "เรียบร้อย" ไม่ได้ — ลูกค้ายังค้างชำระ ฿${outstandingNow.toLocaleString()}\n\nบันทึกการชำระให้ครบก่อน แล้วค่อยปิดงาน`);
+      return;
+    }
     let completedDate = formData.completed_date;
     if (status === 'Completed' && !completedDate) {
         completedDate = getLocalDate();
@@ -112,7 +121,11 @@ const ServiceForm = ({ onCancel, onSuccess, initialData }) => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!formData.customer) return alert('กรุณาระบุข้อมูลลูกค้า');
-    
+    // ห้ามปิดงานเป็น "เรียบร้อย" ถ้ายังมียอดค้างชำระ
+    if (formData.status === 'Completed' && outstandingNow > 0) {
+      return alert(`ปิดงานเป็น "เรียบร้อย" ไม่ได้ — ลูกค้ายังค้างชำระ ฿${outstandingNow.toLocaleString()}\n\nบันทึกการชำระให้ครบก่อน แล้วค่อยเปลี่ยนสถานะ`);
+    }
+
     setLoading(true);
     try {
       const uploadedImages = await Promise.all(formData.images.map(async (img) => {
