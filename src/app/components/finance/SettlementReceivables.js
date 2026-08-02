@@ -1,11 +1,24 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Hourglass, Users, ChevronDown, ChevronUp, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { Hourglass, Users, ChevronDown, ChevronUp, CheckCircle2, AlertTriangle, User } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { ConfirmSettleModal } from '@/app/components/common/PaymentSettlement';
 
 const baht = (n) => `฿${Number(n || 0).toLocaleString('th-TH', { maximumFractionDigits: 0 })}`;
 const thDate = (d) => d ? new Date(d.length === 10 ? d + 'T00:00:00' : d).toLocaleDateString('th-TH', { day: 'numeric', month: 'short' }) : '-';
 const custName = (c) => c ? `${c.first_name || ''} ${c.last_name || ''}`.trim() || c.nickname || '-' : '-';
+// รูปลูกค้าจาก customer_cache (เก็บได้ทั้ง string และ {url})
+const custImgUrl = (c) => {
+  const img = c?.images?.[0];
+  return typeof img === 'string' ? img : img?.url || null;
+};
+const Avatar = ({ cache, size = 'w-8 h-8' }) => {
+  const url = custImgUrl(cache);
+  return (
+    <div className={`${size} rounded-full bg-gray-100 border border-gray-200 flex items-center justify-center text-gray-400 overflow-hidden shrink-0`}>
+      {url ? <img src={url} alt="" className="w-full h-full object-cover" /> : <User size={14} />}
+    </div>
+  );
+};
 const daysSince = (d) => {
   if (!d) return 0;
   const a = new Date(d); a.setHours(0, 0, 0, 0);
@@ -45,7 +58,7 @@ const SettlementReceivables = ({ canEdit, byRef, onChanged }) => {
   // รวมลูกหนี้ต่อลูกค้า เรียงยอดมาก → น้อย
   const byCustomer = Object.values(receivables.reduce((m, r) => {
     const key = r.customer_id || custName(r.customer_cache);
-    if (!m[key]) m[key] = { name: custName(r.customer_cache), total: 0, docs: [] };
+    if (!m[key]) m[key] = { name: custName(r.customer_cache), cache: r.customer_cache, total: 0, docs: [] };
     m[key].total += Number(r.outstanding || 0);
     m[key].docs.push(r);
     return m;
@@ -77,8 +90,9 @@ const SettlementReceivables = ({ canEdit, byRef, onChanged }) => {
               const overdue = isOverdue(p.expected_settle_date);
               return (
                 <div key={`${p.ref_type}-${p.payment_id}`} className={`px-5 py-3 flex items-center gap-3 ${overdue ? 'bg-red-50/40' : ''}`}>
+                  <Avatar cache={p.customer_cache} />
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-gray-800 truncate">{p.doc_number} <span className="font-normal text-gray-500">· {custName(p.customer_cache)}</span></p>
+                    <p className="text-sm font-semibold text-gray-800 truncate">{custName(p.customer_cache)} <span className="font-normal text-gray-500">· {p.doc_number}</span></p>
                     <p className={`text-[11px] ${overdue ? 'text-red-600 font-bold' : 'text-gray-400'}`}>
                       จ่าย {thDate(p.payment_date)} · คาดเข้า {thDate(p.expected_settle_date)}{overdue ? ' — เลยกำหนดแล้ว' : ''}
                     </p>
@@ -118,11 +132,12 @@ const SettlementReceivables = ({ canEdit, byRef, onChanged }) => {
           <div className="border-t border-stone-100 divide-y divide-stone-50 max-h-80 overflow-y-auto">
             {byCustomer.map((c, i) => (
               <div key={i} className="px-5 py-3">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-sm font-semibold text-gray-800 truncate">{c.name}</p>
+                <div className="flex items-center gap-2.5">
+                  <Avatar cache={c.cache} />
+                  <p className="text-sm font-semibold text-gray-800 truncate flex-1">{c.name}</p>
                   <span className="font-bold text-red-600 text-sm whitespace-nowrap">{baht(c.total)}</span>
                 </div>
-                <div className="mt-1 space-y-0.5">
+                <div className="mt-1 space-y-0.5 pl-[42px]">
                   {c.docs.map(d => (
                     <p key={`${d.ref_type}-${d.ref_id}`} className="text-[11px] text-gray-400 flex justify-between gap-2">
                       <span className="truncate">{d.doc_number} · {d.ref_type === 'service' ? 'งานซ่อม' : 'ออเดอร์'} · ค้างมา {daysSince(d.doc_date)} วัน</span>
