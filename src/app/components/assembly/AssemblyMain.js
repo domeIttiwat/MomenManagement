@@ -45,7 +45,7 @@ const ageText = (from) => {
 // เวลาแบบสั้น ใช้ในแถบรวมของที่ขอเพิ่ม
 const dtShort = (v) => (v ? new Date(v).toLocaleString('th-TH', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '');
 
-const AssemblyMain = ({ initialNavData = null }) => {
+const AssemblyMain = ({ initialNavData = null, onViewCustomer }) => {
   const { profile, can, role, isImpersonating } = useAuth();
   const meRef = () => (profile ? { id: profile.id, name: `${profile.first_name} ${profile.last_name}` } : null);
   const isBoss = ['Supervisor', 'Admin'].includes(role?.name);
@@ -949,6 +949,7 @@ const AssemblyMain = ({ initialNavData = null }) => {
           onClose={() => setSelected(null)}
           onChanged={() => fetchAll(true)}
           onEdit={(c) => { setEditCard(c); setFormOpen(true); }}
+          onViewCustomer={onViewCustomer}
         />
       )}
     </div>

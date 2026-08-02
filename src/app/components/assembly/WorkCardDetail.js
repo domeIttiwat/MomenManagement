@@ -29,7 +29,7 @@ const linkify = (text) => String(text || '').split(/(https?:\/\/[^\s]+)/g).map((
     : part
 );
 
-const WorkCardDetail = ({ card: initialCard, onClose, onChanged, onEdit }) => {
+const WorkCardDetail = ({ card: initialCard, onClose, onChanged, onEdit, onViewCustomer }) => {
   const { profile, role, can, isImpersonating } = useAuth();
   const meRef = () => (profile ? { id: profile.id, name: `${profile.first_name} ${profile.last_name}` } : null);
   const isBoss = ['Supervisor', 'Admin'].includes(role?.name);
@@ -143,12 +143,12 @@ const WorkCardDetail = ({ card: initialCard, onClose, onChanged, onEdit }) => {
         const toUrls = (arr) => (arr || []).map((v) => (typeof v === 'string' ? v : v?.url)).filter(Boolean);
         if (card.ref_type === 'service') {
           const { data } = await supabase.from('services')
-            .select('customer_cache, notes, images, service_items(description)').eq('id', card.ref_id).maybeSingle();
-          if (data) setRefInfo({ type: 'service', customer: data.customer_cache, notes: data.notes, images: toUrls(data.images), items: (data.service_items || []).map((x) => x.description).filter(Boolean) });
+            .select('customer_id, customer_cache, notes, images, service_items(description)').eq('id', card.ref_id).maybeSingle();
+          if (data) setRefInfo({ type: 'service', customerId: data.customer_id, customer: data.customer_cache, notes: data.notes, images: toUrls(data.images), items: (data.service_items || []).map((x) => x.description).filter(Boolean) });
         } else {
           const { data } = await supabase.from('orders')
-            .select('customer_cache, notes, images, order_items(product_name, quantity)').eq('id', card.ref_id).maybeSingle();
-          if (data) setRefInfo({ type: 'order', customer: data.customer_cache, notes: data.notes, images: toUrls(data.images), items: (data.order_items || []).map((x) => `${x.product_name}${x.quantity > 1 ? ` ×${x.quantity}` : ''}`).filter(Boolean) });
+            .select('customer_id, customer_cache, notes, images, order_items(product_name, quantity)').eq('id', card.ref_id).maybeSingle();
+          if (data) setRefInfo({ type: 'order', customerId: data.customer_id, customer: data.customer_cache, notes: data.notes, images: toUrls(data.images), items: (data.order_items || []).map((x) => `${x.product_name}${x.quantity > 1 ? ` ×${x.quantity}` : ''}`).filter(Boolean) });
         }
       } catch { /* ignore */ }
     })();
@@ -1036,9 +1036,14 @@ const WorkCardDetail = ({ card: initialCard, onClose, onChanged, onEdit }) => {
                           ? <img src={custImg} onClick={() => setLightbox(custImg)} className="w-full h-full object-cover cursor-zoom-in" />
                           : <UserRound size={22} className="text-gray-300" />}
                       </span>
-                      <div className="min-w-0 flex-1">
-                        <p className="font-bold text-gray-900 truncate">{custName}{cc.nickname ? <span className="font-normal text-gray-500"> ({cc.nickname})</span> : null}</p>
+                      <div
+                        className={`min-w-0 flex-1 ${refInfo.customerId && onViewCustomer ? 'cursor-pointer group/cust' : ''}`}
+                        onClick={() => refInfo.customerId && onViewCustomer && onViewCustomer(refInfo.customerId)}
+                        title={refInfo.customerId && onViewCustomer ? 'ดูข้อมูลลูกค้า' : undefined}
+                      >
+                        <p className="font-bold text-gray-900 truncate group-hover/cust:text-indigo-600 transition-colors">{custName}{cc.nickname ? <span className="font-normal text-gray-500"> ({cc.nickname})</span> : null}</p>
                         {cc.phone && <p className="text-xs text-gray-500 flex items-center gap-1 mt-0.5"><Phone size={11} /> {cc.phone}</p>}
+                        {refInfo.customerId && onViewCustomer && <p className="text-[10px] text-gray-300 group-hover/cust:text-indigo-400 mt-0.5">ดูข้อมูลลูกค้า →</p>}
                       </div>
                       {card.ref_label && <span className="text-[10px] font-bold bg-indigo-50 text-indigo-600 border border-indigo-100 px-2 py-1 rounded-full shrink-0">{card.ref_label}</span>}
                     </div>

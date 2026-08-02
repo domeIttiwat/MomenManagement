@@ -132,7 +132,7 @@ const AppContent = () => {
             />
           ) : <AccessDenied />)}
           {activeTab === 'services' && (canView('services') ? <ServiceMain onViewCustomer={handleNavigateToCustomer} /> : <AccessDenied />)}
-          {activeTab === 'assembly' && (canView('assembly') ? <AssemblyMain initialNavData={navData?.target === 'work_card' ? navData : null} /> : <AccessDenied />)}
+          {activeTab === 'assembly' && (canView('assembly') ? <AssemblyMain initialNavData={navData?.target === 'work_card' ? navData : null} onViewCustomer={handleNavigateToCustomer} /> : <AccessDenied />)}
           {activeTab === 'marketing' && (canView('marketing') ? <MarketingMain /> : <AccessDenied />)}
           {activeTab === 'finance' && (canView('finance') ? <FinanceMain /> : <AccessDenied />)}
           {activeTab === 'users' && (canView('users') ? <UserMain /> : <AccessDenied />)}
