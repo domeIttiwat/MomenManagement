@@ -230,13 +230,22 @@ const ServiceBillPreview = ({ service, onClose }) => {
                                     <td className="py-2 px-3 align-top border-r border-gray-200">
                                         <p className="font-bold text-gray-900">{item.description}</p>
                                         <span className="text-[9px] bg-gray-100 px-1.5 rounded text-gray-500 mt-1 inline-block">{item.type}</span>
-                                        {/* Sub Items */}
+                                        {/* Sub Items — แจ้งราคาแต่ละรายการให้ลูกค้าเห็น */}
                                         {item.sub_items && item.sub_items.length > 0 && (
-                                            <ul className="list-disc list-inside mt-1 text-[10px] text-gray-500 pl-2">
-                                                {item.sub_items.map((sub, idx) => (
-                                                    <li key={idx}>{sub.description}</li>
-                                                ))}
-                                            </ul>
+                                            <div className="mt-1.5 pl-2 space-y-0.5">
+                                                {item.sub_items.map((sub, idx) => {
+                                                    const qty = parseFloat(sub.qty || 1);
+                                                    const lineTotal = parseFloat(sub.price || 0) * qty;
+                                                    return (
+                                                        <div key={idx} className="flex justify-between gap-2 text-[10px] text-gray-500 border-b border-dotted border-gray-200 pb-0.5 last:border-0">
+                                                            <span>• {sub.description}{qty > 1 ? ` ×${qty}` : ''}</span>
+                                                            <span className="text-gray-600 whitespace-nowrap tabular-nums">
+                                                                {lineTotal > 0 ? lineTotal.toLocaleString(undefined, { minimumFractionDigits: 2 }) : '—'}
+                                                            </span>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
                                         )}
                                     </td>
                                     <td className="py-2 px-3 text-center align-top border-r border-gray-200">{item.quantity}</td>
