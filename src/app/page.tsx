@@ -131,7 +131,7 @@ const AppContent = () => {
               onViewCustomer={handleNavigateToCustomer}
             />
           ) : <AccessDenied />)}
-          {activeTab === 'services' && (canView('services') ? <ServiceMain /> : <AccessDenied />)}
+          {activeTab === 'services' && (canView('services') ? <ServiceMain onViewCustomer={handleNavigateToCustomer} /> : <AccessDenied />)}
           {activeTab === 'assembly' && (canView('assembly') ? <AssemblyMain initialNavData={navData?.target === 'work_card' ? navData : null} /> : <AccessDenied />)}
           {activeTab === 'marketing' && (canView('marketing') ? <MarketingMain /> : <AccessDenied />)}
           {activeTab === 'finance' && (canView('finance') ? <FinanceMain /> : <AccessDenied />)}

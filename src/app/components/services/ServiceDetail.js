@@ -8,7 +8,7 @@ import ServicePrep from './ServicePrep';
 import WorkCardStrip from '../assembly/WorkCardStrip';
 import { SettlementChip, ConfirmSettleModal, PaymentSummaryBar } from '@/app/components/common/PaymentSettlement';
 
-const ServiceDetail = ({ service, onBack, onEdit, onDelete, showProfit, setShowProfit }) => {
+const ServiceDetail = ({ service, onBack, onEdit, onDelete, showProfit, setShowProfit, onViewCustomer }) => {
   const { can, profile } = useAuth();
   const meRef = () => profile ? { id: profile.id, name: `${profile.first_name} ${profile.last_name}` } : null;
   const [showBill, setShowBill] = useState(false);
@@ -275,13 +275,26 @@ const ServiceDetail = ({ service, onBack, onEdit, onDelete, showProfit, setShowP
                  </div>
               </div>
 
-              {/* Customer */}
-              <div className="p-4 bg-gray-50 rounded-xl border border-gray-100 mb-6 flex items-center gap-4">
-                 <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center text-gray-400 shadow-sm border border-gray-200"><User size={24}/></div>
-                 <div>
-                    <h3 className="font-bold text-gray-900">{service.customer_cache?.first_name} {service.customer_cache?.last_name}</h3>
+              {/* Customer — กดเพื่อดูรายละเอียดลูกค้า (เหมือนหน้าออเดอร์) */}
+              <div
+                className={`p-4 bg-gray-50 rounded-xl border border-gray-100 mb-6 flex items-center gap-4 transition-colors ${service.customer_id && onViewCustomer ? 'cursor-pointer hover:bg-indigo-50/50 hover:border-indigo-100 group/cust' : ''}`}
+                onClick={() => service.customer_id && onViewCustomer && onViewCustomer(service.customer_id)}
+                title={service.customer_id && onViewCustomer ? 'ดูข้อมูลลูกค้า' : undefined}
+              >
+                 <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center text-gray-400 shadow-sm border border-gray-200 overflow-hidden shrink-0">
+                    {(() => {
+                      const img = service.customer_cache?.images?.[0];
+                      const url = typeof img === 'string' ? img : img?.url;
+                      return url ? <img src={url} alt="" className="w-full h-full object-cover"/> : <User size={24}/>;
+                    })()}
+                 </div>
+                 <div className="min-w-0 flex-1">
+                    <h3 className="font-bold text-gray-900 group-hover/cust:text-indigo-600 transition-colors">{service.customer_cache?.first_name} {service.customer_cache?.last_name}</h3>
                     <p className="text-sm text-gray-500">{service.customer_cache?.phone}</p>
                  </div>
+                 {service.customer_id && onViewCustomer && (
+                   <span className="text-[10px] text-gray-300 group-hover/cust:text-indigo-400 shrink-0">ดูข้อมูล →</span>
+                 )}
               </div>
 
               <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><Wrench size={18}/> รายการซ่อม</h3>
